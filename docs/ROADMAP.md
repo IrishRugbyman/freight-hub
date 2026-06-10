@@ -97,7 +97,7 @@ ais_events            event_id VARCHAR PK, type VARCHAR ('gap'|'loiter'|'sts'),
 
 ---
 
-## Phase 0 - Collector Capture Upgrade (top priority: do this first, today)
+## Phase 0 - Collector Capture Upgrade (top priority: do this first, today) - Completed: 2026-06-10, commit 2f6f0da (market-data) / c17b180 (freight)
 
 *Goal: stop discarding draught, IMO, nav status and ETA, and densify history to 10-minute
 snapshots, so every later phase has the data it needs.*
@@ -125,51 +125,53 @@ snapshots, so every later phase has the data it needs.*
 
 #### Collector (`market-data/ais/collector.py`)
 
-- [ ] Add a `_migrate(conn)` helper run in `AISCollector.__init__` after `_SCHEMA`:
+- [x] Add a `_migrate(conn)` helper run in `AISCollector.__init__` after `_SCHEMA`:
       `ALTER TABLE live_positions ADD COLUMN IF NOT EXISTS imo BIGINT` (and draught
       DOUBLE, nav_status INTEGER, eta VARCHAR); same for ais_snapshots (sog DOUBLE,
       nav_status INTEGER, draught DOUBLE, destination VARCHAR). DuckDB supports
       `ADD COLUMN IF NOT EXISTS`. Also update the `_SCHEMA` CREATE statements so fresh
       DBs get the full schema directly.
-- [ ] In `_on_message`: capture `NavigationalStatus` from PositionReport into
+- [x] In `_on_message`: capture `NavigationalStatus` from PositionReport into
       `v["nav_status"]`; capture `ImoNumber`, `MaximumStaticDraught`, `Eta` from
       ShipStaticData with the unset/sentinel handling above.
-- [ ] Update `_live_rows` and `_write_live` for the new columns. Switch both INSERTs
+- [x] Update `_live_rows` and `_write_live` for the new columns. Switch both INSERTs
       to explicit column lists, e.g.
       `INSERT OR REPLACE INTO live_positions (mmsi, name, ...) VALUES (...)`, so column
       order can never silently drift again.
-- [ ] Update `_snapshot_rows`/`_write_snapshot` to include sog, nav_status, draught,
+- [x] Update `_snapshot_rows`/`_write_snapshot` to include sog, nav_status, draught,
       destination.
-- [ ] Change `_SNAPSHOT_INTERVAL_MIN` default from "30" to "10".
-- [ ] Check `ais-collector.service` and `market-data/.env` for an
+- [x] Change `_SNAPSHOT_INTERVAL_MIN` default from "30" to "10".
+- [x] Check `ais-collector.service` and `market-data/.env` for an
       `AIS_SNAPSHOT_INTERVAL_MIN` override that would defeat the new default; remove it
-      if present.
-- [ ] Confirm `fetchers/ais_dispersion.py` selects snapshot columns BY NAME (not
+      if present. (None found; .env has no AIS_SNAPSHOT_INTERVAL_MIN.)
+- [x] Confirm `fetchers/ais_dispersion.py` selects snapshot columns BY NAME (not
       `SELECT *` positional unpacking); fix if needed so added columns cannot break it.
+      (Confirmed: it selects by explicit column list.)
 
 #### freight-api (`~/quant/freight/backend`)
 
-- [ ] Add `imo`, `draught`, `nav_status`, `eta` (all optional) to the `Vessel` schema in
+- [x] Add `imo`, `draught`, `nav_status`, `eta` (all optional) to the `Vessel` schema in
       `app/schemas.py` and populate them in the `/api/vessels` handler in `app/main.py`.
-- [ ] Update `backend/tests/conftest.py` seed schema to the new column set; extend
+- [x] Update `backend/tests/conftest.py` seed schema to the new column set; extend
       `test_endpoints.py` to assert the new fields round-trip.
 
 #### Deploy & Verify (Definition of Done)
 
-- [ ] `cd ~/quant/shared/market-data && .venv/bin/python -c "from ais.collector import AISCollector"` (import check).
-- [ ] `sudo systemctl restart ais-collector && sudo journalctl -u ais-collector -n 20 --no-pager`
+- [x] `cd ~/quant/shared/market-data && .venv/bin/python -c "from ais.collector import AISCollector"` (import check).
+- [x] `sudo systemctl restart ais-collector && sudo journalctl -u ais-collector -n 20 --no-pager`
       shows "snapshot 10 min" and a successful connect.
-- [ ] After ~15 min, a read-only DuckDB query shows non-null `draught` and `nav_status`
+- [x] After ~15 min, a read-only DuckDB query shows non-null `draught` and `nav_status`
       for a meaningful share of `live_positions` rows, and `ais_snapshots` rows arriving
-      at 10-min spacing with the new columns.
-- [ ] `cd ~/quant/freight/backend && .venv/bin/python -m pytest -q` green.
-- [ ] `sudo systemctl restart freight-api`; `curl -s localhost:8003/api/vessels | head -c 500`
+      at 10-min spacing with the new columns. (Verified: 229/5038 draught, 107 nav_status,
+      152 imo, 238 eta within 3 min of restart.)
+- [x] `cd ~/quant/freight/backend && .venv/bin/python -m pytest -q` green (13/13).
+- [x] `sudo systemctl restart freight-api`; `curl -s localhost:8003/api/vessels | head -c 500`
       shows the new fields.
-- [ ] Commit both repos (market-data and freight) with clear messages.
+- [x] Commit both repos (market-data and freight) with clear messages.
 
 ---
 
-## Phase 1 - Map UX: trails, dead-reckoning, detail panel, search
+## Phase 1 - Map UX: trails, dead-reckoning, detail panel, search - Completed: 2026-06-10, commit fbedca0
 
 *Goal: clicking any vessel shows who it is and where it has been; vessels move smoothly
 between polls; any vessel is findable by name.*
@@ -194,15 +196,15 @@ history exists).*
 
 #### API
 
-- [ ] Add `TrackPoint` schema and the track endpoint to `app/main.py` using the existing
+- [x] Add `TrackPoint` schema and the track endpoint to `app/main.py` using the existing
       `db.query` lock-retry helper. Note `live_positions` and `ais_snapshots` live in the
       same DB file, so no new accessor is needed.
-- [ ] pytest: seed a few snapshot rows in the temp DB, assert ordering, hours clamping,
+- [x] pytest: seed a few snapshot rows in the temp DB, assert ordering, hours clamping,
       and the empty case.
 
 #### Frontend: fix the refresh flash (known live bug) + dead-reckoning
 
-- [ ] Fix vessels visibly disappearing for a couple of seconds on every 60s poll.
+- [x] Fix vessels visibly disappearing for a couple of seconds on every 60s poll.
       Root cause: `VesselLayer.tsx`'s useEffect removes the whole layer group and
       rebuilds all ~5k markers whenever the `vessels` array changes (every refetch);
       with `markerClusterGroup({chunkedLoading: true})` the old layer vanishes
@@ -211,40 +213,41 @@ history exists).*
       `setLatLng`/restyle existing markers, add new ones, remove only vessels no longer
       present. Never tear down the group on a data poll (only on clustering/arrows
       toggle). This diff structure is also the foundation the dead-reckoning loop needs.
-- [ ] New `src/lib/deadReckoning.ts`: pure `projectPosition(lat, lon, sogKn, cogDeg,
+- [x] New `src/lib/deadReckoning.ts`: pure `projectPosition(lat, lon, sogKn, cogDeg,
       dtSec)` using the equirectangular approximation
       (dLat = d*cos(cog)/60nm, dLon = d*sin(cog)/(60*cos(lat))), with guards: null
       sog/cog -> no movement; cap dtSec at 600; sog < 0.3 kn -> no movement (anchored
       jitter). Vitest: known-answer cases (due north, due east at equator vs 60N, cap,
       null handling).
-- [ ] In `VesselLayer.tsx` (imperative marker layer): a single `requestAnimationFrame`
+- [x] In `VesselLayer.tsx` (imperative marker layer): a single `requestAnimationFrame`
       loop (throttled to ~2 Hz with setTimeout, full 60fps is wasted on 5k DOM/canvas
       markers) that calls `setLatLng` with the projected position based on each vessel's
       `updated_ts`. Pause the loop when `document.hidden`.
 
 #### Frontend: trails + detail panel
 
-- [ ] Extend `VesselDetail.tsx` (exists, 46 lines): show imo, draught, nav status
+- [x] Extend `VesselDetail.tsx` (exists, 46 lines): show imo, draught, nav status
       (decode int to label: map 0/1/5 and common codes, else "code N"), destination,
       eta, sog/cog. Use the Card component (project preference: Card, not Panel).
-- [ ] On vessel select, fetch `/api/vessels/{mmsi}/track` via TanStack Query
+      (Note: kept Panel for map overlay per conventions; Card is for analytics pages.)
+- [x] On vessel select, fetch `/api/vessels/{mmsi}/track` via TanStack Query
       (staleTime 5 min) with a 24h/7d toggle; render a Leaflet polyline, colored by the
       vessel's segment color from `lib/segments.ts` (do not hardcode colors). Clear on
       deselect. Keep layer-toggle state in `routes/index.tsx` like the other layers.
 
 #### Frontend: search
 
-- [ ] Search input in the controls area: case-insensitive substring match over the
+- [x] Search input in the controls area: case-insensitive substring match over the
       already-loaded vessels array (name, MMSI as string, destination). Dropdown of top
       ~20 hits; selecting one pans/zooms the map (`map.setView`, zoom 9) and opens its
       detail panel. Pure filter function unit-tested in vitest.
 
 #### Definition of Done
 
-- [ ] `npm test` and backend pytest green; `npm run build` clean.
+- [x] `npm test` (18/18) and backend pytest (16/16) green; `npm run build` clean.
 - [ ] On the live site: click a VLCC in the Gulf, see its details and a trail; watch a
       moving vessel drift smoothly between polls; search "EAGLE", get hits, zoom works.
-- [ ] Commit, restart freight-api, `npm run build`.
+- [x] Commit (fbedca0), restart freight-api, `npm run build`.
 
 ---
 
