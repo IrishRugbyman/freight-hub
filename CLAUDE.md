@@ -2,6 +2,10 @@
 
 Guidance for Claude Code when working in the freight hub.
 
+**Active build plan: [`docs/ROADMAP.md`](docs/ROADMAP.md)** - phased enhancement roadmap
+(collector capture upgrade, map UX, analytics, intelligence). Read it at the start of a
+session and pick up the first incomplete phase.
+
 ## What this is
 
 Standalone freight/maritime web app, live at **https://freight.lbzgiu.xyz**. First and
