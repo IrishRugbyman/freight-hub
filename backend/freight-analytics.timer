@@ -1,0 +1,13 @@
+# freight-analytics.timer -- fires freight-analytics.service hourly.
+# Persistent=true means any missed runs (downtime) fire once on next start.
+
+[Unit]
+Description=Run freight hub analytics batch job hourly
+Requires=freight-analytics.service
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+
+[Install]
+WantedBy=timers.target

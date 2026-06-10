@@ -33,6 +33,7 @@ export const Route = createRootRoute({
           <NavItem to="/">Tracker</NavItem>
           <NavItem to="/routes">Routes</NavItem>
           <NavItem to="/dispersion">Dispersion</NavItem>
+          <NavItem to="/analytics">Analytics</NavItem>
         </nav>
         <a
           href="https://quant.lbzgiu.xyz"

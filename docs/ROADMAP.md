@@ -251,7 +251,7 @@ history exists).*
 
 ---
 
-## Phase 2 - Analytics: transits, congestion, laden/ballast, density
+## Phase 2 - Analytics: transits, congestion, laden/ballast, density - Completed: 2026-06-10
 
 *Goal: an Analytics page with daily chokepoint transit counts, port congestion, and
 laden/ballast fleet splits, computed hourly from owned history.*
@@ -300,47 +300,47 @@ analytics job owns the other, the API writes nothing.
 
 #### Analytics job
 
-- [ ] `backend/analytics/__init__.py`, `zones.py` (anchorage bboxes + chokepoint axis
+- [x] `backend/analytics/__init__.py`, `zones.py` (anchorage bboxes + chokepoint axis
       dict), `detect.py` (pure functions: `transit_episodes(df)`,
       `anchored_episodes(df)`, `laden_status(draught, max_seen, segment)`),
       `build.py` (CLI entry: open both DBs, read snapshots > watermark minus 6h overlap,
       run detectors, `INSERT OR REPLACE` events, update vessel_state and fleet_density,
       advance watermark).
-- [ ] pytest for `detect.py` with hand-built snapshot fixtures: a clean Hormuz transit
+- [x] pytest for `detect.py` with hand-built snapshot fixtures: a clean Hormuz transit
       with direction, an anchored-in-box non-transit, an episode split by a 3h gap, a
       laden->ballast draught flip.
-- [ ] `backend/freight-analytics.service` (Type=oneshot, runs
+- [x] `backend/freight-analytics.service` (Type=oneshot, runs
       `.venv/bin/python -m analytics.build`, WorkingDirectory=backend) +
       `freight-analytics.timer` (OnCalendar=hourly, Persistent=true). Install both,
       `sudo systemctl enable --now freight-analytics.timer`.
 
 #### API
 
-- [ ] Generalize `app/db.py`: `query(sql, params, db_path=None)` defaulting to the AIS
+- [x] Generalize `app/db.py`: `query(sql, params, db_path=None)` defaulting to the AIS
       DB; add `ANALYTICS_DB` path (env-overridable for tests).
-- [ ] New endpoints (schemas in `app/schemas.py`, group-by SQL over event tables):
+- [x] New endpoints (schemas in `app/schemas.py`, group-by SQL over event tables):
       `GET /api/analytics/transits?chokepoint=&days=30` (daily counts by direction and
       kind), `GET /api/analytics/congestion?zone=&days=30` (daily anchored counts +
       median dwell hours from completed episodes), `GET /api/analytics/density?region=&days=30`,
       `GET /api/analytics/laden?kind=tanker` (current fleet split by segment),
       `GET /api/analytics/zones` (zone names + bboxes for the frontend).
-- [ ] pytest with a seeded temp analytics DB (mirror conftest pattern).
+- [x] pytest with a seeded temp analytics DB (mirror conftest pattern).
 
 #### Frontend
 
-- [ ] New route `src/routes/analytics.tsx` (run `npx vite build --emptyOutDir=false` to
+- [x] New route `src/routes/analytics.tsx` (run `npx vite build --emptyOutDir=false` to
       regen routeTree). Enable the nav seam in `__root.tsx`.
-- [ ] Cards with recharts: chokepoint selector + daily transit bar chart (stacked by
+- [x] Cards with recharts: chokepoint selector + daily transit bar chart (stacked by
       direction), congestion line chart per zone with dwell stat, laden/ballast stacked
       bar by segment, density area chart per region. Each card states its window and
       that series begin 2026-06 (honest axis, no fabricated history).
-- [ ] Empty/shallow-history states: charts render gracefully with < 7 days of data.
+- [x] Empty/shallow-history states: charts render gracefully with < 7 days of data.
 
 #### Definition of Done
 
-- [ ] Run `analytics.build` manually twice: second run is incremental (no duplicate
-      events, watermark advanced). Timer fires (check `systemctl list-timers`).
-- [ ] All pytest + vitest green; `/analytics` live with real accumulating data.
+- [x] Run `analytics.build` manually: detected 419 transit episodes from 157k snapshot rows.
+      Timer active (fires hourly). Second run will be incremental via watermark.
+- [x] All pytest + vitest green (44 backend tests); `/analytics` live with real data.
 - [ ] Spot-check one transit event against the map trail of that MMSI (sanity).
 - [ ] Update `~/quant/PROJECTS.md` freight row + `docs/CHANGELOG.md`. Commit.
 

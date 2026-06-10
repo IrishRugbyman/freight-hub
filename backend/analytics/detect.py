@@ -1,0 +1,284 @@
+"""Pure detection functions for freight analytics.
+
+All functions operate on pandas DataFrames; they read nothing from disk.
+Each function returns a list of dicts ready for INSERT OR REPLACE into the
+analytics DB. Keeping them pure makes unit testing tractable.
+
+Expected input schema (subset of ais_snapshots columns):
+  mmsi BIGINT, snapshot_ts TIMESTAMP, lat DOUBLE, lon DOUBLE,
+  sog DOUBLE, nav_status INTEGER, draught DOUBLE,
+  kind VARCHAR, segment VARCHAR, region VARCHAR, destination VARCHAR
+"""
+
+from __future__ import annotations
+
+from datetime import timedelta
+
+import pandas as pd
+
+from .zones import ANCHORAGE_ZONES, CHOKEPOINT_AXES, DESIGN_DRAUGHT
+
+# --- constants ---------------------------------------------------------------
+
+_CHOKEPOINT_REGIONS = set(CHOKEPOINT_AXES.keys())
+
+# Transit: minimum fixes and displacement to distinguish a transit from mere presence
+_MIN_TRANSIT_FIXES = 2
+_MIN_DISPLACEMENT_DEG = 0.3
+
+# Gap that splits one episode into two separate episodes
+_EPISODE_GAP_H = 2.0
+
+# Anchored episode minimum duration
+_MIN_ANCHOR_HOURS = 2.0
+
+# Speed threshold for "stopped / anchored" inference (knots)
+_SOG_ANCHOR_KN = 0.5
+
+# --- helpers -----------------------------------------------------------------
+
+
+def _split_by_gap(group: pd.DataFrame, gap_hours: float) -> list[pd.DataFrame]:
+    """Split a time-sorted group into episodes wherever the inter-fix gap > gap_hours."""
+    if group.empty:
+        return []
+    threshold = timedelta(hours=gap_hours)
+    diffs = group["snapshot_ts"].diff()
+    split_idx = [0] + list(group.index[diffs > threshold]) + [None]
+    # convert positional boundaries
+    pos = group.index.tolist()
+    boundaries: list[int] = []
+    for si in split_idx[1:-1]:
+        boundaries.append(pos.index(si))
+    boundaries = [0] + boundaries + [len(pos)]
+    return [group.iloc[boundaries[i] : boundaries[i + 1]] for i in range(len(boundaries) - 1)]
+
+
+def _in_zone(lat: float, lon: float, zone_key: str) -> bool:
+    (lat_min, lon_min), (lat_max, lon_max) = ANCHORAGE_ZONES[zone_key]
+    return lat_min <= lat <= lat_max and lon_min <= lon <= lon_max
+
+
+def _any_zone(lat: float, lon: float) -> str | None:
+    for name in ANCHORAGE_ZONES:
+        if _in_zone(lat, lon, name):
+            return name
+    return None
+
+
+# --- laden/ballast status -----------------------------------------------------
+
+
+def laden_status(draught: float | None, max_seen: float | None, segment: str | None) -> str:
+    """Return 'laden', 'ballast', or 'unknown' for a single vessel reading.
+
+    Uses max_seen as a proxy for design draught. Falls back to DESIGN_DRAUGHT table
+    when history is too shallow (max_seen < 70% of design draught).
+    """
+    if draught is None or draught <= 0:
+        return "unknown"
+
+    design = DESIGN_DRAUGHT.get(segment or "", None) if segment else None
+
+    effective_max = max_seen if (max_seen and max_seen > 0) else None
+
+    # Use design draught as effective_max when history is shallow
+    if effective_max is None or (design and effective_max < 0.7 * design):
+        effective_max = design
+
+    if effective_max is None or effective_max <= 0:
+        return "unknown"
+
+    ratio = draught / effective_max
+    if ratio >= 0.8:
+        return "laden"
+    if ratio <= 0.65:
+        return "ballast"
+    return "unknown"
+
+
+# --- transit detection -------------------------------------------------------
+
+
+def transit_episodes(df: pd.DataFrame) -> list[dict]:
+    """Detect chokepoint transit events from a snapshot DataFrame.
+
+    Filters to rows where region is one of the 9 chokepoints, groups by
+    (mmsi, chokepoint), splits episodes by 2h gaps, and qualifies transits
+    by the minimum-displacement rule.
+
+    Returns a list of dicts compatible with the transit_events table schema:
+      mmsi, chokepoint, entered_ts, exited_ts, direction, kind, segment, laden
+    """
+    if df.empty or "region" not in df.columns:
+        return []
+
+    cp_df = df[df["region"].isin(_CHOKEPOINT_REGIONS)].copy()
+    if cp_df.empty:
+        return []
+
+    cp_df = cp_df.sort_values("snapshot_ts")
+    results: list[dict] = []
+
+    for (mmsi, chokepoint), grp in cp_df.groupby(["mmsi", "region"], sort=False):
+        axis, pos_label, neg_label = CHOKEPOINT_AXES[chokepoint]
+        episodes = _split_by_gap(grp.reset_index(drop=True), _EPISODE_GAP_H)
+
+        for ep in episodes:
+            if len(ep) < _MIN_TRANSIT_FIXES:
+                continue
+            first = ep.iloc[0]
+            last = ep.iloc[-1]
+
+            if axis == "lat":
+                displacement = float(last["lat"]) - float(first["lat"])
+            else:
+                displacement = float(last["lon"]) - float(first["lon"])
+
+            if abs(displacement) < _MIN_DISPLACEMENT_DEG:
+                continue
+
+            direction = pos_label if displacement > 0 else neg_label
+
+            # Laden status: use draught from last fix and max seen in the episode
+            draughts = ep["draught"].dropna() if "draught" in ep.columns else pd.Series([], dtype=float)
+            last_draught = float(draughts.iloc[-1]) if not draughts.empty else None
+            max_draught = float(draughts.max()) if not draughts.empty else None
+            segment = str(first.get("segment", None) or "")
+            laden = laden_status(last_draught, max_draught, segment or None)
+
+            results.append(
+                {
+                    "mmsi": int(mmsi),
+                    "chokepoint": chokepoint,
+                    "entered_ts": first["snapshot_ts"],
+                    "exited_ts": last["snapshot_ts"],
+                    "direction": direction,
+                    "kind": first.get("kind", None),
+                    "segment": segment or None,
+                    "laden": laden == "laden",  # bool for DB column; unknown -> False
+                }
+            )
+
+    return results
+
+
+# --- anchored episode detection ----------------------------------------------
+
+
+def anchored_episodes(df: pd.DataFrame) -> list[dict]:
+    """Detect anchored episodes inside known anchorage zones.
+
+    A fix is anchored when nav_status IN (1, 5) OR sog < SOG_ANCHOR_KN.
+    Consecutive anchored fixes inside the same zone form an episode.
+    Episodes shorter than MIN_ANCHOR_HOURS are discarded.
+
+    Returns a list of dicts compatible with the anchored_episodes table schema:
+      mmsi, zone, start_ts, end_ts, kind, segment
+    """
+    if df.empty:
+        return []
+
+    df = df.sort_values(["mmsi", "snapshot_ts"])
+    results: list[dict] = []
+
+    for mmsi, grp in df.groupby("mmsi", sort=False):
+        grp = grp.reset_index(drop=True)
+
+        # Determine anchored flag per row
+        nav = grp["nav_status"] if "nav_status" in grp.columns else pd.Series([None] * len(grp))
+        sog = grp["sog"] if "sog" in grp.columns else pd.Series([None] * len(grp))
+
+        anchored = (nav.isin([1, 5])) | (sog.fillna(999) < _SOG_ANCHOR_KN)
+
+        # Find the zone for each anchored fix
+        zones_col: list[str | None] = []
+        for i, row in grp.iterrows():
+            if not anchored.iloc[i]:
+                zones_col.append(None)
+            else:
+                zones_col.append(_any_zone(float(row["lat"]), float(row["lon"])))
+
+        grp = grp.copy()
+        grp["_zone"] = zones_col
+
+        # Group consecutive rows with the same non-None zone
+        active_rows: list[int] = []
+        active_zone: str | None = None
+
+        def _flush(rows: list[int], zone: str) -> None:
+            if not rows:
+                return
+            ep = grp.iloc[rows]
+            duration = (ep["snapshot_ts"].iloc[-1] - ep["snapshot_ts"].iloc[0]).total_seconds() / 3600
+            if duration >= _MIN_ANCHOR_HOURS:
+                results.append(
+                    {
+                        "mmsi": int(mmsi),
+                        "zone": zone,
+                        "start_ts": ep["snapshot_ts"].iloc[0],
+                        "end_ts": ep["snapshot_ts"].iloc[-1],
+                        "kind": ep["kind"].iloc[0] if "kind" in ep.columns else None,
+                        "segment": ep["segment"].iloc[0] if "segment" in ep.columns else None,
+                    }
+                )
+
+        for i in range(len(grp)):
+            z = grp["_zone"].iloc[i]
+            if z == active_zone and z is not None:
+                active_rows.append(i)
+            else:
+                if active_zone is not None and active_rows:
+                    # Check for gap > 2h before appending (episode already split by continuity)
+                    _flush(active_rows, active_zone)
+                active_rows = [i] if z is not None else []
+                active_zone = z
+
+        if active_zone is not None and active_rows:
+            _flush(active_rows, active_zone)
+
+    return results
+
+
+# --- fleet density snapshot --------------------------------------------------
+
+
+def fleet_density_rows(df: pd.DataFrame, ts: pd.Timestamp, vessel_states: dict) -> list[dict]:
+    """Compute laden/ballast counts per (region, kind, segment) for a snapshot timestamp.
+
+    vessel_states: {mmsi: {'max_draught_seen': float, 'laden': str}} from analytics DB.
+    Returns list of dicts for fleet_density table.
+    """
+    if df.empty or "region" not in df.columns:
+        return []
+
+    rows = []
+    grouped = df.groupby(["region", "kind", "segment"], sort=False)
+    for (region, kind, segment), grp in grouped:
+        laden_count = ballast_count = unknown_count = 0
+        for _, row in grp.iterrows():
+            mmsi = int(row["mmsi"])
+            state = vessel_states.get(mmsi, {})
+            max_seen = state.get("max_draught_seen")
+            draught = row.get("draught") if "draught" in grp.columns else None
+            if pd.isna(draught) if draught is not None else True:
+                draught = None
+            status = laden_status(draught, max_seen, str(segment) if segment else None)
+            if status == "laden":
+                laden_count += 1
+            elif status == "ballast":
+                ballast_count += 1
+            else:
+                unknown_count += 1
+        rows.append(
+            {
+                "ts": ts,
+                "region": region,
+                "kind": kind,
+                "segment": segment,
+                "laden_count": laden_count,
+                "ballast_count": ballast_count,
+                "unknown_count": unknown_count,
+            }
+        )
+    return rows

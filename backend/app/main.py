@@ -27,11 +27,17 @@ from .runner_dispersion import run_dispersion_default
 from .runner_routes import run_routes_default
 from .schemas import (
     AisDispersionRow,
+    AnalyticsZone,
     ChokepointCount,
+    CongestionResponse,
+    DensityResponse,
     DispersionResponse,
+    LadenResponse,
+    LadenSegment,
     Meta,
     RoutesResponse,
     TrackPoint,
+    TransitsResponse,
     Vessel,
 )
 
@@ -220,6 +226,152 @@ def dispersion_live(segment: str | None = None):
             )
         )
     return rows
+
+
+@app.get("/api/analytics/transits", response_model=TransitsResponse)
+def analytics_transits(chokepoint: str = "suez", days: int = 30):
+    """Daily chokepoint transit counts grouped by direction and vessel kind."""
+    d = max(1, min(days, 365))
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=d)
+    df = db.query(
+        "SELECT entered_ts, direction, kind FROM transit_events "
+        "WHERE chokepoint = ? AND entered_ts >= ?",
+        [chokepoint, cutoff],
+        db=db.analytics_db_path(),
+    )
+    series = []
+    if not df.empty:
+        df["date"] = pd.to_datetime(df["entered_ts"]).dt.date.astype(str)
+        for (date_s, direction, kind), grp in df.groupby(["date", "direction", "kind"]):
+            from .schemas import TransitDay
+            series.append(TransitDay(date=date_s, direction=direction, kind=kind, count=len(grp)))
+        series.sort(key=lambda r: r.date)
+    return TransitsResponse(chokepoint=chokepoint, days=d, series=series)
+
+
+@app.get("/api/analytics/congestion", response_model=CongestionResponse)
+def analytics_congestion(zone: str = "singapore_west", days: int = 30):
+    """Daily anchored vessel counts and median dwell hours per anchorage zone."""
+    d = max(1, min(days, 365))
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=d)
+    df = db.query(
+        "SELECT start_ts, end_ts FROM anchored_episodes WHERE zone = ? AND start_ts >= ?",
+        [zone, cutoff],
+        db=db.analytics_db_path(),
+    )
+    series = []
+    if not df.empty:
+        df["date"] = pd.to_datetime(df["start_ts"]).dt.date.astype(str)
+        df["dwell_h"] = (
+            pd.to_datetime(df["end_ts"]) - pd.to_datetime(df["start_ts"])
+        ).dt.total_seconds() / 3600
+        for date_s, grp in df.groupby("date"):
+            from .schemas import CongestionDay
+            series.append(
+                CongestionDay(
+                    date=date_s,
+                    zone=zone,
+                    vessel_count=len(grp),
+                    median_dwell_hours=round(float(grp["dwell_h"].median()), 1),
+                )
+            )
+        series.sort(key=lambda r: r.date)
+    return CongestionResponse(zone=zone, days=d, series=series)
+
+
+@app.get("/api/analytics/density", response_model=DensityResponse)
+def analytics_density(region: str = "singapore_malacca", days: int = 30):
+    """Fleet density series per region: daily laden/ballast/unknown counts by segment."""
+    d = max(1, min(days, 365))
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=d)
+    df = db.query(
+        "SELECT ts, kind, segment, laden_count, ballast_count, unknown_count "
+        "FROM fleet_density WHERE region = ? AND ts >= ? ORDER BY ts",
+        [region, cutoff],
+        db=db.analytics_db_path(),
+    )
+    series = []
+    if not df.empty:
+        df["date"] = pd.to_datetime(df["ts"]).dt.date.astype(str)
+        agg = (
+            df.groupby(["date", "kind", "segment"])[["laden_count", "ballast_count", "unknown_count"]]
+            .sum()
+            .reset_index()
+        )
+        from .schemas import DensityDay
+        for _, r in agg.iterrows():
+            series.append(
+                DensityDay(
+                    date=str(r["date"]),
+                    kind=str(r["kind"]),
+                    segment=str(r["segment"]),
+                    laden_count=int(r["laden_count"]),
+                    ballast_count=int(r["ballast_count"]),
+                    unknown_count=int(r["unknown_count"]),
+                )
+            )
+        series.sort(key=lambda r: r.date)
+    return DensityResponse(region=region, days=d, series=series)
+
+
+@app.get("/api/analytics/laden", response_model=LadenResponse)
+def analytics_laden(kind: str = "tanker"):
+    """Current fleet laden/ballast/unknown split by segment from vessel_state."""
+    df = db.query(
+        "SELECT vs.mmsi, vs.laden, lp.segment "
+        "FROM vessel_state vs "
+        "LEFT JOIN ( "
+        "   SELECT mmsi, segment FROM live_positions "
+        ") lp ON vs.mmsi = lp.mmsi "
+        "WHERE lp.kind = ? OR lp.kind IS NULL",
+        [kind],
+        db=db.analytics_db_path(),
+    )
+    # vessel_state has no kind column; join with live_positions for kind filter
+    # Fallback: query vessel_state alone if analytics DB has no join candidates
+    if df.empty or "segment" not in df.columns or df["segment"].isna().all():
+        df = db.query(
+            "SELECT mmsi, laden, CAST(NULL AS VARCHAR) as segment FROM vessel_state",
+            db=db.analytics_db_path(),
+        )
+
+    if df.empty:
+        return LadenResponse(kind=kind, segments=[])
+
+    df["laden"] = df["laden"].fillna("unknown").astype(str)
+    df["segment"] = df["segment"].fillna("Unknown").astype(str)
+    result: dict[str, dict[str, int]] = {}
+    for _, row in df.iterrows():
+        seg = str(row["segment"]) if row["segment"] else "Unknown"
+        status = str(row["laden"])
+        entry = result.setdefault(seg, {"laden": 0, "ballast": 0, "unknown": 0})
+        entry[status] = entry.get(status, 0) + 1
+
+    segments = [
+        LadenSegment(segment=seg, laden=v["laden"], ballast=v["ballast"], unknown=v["unknown"])
+        for seg, v in sorted(result.items())
+    ]
+    return LadenResponse(kind=kind, segments=segments)
+
+
+@app.get("/api/analytics/zones", response_model=list[AnalyticsZone])
+def analytics_zones():
+    """All anchorage bboxes and chokepoint region bboxes for frontend overlay."""
+    from analytics.zones import ANCHORAGE_ZONES
+    from ais.regions import REGIONS
+
+    out: list[AnalyticsZone] = []
+    for name, ((lat_min, lon_min), (lat_max, lon_max)) in ANCHORAGE_ZONES.items():
+        out.append(
+            AnalyticsZone(
+                name=name,
+                bbox=[[lat_min, lon_min], [lat_max, lon_max]],
+                type="anchorage",
+            )
+        )
+    for name, bbox in REGIONS.items():
+        out.append(AnalyticsZone(name=name, bbox=bbox, type="chokepoint"))
+    return out
 
 
 def _iso(ts) -> str | None:

@@ -166,6 +166,83 @@ _DISPERSION_FIXTURE = {
     "avg_dispersion": [{"date": "2016-01-04", "value": 1234.5}],
 }
 
+_ANALYTICS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS meta_watermark (key VARCHAR PRIMARY KEY, ts TIMESTAMP);
+CREATE TABLE IF NOT EXISTS transit_events (
+    mmsi BIGINT, chokepoint VARCHAR, entered_ts TIMESTAMP, exited_ts TIMESTAMP,
+    direction VARCHAR, kind VARCHAR, segment VARCHAR, laden BOOLEAN,
+    PRIMARY KEY (mmsi, chokepoint, entered_ts)
+);
+CREATE TABLE IF NOT EXISTS anchored_episodes (
+    mmsi BIGINT, zone VARCHAR, start_ts TIMESTAMP, end_ts TIMESTAMP,
+    kind VARCHAR, segment VARCHAR,
+    PRIMARY KEY (mmsi, zone, start_ts)
+);
+CREATE TABLE IF NOT EXISTS fleet_density (
+    ts TIMESTAMP, region VARCHAR, kind VARCHAR, segment VARCHAR,
+    laden_count INTEGER, ballast_count INTEGER, unknown_count INTEGER,
+    PRIMARY KEY (ts, region, kind, segment)
+);
+CREATE TABLE IF NOT EXISTS vessel_state (
+    mmsi BIGINT PRIMARY KEY, max_draught_seen DOUBLE, last_draught DOUBLE,
+    laden VARCHAR, updated_ts TIMESTAMP
+);
+"""
+
+_TRANSIT_SEED = [
+    # mmsi, chokepoint, entered_ts, exited_ts, direction, kind, segment, laden
+    (1003, "hormuz", _NOW - timedelta(hours=10), _NOW - timedelta(hours=8),
+     "outbound", "tanker", "VLCC", True),
+    (1001, "singapore_malacca", _NOW - timedelta(hours=5), _NOW - timedelta(hours=4),
+     "eastbound", "bulk", "Capesize", False),
+]
+
+_ANCHOR_SEED = [
+    # mmsi, zone, start_ts, end_ts, kind, segment
+    (1002, "singapore_east", _NOW - timedelta(hours=6), _NOW - timedelta(hours=2),
+     "bulk", "Capesize"),
+]
+
+_DENSITY_SEED = [
+    # ts, region, kind, segment, laden, ballast, unknown
+    (_NOW - timedelta(hours=2), "hormuz", "tanker", "VLCC", 2, 1, 0),
+    (_NOW - timedelta(hours=1), "hormuz", "tanker", "VLCC", 2, 0, 1),
+]
+
+_VESSEL_STATE_SEED = [
+    # mmsi, max_draught_seen, last_draught, laden, updated_ts
+    (1003, 22.0, 20.5, "laden", _NOW),
+]
+
+
+@pytest.fixture
+def analytics_client(tmp_path, monkeypatch) -> TestClient:
+    """Client with both AIS DB and analytics DB seeded."""
+    ais_file = tmp_path / "ais_positions.duckdb"
+    ais_conn = duckdb.connect(str(ais_file))
+    ais_conn.execute(_SCHEMA)
+    ais_conn.executemany("INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", _SEED)
+    ais_conn.executemany("INSERT INTO ais_snapshots VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", _SNAP_SEED)
+    ais_conn.close()
+
+    an_file = tmp_path / "freight_analytics.duckdb"
+    an_conn = duckdb.connect(str(an_file))
+    an_conn.execute(_ANALYTICS_SCHEMA)
+    an_conn.executemany(
+        "INSERT INTO transit_events VALUES (?,?,?,?,?,?,?,?)", _TRANSIT_SEED
+    )
+    an_conn.executemany("INSERT INTO anchored_episodes VALUES (?,?,?,?,?,?)", _ANCHOR_SEED)
+    an_conn.executemany("INSERT INTO fleet_density VALUES (?,?,?,?,?,?,?)", _DENSITY_SEED)
+    an_conn.executemany("INSERT INTO vessel_state VALUES (?,?,?,?,?)", _VESSEL_STATE_SEED)
+    an_conn.close()
+
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
+    monkeypatch.setenv("ANALYTICS_DB", str(an_file))
+    from app.main import app
+
+    return TestClient(app)
+
+
 _STATIC_DIR = Path(__file__).parent.parent / "app" / "static"
 
 

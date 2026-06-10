@@ -1,0 +1,24 @@
+# freight-analytics -- hourly analytics batch job for the freight hub.
+#
+# Install:
+#   sudo cp ~/quant/freight/backend/freight-analytics.service /etc/systemd/system/
+#   sudo cp ~/quant/freight/backend/freight-analytics.timer  /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now freight-analytics.timer
+# Check:
+#   systemctl status freight-analytics.service freight-analytics.timer
+#   journalctl -u freight-analytics.service -n 50 --no-pager
+
+[Unit]
+Description=Freight hub analytics batch job (transit/anchored/density detection)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=lbzgiu
+WorkingDirectory=/home/lbzgiu/quant/freight/backend
+ExecStart=/home/lbzgiu/quant/freight/backend/.venv/bin/python -m analytics.build
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

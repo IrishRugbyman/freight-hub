@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 
 def test_health(client):
     r = client.get("/api/health")
@@ -141,3 +143,80 @@ def test_dispersion_live(client):
         assert "segment" in row
         assert "dispersion_nm" in row
         assert "vessel_count" in row
+
+
+# ---------------------------------------------------------------------------
+# Analytics endpoints
+# ---------------------------------------------------------------------------
+
+
+def test_analytics_transits_empty_when_no_analytics_db(client):
+    # With no analytics DB injected, the endpoint returns an empty series gracefully.
+    r = client.get("/api/analytics/transits", params={"chokepoint": "hormuz"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["chokepoint"] == "hormuz"
+    assert body["series"] == []
+
+
+def test_analytics_transits_with_data(analytics_client):
+    r = analytics_client.get("/api/analytics/transits", params={"chokepoint": "hormuz", "days": 30})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["chokepoint"] == "hormuz"
+    assert len(body["series"]) >= 1
+    first = body["series"][0]
+    assert "date" in first
+    assert "direction" in first
+    assert "count" in first
+    assert first["direction"] == "outbound"
+    assert first["count"] == 1
+
+
+def test_analytics_congestion_with_data(analytics_client):
+    r = analytics_client.get("/api/analytics/congestion", params={"zone": "singapore_east", "days": 30})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["zone"] == "singapore_east"
+    assert len(body["series"]) >= 1
+    row = body["series"][0]
+    assert row["vessel_count"] == 1
+    assert row["median_dwell_hours"] == pytest.approx(4.0, abs=0.1)
+
+
+def test_analytics_density_with_data(analytics_client):
+    r = analytics_client.get("/api/analytics/density", params={"region": "hormuz", "days": 30})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["region"] == "hormuz"
+    assert len(body["series"]) >= 1
+    day = body["series"][0]
+    assert "laden_count" in day
+    assert "ballast_count" in day
+    assert "unknown_count" in day
+
+
+def test_analytics_laden_with_data(analytics_client):
+    r = analytics_client.get("/api/analytics/laden", params={"kind": "tanker"})
+    assert r.status_code == 200
+    body = r.json()
+    assert "segments" in body
+
+
+def test_analytics_zones(analytics_client):
+    r = analytics_client.get("/api/analytics/zones")
+    assert r.status_code == 200
+    zones = r.json()
+    names = {z["name"] for z in zones}
+    assert "singapore_east" in names   # anchorage zone
+    assert "hormuz" in names           # chokepoint region
+    types = {z["type"] for z in zones}
+    assert "anchorage" in types
+    assert "chokepoint" in types
+
+
+def test_analytics_days_clamped(analytics_client):
+    # days=500 should be clamped to 365
+    r = analytics_client.get("/api/analytics/transits?chokepoint=suez&days=500")
+    assert r.status_code == 200
+    assert r.json()["days"] == 365

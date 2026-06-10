@@ -218,3 +218,109 @@ export function useDispersionLive(segment?: string) {
     refetchInterval: REFETCH_MS,
   })
 }
+
+// ---- Analytics (Phase 2) ----
+
+export interface TransitDay {
+  date: string
+  direction: string
+  kind: string
+  count: number
+}
+
+export interface TransitsResponse {
+  chokepoint: string
+  days: number
+  series: TransitDay[]
+}
+
+export interface CongestionDay {
+  date: string
+  zone: string
+  vessel_count: number
+  median_dwell_hours: number | null
+}
+
+export interface CongestionResponse {
+  zone: string
+  days: number
+  series: CongestionDay[]
+}
+
+export interface DensityDay {
+  date: string
+  kind: string
+  segment: string
+  laden_count: number
+  ballast_count: number
+  unknown_count: number
+}
+
+export interface DensityResponse {
+  region: string
+  days: number
+  series: DensityDay[]
+}
+
+export interface LadenSegment {
+  segment: string
+  laden: number
+  ballast: number
+  unknown: number
+}
+
+export interface LadenResponse {
+  kind: string
+  segments: LadenSegment[]
+}
+
+export interface AnalyticsZone {
+  name: string
+  bbox: [[number, number], [number, number]]
+  type: 'anchorage' | 'chokepoint'
+}
+
+const ANALYTICS_STALE = 10 * 60 * 1000 // 10 min; job runs hourly
+
+export function useTransits(chokepoint: string, days: number) {
+  return useQuery({
+    queryKey: ['analytics-transits', chokepoint, days],
+    queryFn: () =>
+      getJSON<TransitsResponse>(`/api/analytics/transits?chokepoint=${encodeURIComponent(chokepoint)}&days=${days}`),
+    staleTime: ANALYTICS_STALE,
+  })
+}
+
+export function useCongestion(zone: string, days: number) {
+  return useQuery({
+    queryKey: ['analytics-congestion', zone, days],
+    queryFn: () =>
+      getJSON<CongestionResponse>(`/api/analytics/congestion?zone=${encodeURIComponent(zone)}&days=${days}`),
+    staleTime: ANALYTICS_STALE,
+  })
+}
+
+export function useDensity(region: string, days: number) {
+  return useQuery({
+    queryKey: ['analytics-density', region, days],
+    queryFn: () =>
+      getJSON<DensityResponse>(`/api/analytics/density?region=${encodeURIComponent(region)}&days=${days}`),
+    staleTime: ANALYTICS_STALE,
+  })
+}
+
+export function useLaden(kind: string) {
+  return useQuery({
+    queryKey: ['analytics-laden', kind],
+    queryFn: () => getJSON<LadenResponse>(`/api/analytics/laden?kind=${encodeURIComponent(kind)}`),
+    staleTime: ANALYTICS_STALE,
+  })
+}
+
+export function useAnalyticsZones() {
+  return useQuery({
+    queryKey: ['analytics-zones'],
+    queryFn: () => getJSON<AnalyticsZone[]>('/api/analytics/zones'),
+    staleTime: Infinity,
+  })
+}

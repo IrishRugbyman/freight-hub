@@ -143,3 +143,65 @@ class AisDispersionRow(BaseModel):
     segment: str
     vessel_count: int
     dispersion_nm: float
+
+
+# ---- Phase 2 analytics ----
+
+
+class TransitDay(BaseModel):
+    date: str
+    direction: str
+    kind: str
+    count: int
+
+
+class TransitsResponse(BaseModel):
+    chokepoint: str
+    days: int
+    series: list[TransitDay]
+
+
+class CongestionDay(BaseModel):
+    date: str
+    zone: str
+    vessel_count: int
+    median_dwell_hours: float | None = None
+
+
+class CongestionResponse(BaseModel):
+    zone: str
+    days: int
+    series: list[CongestionDay]
+
+
+class DensityDay(BaseModel):
+    date: str
+    kind: str
+    segment: str
+    laden_count: int
+    ballast_count: int
+    unknown_count: int
+
+
+class DensityResponse(BaseModel):
+    region: str
+    days: int
+    series: list[DensityDay]
+
+
+class LadenSegment(BaseModel):
+    segment: str
+    laden: int
+    ballast: int
+    unknown: int
+
+
+class LadenResponse(BaseModel):
+    kind: str
+    segments: list[LadenSegment]
+
+
+class AnalyticsZone(BaseModel):
+    name: str
+    bbox: list[list[float]]  # [[lat_min, lon_min], [lat_max, lon_max]]
+    type: str  # 'anchorage' or 'chokepoint'

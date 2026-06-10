@@ -1,9 +1,13 @@
-"""Read-only access to the AIS collector's live_positions table.
+"""Read-only access to DuckDB files used by the freight API.
 
-The collector (market-data/ais/collector.py) owns ais_positions.duckdb and writes
-to it every ~90s, connecting per-write so the file is unlocked between writes. We
-open read-only and retry briefly past the rare mid-write lock, mirroring
-market-data/fetchers/ais_dispersion.py.
+Two DBs in use:
+- ais_positions.duckdb  : owned by the AIS collector (market-data service). We open
+  read-only and retry past the rare per-write lock (the writer holds it < 1s every ~90s).
+- freight_analytics.duckdb : owned by the analytics batch job (analytics/build.py). Also
+  opened read-only here; the batch job is the sole writer.
+
+Both paths are env-overridable (AIS_POSITIONS_DB, ANALYTICS_DB), which is how tests
+inject temporary DBs without touching the live files.
 """
 
 from __future__ import annotations
@@ -14,23 +18,38 @@ from pathlib import Path
 
 import duckdb
 
-_DEFAULT_DB = "~/quant/shared/market-data/data/ais_positions.duckdb"
+_DEFAULT_AIS_DB = "~/quant/shared/market-data/data/ais_positions.duckdb"
+_DEFAULT_ANALYTICS_DB = Path(__file__).resolve().parents[1] / "data" / "freight_analytics.duckdb"
+
 # Vessels not refreshed within this many hours are considered gone.
 STALE_HOURS = float(os.environ.get("FREIGHT_STALE_HOURS", "3"))
 
 
 def db_path() -> Path:
-    """Path to the collector's DuckDB (overridable via AIS_POSITIONS_DB, e.g. in tests)."""
-    return Path(os.environ.get("AIS_POSITIONS_DB", _DEFAULT_DB)).expanduser()
+    """Path to the collector's AIS DuckDB (overridable via AIS_POSITIONS_DB)."""
+    return Path(os.environ.get("AIS_POSITIONS_DB", _DEFAULT_AIS_DB)).expanduser()
 
 
-def query(sql: str, params: list | None = None, retries: int = 10):
-    """Run a read-only query, returning a DataFrame. Empty DataFrame if the DB or
-    table is missing; retries past the collector's brief per-write lock (the writer
-    holds the file <1s every ~90s, so a generous retry budget avoids spurious empties)."""
+def analytics_db_path() -> Path:
+    """Path to the analytics DuckDB (overridable via ANALYTICS_DB)."""
+    return Path(os.environ.get("ANALYTICS_DB", str(_DEFAULT_ANALYTICS_DB)))
+
+
+def query(sql: str, params: list | None = None, retries: int = 10, db: Path | None = None):
+    """Run a read-only query against the specified DB, returning a DataFrame.
+
+    Empty DataFrame if the DB or table is missing. Retries past the brief lock that
+    the collector (or analytics job) holds during each write cycle.
+
+    Args:
+        sql: SQL to execute.
+        params: Positional parameters for the query.
+        retries: Number of lock-retry attempts before giving up.
+        db: Path to the DuckDB file. Defaults to the AIS positions DB.
+    """
     import pandas as pd
 
-    path = db_path()
+    path = db if db is not None else db_path()
     if not path.exists():
         return pd.DataFrame()
     for attempt in range(retries):
@@ -45,5 +64,5 @@ def query(sql: str, params: list | None = None, retries: int = 10):
         except duckdb.IOException:
             if attempt == retries - 1:
                 return pd.DataFrame()
-            time.sleep(0.3)  # collector mid-write
+            time.sleep(0.3)
     return pd.DataFrame()
