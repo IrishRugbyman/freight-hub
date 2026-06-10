@@ -74,8 +74,8 @@ function TrackerPage() {
         </div>
       )}
 
-      {/* status strip */}
-      <div className="absolute bottom-3 left-3 z-[1000]">
+      {/* status strip - centered bottom so it doesn't overlap left panel or zoom control */}
+      <div className="absolute bottom-3 left-1/2 z-[1000] -translate-x-1/2">
         <Panel className="px-3 py-1.5 text-xs text-muted-foreground">
           {isLoading ? (
             <span className="flex items-center gap-1.5">
