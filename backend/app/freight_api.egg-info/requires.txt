@@ -4,6 +4,7 @@ pydantic>=2.11
 slowapi>=0.1.9
 uvicorn[standard]>=0.34
 market-data
+quant-lib
 
 [dev]
 pytest>=8.0

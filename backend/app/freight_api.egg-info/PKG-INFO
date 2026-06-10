@@ -8,6 +8,7 @@ Requires-Dist: pydantic>=2.11
 Requires-Dist: slowapi>=0.1.9
 Requires-Dist: uvicorn[standard]>=0.34
 Requires-Dist: market-data
+Requires-Dist: quant-lib
 Provides-Extra: dev
 Requires-Dist: pytest>=8.0; extra == "dev"
 Requires-Dist: pytest-cov>=5.0; extra == "dev"

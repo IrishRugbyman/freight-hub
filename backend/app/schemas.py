@@ -25,6 +25,13 @@ class Vessel(BaseModel):
     eta: str | None = None
 
 
+class TrackPoint(BaseModel):
+    ts: str
+    lat: float
+    lon: float
+    sog: float | None = None
+
+
 class ChokepointCount(BaseModel):
     region: str
     bbox: list[list[float]]  # [[lat_min, lon_min], [lat_max, lon_max]]

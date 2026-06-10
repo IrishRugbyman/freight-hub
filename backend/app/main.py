@@ -31,6 +31,7 @@ from .schemas import (
     DispersionResponse,
     Meta,
     RoutesResponse,
+    TrackPoint,
     Vessel,
 )
 
@@ -133,6 +134,25 @@ def vessels(kind: str | None = None, segment: str | None = None, region: str | N
             nav_status=getattr(r, "nav_status", None) if "nav_status" in cols else None,
             eta=getattr(r, "eta", None) if "eta" in cols else None,
         )
+        for r in df.itertuples()
+    ]
+
+
+@app.get("/api/vessels/{mmsi}/track", response_model=list[TrackPoint])
+def vessel_track(mmsi: int, hours: int = 24):
+    """Historical trail for a vessel from ais_snapshots. hours clamped to [1, 336]."""
+    h = max(1, min(hours, 336))
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=h)
+    df = db.query(
+        "SELECT snapshot_ts, lat, lon, sog FROM ais_snapshots "
+        "WHERE mmsi = ? AND snapshot_ts >= ? ORDER BY snapshot_ts",
+        [mmsi, cutoff],
+    )
+    if df.empty:
+        return []
+    df = df.astype(object).where(df.notna(), None)
+    return [
+        TrackPoint(ts=_iso(r.snapshot_ts), lat=r.lat, lon=r.lon, sog=r.sog)
         for r in df.itertuples()
     ]
 

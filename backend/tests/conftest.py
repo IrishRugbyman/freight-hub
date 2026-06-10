@@ -21,6 +21,13 @@ CREATE TABLE live_positions (
     region VARCHAR, updated_ts TIMESTAMP,
     imo BIGINT, draught DOUBLE, nav_status INTEGER, eta VARCHAR
 );
+CREATE TABLE ais_snapshots (
+    snapshot_ts TIMESTAMP, mmsi BIGINT,
+    kind VARCHAR, segment VARCHAR, region VARCHAR,
+    lat DOUBLE, lon DOUBLE, ship_type INTEGER, length_m DOUBLE,
+    sog DOUBLE, nav_status INTEGER, draught DOUBLE, destination VARCHAR,
+    PRIMARY KEY (snapshot_ts, mmsi)
+);
 """
 
 _NOW = datetime.now(UTC).replace(tzinfo=None, microsecond=0)
@@ -60,6 +67,33 @@ def client(tmp_path, monkeypatch) -> TestClient:
 def empty_client(tmp_path, monkeypatch) -> TestClient:
     """Client pointed at a non-existent DB (collector never ran)."""
     monkeypatch.setenv("AIS_POSITIONS_DB", str(tmp_path / "missing.duckdb"))
+    from app.main import app
+
+    return TestClient(app)
+
+
+_SNAP_SEED = [
+    # snapshot_ts, mmsi, kind, segment, region, lat, lon, ship_type, length_m, sog, nav_s, draught, dest
+    (_NOW - timedelta(hours=2), 1003, "tanker", "VLCC", "hormuz", 25.9, 56.1, 80, 330, 14.0, 0, 20.0, "AEFJR"),
+    (_NOW - timedelta(hours=1), 1003, "tanker", "VLCC", "hormuz", 26.0, 56.2, 80, 330, 14.0, 0, 20.0, "AEFJR"),
+    (_NOW, 1003, "tanker", "VLCC", "hormuz", 26.1, 56.3, 80, 330, 14.0, 0, 20.0, "AEFJR"),
+    # old snapshot outside 24h window
+    (_NOW - timedelta(hours=30), 1003, "tanker", "VLCC", "hormuz", 25.5, 55.8, 80, 330, 12.0, 0, 20.0, "AEFJR"),
+]
+
+
+@pytest.fixture
+def client_with_snaps(tmp_path, monkeypatch) -> TestClient:
+    db_file = tmp_path / "ais_positions.duckdb"
+    conn = duckdb.connect(str(db_file))
+    conn.execute(_SCHEMA)
+    conn.executemany("INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", _SEED)
+    conn.executemany(
+        "INSERT INTO ais_snapshots VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", _SNAP_SEED
+    )
+    conn.close()
+
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(db_file))
     from app.main import app
 
     return TestClient(app)

@@ -109,6 +109,10 @@ export interface Vessel {
   segment: string | null
   region: string | null
   updated_ts: string
+  imo: number | null
+  draught: number | null
+  nav_status: number | null
+  eta: string | null
 }
 
 export interface ChokepointCount {
@@ -154,6 +158,23 @@ export function useVessels(filters: VesselFilters) {
     queryKey: ['vessels', filters],
     queryFn: () => getJSON<Vessel[]>(vesselsUrl(filters)),
     refetchInterval: REFETCH_MS,
+    placeholderData: (prev) => prev,
+  })
+}
+
+export interface TrackPoint {
+  ts: string
+  lat: number
+  lon: number
+  sog: number | null
+}
+
+export function useVesselTrack(mmsi: number | null, hours: 24 | 168) {
+  return useQuery({
+    queryKey: ['track', mmsi, hours],
+    queryFn: () => getJSON<TrackPoint[]>(`/api/vessels/${mmsi}/track?hours=${hours}`),
+    enabled: mmsi != null,
+    staleTime: 5 * 60 * 1000,
   })
 }
 

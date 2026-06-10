@@ -85,6 +85,31 @@ def test_empty_db_resilience(empty_client):
     assert all(c["total"] == 0 for c in cps)
 
 
+def test_track_returns_ordered_points(client_with_snaps):
+    r = client_with_snaps.get("/api/vessels/1003/track")
+    assert r.status_code == 200
+    pts = r.json()
+    # default 24h window: 3 points (the 30h-old one is excluded)
+    assert len(pts) == 3
+    # ordered by snapshot_ts ascending
+    assert pts[0]["lat"] < pts[-1]["lat"]
+    assert pts[0]["sog"] == 14.0
+
+
+def test_track_hours_clamping(client_with_snaps):
+    # hours=48 should include the 30h-old snapshot
+    pts_48 = client_with_snaps.get("/api/vessels/1003/track?hours=48").json()
+    assert len(pts_48) == 4
+    # hours beyond 336 clamped to 336 (still 4 points in our seed)
+    pts_huge = client_with_snaps.get("/api/vessels/1003/track?hours=9999").json()
+    assert len(pts_huge) == 4
+
+
+def test_track_empty_for_unknown_vessel(client_with_snaps):
+    pts = client_with_snaps.get("/api/vessels/99999/track").json()
+    assert pts == []
+
+
 def test_routes_serves_static(client, static_routes_json):
     r = client.get("/api/routes")
     assert r.status_code == 200
