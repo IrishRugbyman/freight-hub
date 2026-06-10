@@ -8,6 +8,8 @@ Each chokepoint entry: (axis, positive_label, negative_label).
 
 from __future__ import annotations
 
+from ais.regions import REGIONS  # re-exported for use by detect.py
+
 # Curated anchorage zones inside covered regions (verified against region bboxes in regions.py)
 ANCHORAGE_ZONES: dict[str, tuple[tuple[float, float], tuple[float, float]]] = {
     "fujairah": ((24.9, 56.3), (25.4, 56.85)),         # UAE east coast; hormuz region

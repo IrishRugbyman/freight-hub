@@ -187,6 +187,13 @@ CREATE TABLE IF NOT EXISTS vessel_state (
     mmsi BIGINT PRIMARY KEY, max_draught_seen DOUBLE, last_draught DOUBLE,
     laden VARCHAR, updated_ts TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS ais_events (
+    event_id VARCHAR PRIMARY KEY, type VARCHAR,
+    mmsi BIGINT, mmsi2 BIGINT,
+    start_ts TIMESTAMP, end_ts TIMESTAMP,
+    lat DOUBLE, lon DOUBLE,
+    region VARCHAR, kind VARCHAR, segment VARCHAR, details VARCHAR
+);
 """
 
 _TRANSIT_SEED = [
@@ -214,6 +221,19 @@ _VESSEL_STATE_SEED = [
     (1003, 22.0, 20.5, "laden", _NOW),
 ]
 
+_EVENTS_SEED = [
+    # event_id, type, mmsi, mmsi2, start_ts, end_ts, lat, lon, region, kind, segment, details
+    ("gap0000001", "gap", 1001, None,
+     _NOW - timedelta(hours=20), _NOW - timedelta(hours=20),
+     25.2, 56.5, "hormuz", "tanker", "Aframax", '{"silence_hours":20,"last_sog":9.1}'),
+    ("loi0000001", "loiter", 1002, None,
+     _NOW - timedelta(hours=15), _NOW - timedelta(hours=3),
+     1.2, 103.8, "singapore_malacca", "bulk", "Capesize", '{"duration_hours":12,"mean_sog":0.3}'),
+    ("sts0000001", "sts", 1003, 1004,
+     _NOW - timedelta(hours=3), _NOW - timedelta(hours=1),
+     26.1, 56.3, "hormuz", "tanker", "VLCC", '{"duration_hours":2,"co_location_fixes":12}'),
+]
+
 
 @pytest.fixture
 def analytics_client(tmp_path, monkeypatch) -> TestClient:
@@ -234,6 +254,9 @@ def analytics_client(tmp_path, monkeypatch) -> TestClient:
     an_conn.executemany("INSERT INTO anchored_episodes VALUES (?,?,?,?,?,?)", _ANCHOR_SEED)
     an_conn.executemany("INSERT INTO fleet_density VALUES (?,?,?,?,?,?,?)", _DENSITY_SEED)
     an_conn.executemany("INSERT INTO vessel_state VALUES (?,?,?,?,?)", _VESSEL_STATE_SEED)
+    an_conn.executemany(
+        "INSERT INTO ais_events VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", _EVENTS_SEED
+    )
     an_conn.close()
 
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))

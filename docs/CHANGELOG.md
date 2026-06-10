@@ -1,5 +1,18 @@
 # Freight Hub Changelog
 
+## 2026-06-10 - Phase 3: Intelligence events
+
+- AIS gap detection: vessel active for >= 6 fixes in 48h then silent > 6h, last SOG > 2 kn, inside region interior (>0.4 deg from bbox edge). Closes when vessel reappears.
+- Loitering detection: >= 12h episode with mean SOG < 1 kn, outside all anchorage zones, > 0.2 deg from region bbox edge.
+- STS candidate detection: two tankers within 500m for >= 2h, both SOG < 0.5 kn, outside anchorage zones (0.01-deg grid hash for efficiency).
+- `ais_events` table added to `freight_analytics.duckdb`; event_ids stable via sha1 for idempotent re-runs.
+- `GET /api/events?type=&days=7&limit=200` endpoint with vessel name enrichment from live_positions.
+- Events page at `/events`: type-chip filters, days selector, row click navigates to tracker.
+- "Event pins" toggleable layer on the tracker map (last 48h events as color-coded pins).
+- 62 backend tests passing (12 new detect unit tests, 6 new endpoint tests).
+- 0 events on first run (expected - gap/loiter need 48h+ history, STS is rare).
+
+
 ## 2026-06-10 - Phase 2: Analytics pipeline
 
 - Added hourly analytics batch job (`backend/analytics/`) writing to `freight_analytics.duckdb`.

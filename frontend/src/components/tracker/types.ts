@@ -5,6 +5,7 @@ export interface LayerState {
   headingArrows: boolean
   counts: boolean
   chokepoints: boolean
+  eventPins: boolean
 }
 
 export const DEFAULT_LAYERS: LayerState = {
@@ -12,6 +13,7 @@ export const DEFAULT_LAYERS: LayerState = {
   headingArrows: true,
   counts: true,
   chokepoints: false,
+  eventPins: true,
 }
 
 export type Filters = VesselFilters

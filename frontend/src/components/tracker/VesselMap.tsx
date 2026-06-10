@@ -5,6 +5,7 @@ import type { LayerState } from './types'
 import { VesselLayer } from './VesselLayer'
 import { ChokepointLayer } from './ChokepointLayer'
 import { TrailLayer } from './TrailLayer'
+import { EventPinsLayer } from './EventPinsLayer'
 import { colorFor } from '@/lib/segments'
 
 function MapFocuser({ target }: { target: Vessel | null | undefined }) {
@@ -60,6 +61,7 @@ export function VesselMap({
           color={colorFor(trailVessel.kind, trailVessel.segment)}
         />
       )}
+      <EventPinsLayer visible={layers.eventPins} />
       <MapFocuser target={focusTarget} />
     </MapContainer>
   )

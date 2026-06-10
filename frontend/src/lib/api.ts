@@ -324,3 +324,42 @@ export function useAnalyticsZones() {
     staleTime: Infinity,
   })
 }
+
+// ---- Events (Phase 3: AIS gaps, loitering, STS) ----
+
+export interface AisEvent {
+  event_id: string
+  type: 'gap' | 'loiter' | 'sts'
+  mmsi: number
+  mmsi2: number | null
+  start_ts: string
+  end_ts: string
+  lat: number
+  lon: number
+  region: string | null
+  kind: string | null
+  segment: string | null
+  details: Record<string, unknown>
+  vessel_name: string | null
+  vessel2_name: string | null
+}
+
+export interface EventsResponse {
+  events: AisEvent[]
+  total: number
+}
+
+const EVENTS_STALE = 2 * 60 * 1000  // 2 min
+
+export function useEvents(params?: { type?: string; days?: number; limit?: number }) {
+  const searchParams = new URLSearchParams()
+  if (params?.type) searchParams.set('type', params.type)
+  if (params?.days) searchParams.set('days', String(params.days))
+  if (params?.limit) searchParams.set('limit', String(params.limit))
+  const qs = searchParams.toString()
+  return useQuery({
+    queryKey: ['events', qs],
+    queryFn: () => getJSON<EventsResponse>(`/api/events${qs ? '?' + qs : ''}`),
+    staleTime: EVENTS_STALE,
+  })
+}

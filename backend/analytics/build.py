@@ -23,7 +23,14 @@ from pathlib import Path
 import duckdb
 import pandas as pd
 
-from .detect import anchored_episodes, fleet_density_rows, transit_episodes
+from .detect import (
+    ais_gap_events,
+    anchored_episodes,
+    fleet_density_rows,
+    loitering_events,
+    sts_candidates,
+    transit_episodes,
+)
 
 log = logging.getLogger(__name__)
 
@@ -42,6 +49,9 @@ _OVERLAP_HOURS = 6
 
 # Retry budget when the collector holds the AIS DB lock (usually < 1s per write)
 _LOCK_RETRIES = 15
+
+# Window within max_ts where a vessel is considered "recently active" for gap closure
+_GAP_RECHECK_H = 6
 
 # ---------------------------------------------------------------------------
 # Analytics DB schema
@@ -92,6 +102,21 @@ CREATE TABLE IF NOT EXISTS vessel_state (
     last_draught        DOUBLE,
     laden               VARCHAR,
     updated_ts          TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS ais_events (
+    event_id    VARCHAR PRIMARY KEY,
+    type        VARCHAR,
+    mmsi        BIGINT,
+    mmsi2       BIGINT,
+    start_ts    TIMESTAMP,
+    end_ts      TIMESTAMP,
+    lat         DOUBLE,
+    lon         DOUBLE,
+    region      VARCHAR,
+    kind        VARCHAR,
+    segment     VARCHAR,
+    details     VARCHAR
 );
 """
 
@@ -290,14 +315,111 @@ def run(reset: bool = False) -> None:
             )
 
     # ------------------------------------------------------------------
-    # 5. Advance watermark
+    # 5. Intelligence events (gaps, loitering, STS) - 48h lookback
     # ------------------------------------------------------------------
-    new_watermark = max_ts.to_pydatetime() if hasattr(max_ts, "to_pydatetime") else max_ts
+    max_ts_dt = max_ts.to_pydatetime() if hasattr(max_ts, "to_pydatetime") else max_ts
+    lookback_since = max_ts_dt - timedelta(hours=48)
+
+    df_48h = _ais_query(
+        "SELECT mmsi, snapshot_ts, lat, lon, sog, nav_status, draught, destination, "
+        "       kind, segment, region "
+        "FROM ais_snapshots "
+        "WHERE snapshot_ts >= ? "
+        "ORDER BY mmsi, snapshot_ts",
+        [lookback_since],
+    )
+
+    if not df_48h.empty:
+        df_48h["snapshot_ts"] = pd.to_datetime(df_48h["snapshot_ts"])
+
+        # 5a. AIS gaps
+        gaps = ais_gap_events(df_48h, max_ts)
+        log.info("detected %d gap events", len(gaps))
+        if gaps:
+            # Close any gap events for vessels that have reappeared
+            active_recent = set(
+                df_48h[df_48h["snapshot_ts"] >= max_ts - timedelta(hours=_GAP_RECHECK_H)]["mmsi"].astype(int).unique()
+            )
+            for mmsi_int in active_recent:
+                row = conn.execute(
+                    "SELECT event_id, details FROM ais_events "
+                    "WHERE type = 'gap' AND mmsi = ? AND end_ts = start_ts",
+                    [mmsi_int],
+                ).fetchone()
+                if row:
+                    import json as _json
+                    event_id_existing, details_str = row
+                    details = _json.loads(details_str) if details_str else {}
+                    grp_m = df_48h[df_48h["mmsi"] == mmsi_int].sort_values("snapshot_ts")
+                    # Find first fix after gap start
+                    gap_start = conn.execute(
+                        "SELECT start_ts FROM ais_events WHERE event_id = ?", [event_id_existing]
+                    ).fetchone()
+                    if gap_start:
+                        after = grp_m[grp_m["snapshot_ts"] > gap_start[0]]
+                        if not after.empty:
+                            refix = after.iloc[0]
+                            details["reappeared_lat"] = round(float(refix["lat"]), 5)
+                            details["reappeared_lon"] = round(float(refix["lon"]), 5)
+                            conn.execute(
+                                "UPDATE ais_events SET end_ts = ?, details = ? WHERE event_id = ?",
+                                [refix["snapshot_ts"], _json.dumps(details), event_id_existing],
+                            )
+            for e in gaps:
+                conn.execute(
+                    "INSERT OR REPLACE INTO ais_events "
+                    "(event_id, type, mmsi, mmsi2, start_ts, end_ts, lat, lon, "
+                    " region, kind, segment, details) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [
+                        e["event_id"], e["type"], e["mmsi"], e["mmsi2"],
+                        e["start_ts"], e["end_ts"], e["lat"], e["lon"],
+                        e["region"], e["kind"], e["segment"], e["details"],
+                    ],
+                )
+
+        # 5b. Loitering
+        loiters = loitering_events(df_48h)
+        log.info("detected %d loitering events", len(loiters))
+        for e in loiters:
+            conn.execute(
+                "INSERT OR REPLACE INTO ais_events "
+                "(event_id, type, mmsi, mmsi2, start_ts, end_ts, lat, lon, "
+                " region, kind, segment, details) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    e["event_id"], e["type"], e["mmsi"], e["mmsi2"],
+                    e["start_ts"], e["end_ts"], e["lat"], e["lon"],
+                    e["region"], e["kind"], e["segment"], e["details"],
+                ],
+            )
+
+        # 5c. STS candidates
+        sts = sts_candidates(df_48h)
+        log.info("detected %d STS candidates", len(sts))
+        for e in sts:
+            conn.execute(
+                "INSERT OR REPLACE INTO ais_events "
+                "(event_id, type, mmsi, mmsi2, start_ts, end_ts, lat, lon, "
+                " region, kind, segment, details) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    e["event_id"], e["type"], e["mmsi"], e["mmsi2"],
+                    e["start_ts"], e["end_ts"], e["lat"], e["lon"],
+                    e["region"], e["kind"], e["segment"], e["details"],
+                ],
+            )
+
+    # ------------------------------------------------------------------
+    # 6. Advance watermark
+    # ------------------------------------------------------------------
+    new_watermark = max_ts_dt
     _set_watermark(conn, new_watermark)
     log.info("watermark advanced to %s", new_watermark)
 
     conn.close()
-    log.info("analytics.build complete")
+    log.info("analytics.build complete: transits=%d anchored=%d density=%d",
+             len(transits), len(anchored), len(density_rows))
 
 
 # ---------------------------------------------------------------------------

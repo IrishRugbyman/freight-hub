@@ -34,6 +34,7 @@ export const Route = createRootRoute({
           <NavItem to="/routes">Routes</NavItem>
           <NavItem to="/dispersion">Dispersion</NavItem>
           <NavItem to="/analytics">Analytics</NavItem>
+          <NavItem to="/events">Events</NavItem>
         </nav>
         <a
           href="https://quant.lbzgiu.xyz"

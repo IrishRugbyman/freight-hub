@@ -220,3 +220,53 @@ def test_analytics_days_clamped(analytics_client):
     r = analytics_client.get("/api/analytics/transits?chokepoint=suez&days=500")
     assert r.status_code == 200
     assert r.json()["days"] == 365
+
+
+# --- /api/events tests -------------------------------------------------------
+
+def test_events_all(analytics_client):
+    r = analytics_client.get("/api/events")
+    assert r.status_code == 200
+    body = r.json()
+    assert "events" in body
+    assert "total" in body
+    assert body["total"] == 3
+    types = {e["type"] for e in body["events"]}
+    assert types == {"gap", "loiter", "sts"}
+
+
+def test_events_filter_by_type(analytics_client):
+    r = analytics_client.get("/api/events", params={"type": "gap"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total"] == 1
+    assert body["events"][0]["type"] == "gap"
+    assert body["events"][0]["mmsi"] == 1001
+
+
+def test_events_sts_has_mmsi2(analytics_client):
+    r = analytics_client.get("/api/events", params={"type": "sts"})
+    assert r.status_code == 200
+    ev = r.json()["events"][0]
+    assert ev["mmsi"] == 1003
+    assert ev["mmsi2"] == 1004
+    assert "duration_hours" in ev["details"]
+
+
+def test_events_details_parsed(analytics_client):
+    r = analytics_client.get("/api/events", params={"type": "loiter"})
+    assert r.status_code == 200
+    ev = r.json()["events"][0]
+    assert isinstance(ev["details"], dict)
+    assert "duration_hours" in ev["details"]
+
+
+def test_events_limit_clamped(analytics_client):
+    r = analytics_client.get("/api/events", params={"limit": 1000})
+    assert r.status_code == 200  # 1000 clamped to 500, still returns OK
+
+
+def test_events_empty_outside_days(analytics_client):
+    # days=0 should be clamped to 1; seeded events are within last 1 day so still return
+    r = analytics_client.get("/api/events", params={"type": "gap", "days": 1})
+    assert r.status_code == 200

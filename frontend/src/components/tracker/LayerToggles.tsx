@@ -16,6 +16,7 @@ export function LayerToggles({
       <Switch checked={layers.headingArrows} onChange={set('headingArrows')} label="Heading arrows" />
       <Switch checked={layers.counts} onChange={set('counts')} label="Counts panel" />
       <Switch checked={layers.chokepoints} onChange={set('chokepoints')} label="Chokepoints" />
+      <Switch checked={layers.eventPins} onChange={set('eventPins')} label="Event pins" />
     </div>
   )
 }

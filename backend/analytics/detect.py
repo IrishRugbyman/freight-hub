@@ -12,11 +12,14 @@ Expected input schema (subset of ais_snapshots columns):
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import timedelta
+from math import atan2, cos, radians, sin, sqrt
 
 import pandas as pd
 
-from .zones import ANCHORAGE_ZONES, CHOKEPOINT_AXES, DESIGN_DRAUGHT
+from .zones import ANCHORAGE_ZONES, CHOKEPOINT_AXES, DESIGN_DRAUGHT, REGIONS
 
 # --- constants ---------------------------------------------------------------
 
@@ -34,6 +37,23 @@ _MIN_ANCHOR_HOURS = 2.0
 
 # Speed threshold for "stopped / anchored" inference (knots)
 _SOG_ANCHOR_KN = 0.5
+
+# --- Phase 3 constants -------------------------------------------------------
+
+# AIS gap: minimum fixes in last 48h to consider a vessel "active", min silence, min last SOG
+_GAP_MIN_FIXES = 6
+_GAP_MIN_SILENCE_H = 6.0
+_GAP_MIN_SOG_KN = 2.0
+_GAP_EDGE_MARGIN_DEG = 0.4  # must be this far from region bbox edge
+
+# Loitering: minimum episode duration, max mean SOG, min margin from region edge
+_LOITER_MIN_HOURS = 12.0
+_LOITER_MAX_SOG_KN = 1.0
+_LOITER_EDGE_MARGIN_DEG = 0.2
+
+# STS: max distance between two stopped tankers, min co-location duration
+_STS_MAX_DIST_M = 500
+_STS_MIN_HOURS = 2.0
 
 # --- helpers -----------------------------------------------------------------
 
@@ -282,3 +302,305 @@ def fleet_density_rows(df: pd.DataFrame, ts: pd.Timestamp, vessel_states: dict) 
             }
         )
     return rows
+
+
+# --- Phase 3 helpers ---------------------------------------------------------
+
+
+def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Haversine distance in metres."""
+    R = 6_371_000
+    phi1, phi2 = radians(lat1), radians(lat2)
+    dphi = radians(lat2 - lat1)
+    dlam = radians(lon2 - lon1)
+    a = sin(dphi / 2) ** 2 + cos(phi1) * cos(phi2) * sin(dlam / 2) ** 2
+    return 2 * R * atan2(sqrt(a), sqrt(1 - a))
+
+
+def _event_id(type_: str, mmsi: int, start_ts: object, mmsi2: int | None = None) -> str:
+    ts_str = start_ts.isoformat() if hasattr(start_ts, "isoformat") else str(start_ts)
+    key = f"{type_}|{mmsi}|{mmsi2 or ''}|{ts_str}"
+    return hashlib.sha1(key.encode()).hexdigest()[:16]
+
+
+def _in_region_interior(lat: float, lon: float, region: str, margin: float) -> bool:
+    """Return True if (lat, lon) is inside the region bbox shrunk by `margin` deg."""
+    if region not in REGIONS:
+        return False
+    bbox = REGIONS[region]
+    lat_min, lon_min = bbox[0]
+    lat_max, lon_max = bbox[1]
+    return (
+        lat_min + margin <= lat <= lat_max - margin
+        and lon_min + margin <= lon <= lon_max - margin
+    )
+
+
+# --- AIS gap detection -------------------------------------------------------
+
+
+def ais_gap_events(df: pd.DataFrame, max_ts: pd.Timestamp) -> list[dict]:
+    """Detect vessels that were active (>= 6 fixes in last 48h) but went silent > 6h.
+
+    Only fires for vessels whose last fix is > 0.4 deg inside their region bbox
+    (to avoid false positives from vessels sailing out of terrestrial coverage).
+    Last SOG must be > 2 kn (vessel was underway, not anchored).
+
+    Returns a list of dicts compatible with the ais_events table schema.
+    """
+    if df.empty:
+        return []
+
+    results: list[dict] = []
+    gap_cutoff = max_ts - timedelta(hours=_GAP_MIN_SILENCE_H)
+
+    for mmsi, grp in df.groupby("mmsi", sort=False):
+        grp = grp.sort_values("snapshot_ts")
+        last = grp.iloc[-1]
+        last_ts = last["snapshot_ts"]
+
+        if last_ts >= gap_cutoff:
+            continue
+
+        if len(grp) < _GAP_MIN_FIXES:
+            continue
+
+        last_sog = last.get("sog")
+        if last_sog is None or pd.isna(last_sog) or float(last_sog) < _GAP_MIN_SOG_KN:
+            continue
+
+        region = last.get("region")
+        if not region:
+            continue
+
+        lat, lon = float(last["lat"]), float(last["lon"])
+        if not _in_region_interior(lat, lon, region, _GAP_EDGE_MARGIN_DEG):
+            continue
+
+        start_ts = last_ts.to_pydatetime() if hasattr(last_ts, "to_pydatetime") else last_ts
+        silence_h = (max_ts.to_pydatetime() - start_ts).total_seconds() / 3600
+
+        results.append(
+            {
+                "event_id": _event_id("gap", int(mmsi), start_ts),
+                "type": "gap",
+                "mmsi": int(mmsi),
+                "mmsi2": None,
+                "start_ts": start_ts,
+                "end_ts": start_ts,
+                "lat": lat,
+                "lon": lon,
+                "region": region,
+                "kind": last.get("kind"),
+                "segment": last.get("segment"),
+                "details": json.dumps(
+                    {
+                        "silence_hours": round(silence_h, 1),
+                        "last_sog": round(float(last_sog), 1),
+                        "fix_count_48h": len(grp),
+                    }
+                ),
+            }
+        )
+
+    return results
+
+
+# --- Loitering detection -----------------------------------------------------
+
+
+def loitering_events(df: pd.DataFrame) -> list[dict]:
+    """Detect vessels drifting for >= 12h with mean SOG < 1 kn, outside anchorages.
+
+    Excludes vessels inside anchorage zones or within 0.2 deg of the region bbox edge
+    (to avoid attributing coverage-edge behaviour as loitering).
+
+    Returns a list of dicts compatible with the ais_events table schema.
+    """
+    if df.empty:
+        return []
+
+    results: list[dict] = []
+
+    for mmsi, grp in df.groupby("mmsi", sort=False):
+        grp = grp.sort_values("snapshot_ts").reset_index(drop=True)
+        episodes = _split_by_gap(grp, _EPISODE_GAP_H)
+
+        for ep in episodes:
+            if len(ep) < 2:
+                continue
+
+            ep_sog = ep["sog"].fillna(999) if "sog" in ep.columns else pd.Series([999] * len(ep))
+            if ep_sog.mean() >= _LOITER_MAX_SOG_KN:
+                continue
+
+            duration_h = (
+                ep["snapshot_ts"].iloc[-1] - ep["snapshot_ts"].iloc[0]
+            ).total_seconds() / 3600
+            if duration_h < _LOITER_MIN_HOURS:
+                continue
+
+            # All fixes must be outside anchorage zones AND in region interior
+            skip = False
+            for i in range(len(ep)):
+                fix = ep.iloc[i]
+                lat, lon = float(fix["lat"]), float(fix["lon"])
+                if _any_zone(lat, lon) is not None:
+                    skip = True
+                    break
+                region = fix.get("region")
+                if not region or not _in_region_interior(lat, lon, region, _LOITER_EDGE_MARGIN_DEG):
+                    skip = True
+                    break
+            if skip:
+                continue
+
+            start_ts_raw = ep["snapshot_ts"].iloc[0]
+            start_ts = start_ts_raw.to_pydatetime() if hasattr(start_ts_raw, "to_pydatetime") else start_ts_raw
+            end_ts_raw = ep["snapshot_ts"].iloc[-1]
+            end_ts = end_ts_raw.to_pydatetime() if hasattr(end_ts_raw, "to_pydatetime") else end_ts_raw
+
+            mid = ep.iloc[len(ep) // 2]
+            region = str(mid.get("region") or "")
+
+            results.append(
+                {
+                    "event_id": _event_id("loiter", int(mmsi), start_ts),
+                    "type": "loiter",
+                    "mmsi": int(mmsi),
+                    "mmsi2": None,
+                    "start_ts": start_ts,
+                    "end_ts": end_ts,
+                    "lat": float(ep["lat"].mean()),
+                    "lon": float(ep["lon"].mean()),
+                    "region": region,
+                    "kind": ep["kind"].iloc[0] if "kind" in ep.columns else None,
+                    "segment": ep["segment"].iloc[0] if "segment" in ep.columns else None,
+                    "details": json.dumps(
+                        {
+                            "duration_hours": round(duration_h, 1),
+                            "mean_sog": round(float(ep_sog.mean()), 2),
+                            "fix_count": len(ep),
+                        }
+                    ),
+                }
+            )
+
+    return results
+
+
+# --- STS candidate detection -------------------------------------------------
+
+
+def sts_candidates(df: pd.DataFrame) -> list[dict]:
+    """Detect ship-to-ship transfer candidates: two tankers within 500m for >= 2h,
+    both SOG < 0.5 kn, outside anchorage zones.
+
+    Uses a 0.01-deg grid hash per snapshot_ts to find candidate pairs efficiently.
+
+    Returns a list of dicts compatible with the ais_events table schema.
+    """
+    if df.empty or "kind" not in df.columns:
+        return []
+
+    # Filter to slow tankers outside anchorage zones
+    tankers = df[df["kind"] == "tanker"].copy()
+    if tankers.empty:
+        return []
+
+    tankers = tankers[tankers["sog"].fillna(999) < _SOG_ANCHOR_KN].copy()
+    if tankers.empty:
+        return []
+
+    tankers = tankers[
+        tankers.apply(lambda r: _any_zone(float(r["lat"]), float(r["lon"])) is None, axis=1)
+    ].copy()
+    if tankers.empty:
+        return []
+
+    # Accumulate (mmsi1, mmsi2) -> sorted list of co-location timestamps
+    from collections import defaultdict
+
+    pair_timestamps: dict[tuple[int, int], list] = defaultdict(list)
+
+    for ts, snap in tankers.groupby("snapshot_ts", sort=False):
+        if len(snap) < 2:
+            continue
+
+        snap = snap.reset_index(drop=True)
+        # Grid cell: floor to nearest 0.01 deg
+        snap["_gi"] = (snap["lat"] / 0.01).astype(int)
+        snap["_gj"] = (snap["lon"] / 0.01).astype(int)
+
+        cell_map: dict[tuple, list] = defaultdict(list)
+        for _, row in snap.iterrows():
+            gi, gj = int(row["_gi"]), int(row["_gj"])
+            # Index vessel into its cell AND all 8 neighbors so pairs straddling borders match
+            for di in range(-1, 2):
+                for dj in range(-1, 2):
+                    cell_map[(gi + di, gj + dj)].append(row)
+
+        checked: set[tuple[int, int]] = set()
+        for vessels in cell_map.values():
+            for i in range(len(vessels)):
+                for j in range(i + 1, len(vessels)):
+                    m1, m2 = int(vessels[i]["mmsi"]), int(vessels[j]["mmsi"])
+                    if m1 == m2:
+                        continue
+                    pair = (min(m1, m2), max(m1, m2))
+                    if pair in checked:
+                        continue
+                    checked.add(pair)
+                    dist = _haversine_m(
+                        float(vessels[i]["lat"]), float(vessels[i]["lon"]),
+                        float(vessels[j]["lat"]), float(vessels[j]["lon"]),
+                    )
+                    if dist <= _STS_MAX_DIST_M:
+                        pair_timestamps[pair].append(ts)
+
+    results: list[dict] = []
+    for (mmsi1, mmsi2), timestamps in pair_timestamps.items():
+        if len(timestamps) < 2:
+            continue
+        timestamps.sort()
+        duration_h = (timestamps[-1] - timestamps[0]).total_seconds() / 3600
+        if duration_h < _STS_MIN_HOURS:
+            continue
+
+        # Position and metadata from first co-location fix
+        first_fix = tankers[(tankers["mmsi"] == mmsi1) & (tankers["snapshot_ts"] == timestamps[0])]
+        if first_fix.empty:
+            continue
+        fix = first_fix.iloc[0]
+
+        v2_fix = tankers[tankers["mmsi"] == mmsi2].sort_values("snapshot_ts").iloc[-1] if not tankers[tankers["mmsi"] == mmsi2].empty else None
+
+        start_ts_raw = timestamps[0]
+        end_ts_raw = timestamps[-1]
+        start_ts = start_ts_raw.to_pydatetime() if hasattr(start_ts_raw, "to_pydatetime") else start_ts_raw
+        end_ts = end_ts_raw.to_pydatetime() if hasattr(end_ts_raw, "to_pydatetime") else end_ts_raw
+
+        results.append(
+            {
+                "event_id": _event_id("sts", mmsi1, start_ts, mmsi2),
+                "type": "sts",
+                "mmsi": mmsi1,
+                "mmsi2": mmsi2,
+                "start_ts": start_ts,
+                "end_ts": end_ts,
+                "lat": float(fix["lat"]),
+                "lon": float(fix["lon"]),
+                "region": str(fix.get("region") or ""),
+                "kind": "tanker",
+                "segment": str(fix.get("segment") or "") or None,
+                "details": json.dumps(
+                    {
+                        "duration_hours": round(duration_h, 1),
+                        "co_location_fixes": len(timestamps),
+                        "segment2": str(v2_fix.get("segment") or "") if v2_fix is not None else None,
+                    }
+                ),
+            }
+        )
+
+    return results

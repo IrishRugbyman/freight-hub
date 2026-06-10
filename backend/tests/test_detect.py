@@ -7,7 +7,18 @@ from datetime import datetime, timedelta
 import pandas as pd
 import pytest
 
-from analytics.detect import anchored_episodes, laden_status, transit_episodes
+import json
+
+from analytics.detect import (
+    ais_gap_events,
+    anchored_episodes,
+    laden_status,
+    loitering_events,
+    sts_candidates,
+    transit_episodes,
+)
+
+_NOW = datetime(2026, 6, 10, 12, 0, 0)
 
 
 # ---------------------------------------------------------------------------
@@ -273,3 +284,194 @@ def test_anchored_by_low_sog():
     result = anchored_episodes(_df(rows))
     assert len(result) == 1
     assert result[0]["zone"] == "singapore_east"
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: ais_gap_events
+# ---------------------------------------------------------------------------
+
+_GAP_MAX_TS = _NOW  # treat now as max_ts for gap tests
+
+
+def _gap_df(mmsi: int, fix_times: list, lat: float = 25.2, lon: float = 56.5,
+            region: str = "hormuz", sog: float = 9.0) -> pd.DataFrame:
+    rows = [
+        {
+            "mmsi": mmsi, "snapshot_ts": t, "lat": lat, "lon": lon,
+            "sog": sog, "nav_status": 0, "draught": 12.0,
+            "kind": "tanker", "segment": "Aframax", "region": region,
+            "destination": None,
+        }
+        for t in fix_times
+    ]
+    df = pd.DataFrame(rows)
+    df["snapshot_ts"] = pd.to_datetime(df["snapshot_ts"])
+    return df
+
+
+def test_gap_detected():
+    """Vessel with 8 fixes, last fix 10h ago, deep inside region: should fire."""
+    fix_times = [_NOW - timedelta(hours=h) for h in reversed(range(8, 56, 6))]
+    df = _gap_df(9001, fix_times)
+    max_ts = pd.Timestamp(_NOW)
+    result = ais_gap_events(df, max_ts)
+    assert len(result) == 1
+    assert result[0]["type"] == "gap"
+    assert result[0]["mmsi"] == 9001
+    details = json.loads(result[0]["details"])
+    assert details["silence_hours"] >= 8
+
+
+def test_gap_not_fired_vessel_recently_active():
+    """Vessel with fix within 6h of max_ts: no gap."""
+    fix_times = [_NOW - timedelta(hours=h) for h in [10, 8, 6, 4, 2, 1]]
+    df = _gap_df(9002, fix_times)
+    max_ts = pd.Timestamp(_NOW)
+    result = ais_gap_events(df, max_ts)
+    assert len(result) == 0
+
+
+def test_gap_not_fired_too_few_fixes():
+    """Vessel with only 4 fixes (below _GAP_MIN_FIXES=6) before going silent."""
+    fix_times = [_NOW - timedelta(hours=h) for h in [40, 35, 30, 25]]
+    df = _gap_df(9003, fix_times)
+    max_ts = pd.Timestamp(_NOW)
+    result = ais_gap_events(df, max_ts)
+    assert len(result) == 0
+
+
+def test_gap_not_fired_low_sog():
+    """Vessel that was anchored (sog=0.5) when it went silent: no gap."""
+    fix_times = [_NOW - timedelta(hours=h) for h in reversed(range(8, 56, 6))]
+    df = _gap_df(9004, fix_times, sog=0.5)
+    max_ts = pd.Timestamp(_NOW)
+    result = ais_gap_events(df, max_ts)
+    assert len(result) == 0
+
+
+def test_gap_not_fired_at_region_edge():
+    """Vessel last seen within 0.4 deg of hormuz bbox edge: coverage exit, not a gap."""
+    # hormuz bbox: lat [24.5,27.5], lon [54,58.5]
+    # Place vessel near lat edge (lat=24.7 = 24.5 + 0.2, inside 0.4 margin)
+    fix_times = [_NOW - timedelta(hours=h) for h in reversed(range(8, 56, 6))]
+    df = _gap_df(9005, fix_times, lat=24.7, lon=56.0, region="hormuz")
+    max_ts = pd.Timestamp(_NOW)
+    result = ais_gap_events(df, max_ts)
+    assert len(result) == 0
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: loitering_events
+# ---------------------------------------------------------------------------
+
+def _loiter_df(mmsi: int, fix_times: list, lat: float = 25.2, lon: float = 56.5,
+               region: str = "hormuz", sog: float = 0.3) -> pd.DataFrame:
+    rows = [
+        {
+            "mmsi": mmsi, "snapshot_ts": t, "lat": lat, "lon": lon,
+            "sog": sog, "nav_status": 0, "draught": 12.0,
+            "kind": "tanker", "segment": "Aframax", "region": region,
+            "destination": None,
+        }
+        for t in fix_times
+    ]
+    df = pd.DataFrame(rows)
+    df["snapshot_ts"] = pd.to_datetime(df["snapshot_ts"])
+    return df
+
+
+def test_loiter_detected():
+    """14h of slow movement, deep inside hormuz, outside anchorages."""
+    # hormuz interior: lat [24.5+0.2, 27.5-0.2] x lon [54+0.2, 58.5-0.2]
+    # Use lat=26, lon=56 (well inside)
+    fix_times = [_NOW - timedelta(hours=h) for h in reversed(range(0, 14))]
+    df = _loiter_df(9010, fix_times, lat=26.0, lon=56.0)
+    result = loitering_events(df)
+    assert len(result) >= 1
+    assert result[0]["type"] == "loiter"
+    details = json.loads(result[0]["details"])
+    assert details["duration_hours"] >= 12
+
+
+def test_loiter_not_fired_short_episode():
+    """Episode only 6h: below the 12h minimum."""
+    fix_times = [_NOW - timedelta(hours=h) for h in reversed(range(0, 6))]
+    df = _loiter_df(9011, fix_times, lat=26.0, lon=56.0)
+    result = loitering_events(df)
+    assert len(result) == 0
+
+
+def test_loiter_not_fired_in_anchorage():
+    """Slow vessel inside fujairah anchorage: should NOT loiter-detect."""
+    # fujairah: lat [24.9, 25.4], lon [56.3, 56.85]
+    fix_times = [_NOW - timedelta(hours=h) for h in reversed(range(0, 14))]
+    df = _loiter_df(9012, fix_times, lat=25.1, lon=56.5, region="hormuz")
+    result = loitering_events(df)
+    assert len(result) == 0
+
+
+def test_loiter_not_fired_fast_vessel():
+    """Mean SOG >= 1 kn: not a loiter."""
+    fix_times = [_NOW - timedelta(hours=h) for h in reversed(range(0, 14))]
+    df = _loiter_df(9013, fix_times, lat=26.0, lon=56.0, sog=2.5)
+    result = loitering_events(df)
+    assert len(result) == 0
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: sts_candidates
+# ---------------------------------------------------------------------------
+
+def _sts_df(pairs: list[dict]) -> pd.DataFrame:
+    """pairs: list of dicts with keys mmsi, snapshot_ts, lat, lon, kind, segment."""
+    rows = []
+    for p in pairs:
+        rows.append({
+            "mmsi": p["mmsi"], "snapshot_ts": p["snapshot_ts"],
+            "lat": p.get("lat", 26.0), "lon": p.get("lon", 56.0),
+            "sog": p.get("sog", 0.1), "nav_status": 1, "draught": 12.0,
+            "kind": p.get("kind", "tanker"), "segment": p.get("segment", "Aframax"),
+            "region": p.get("region", "hormuz"), "destination": None,
+        })
+    df = pd.DataFrame(rows)
+    df["snapshot_ts"] = pd.to_datetime(df["snapshot_ts"])
+    return df
+
+
+def test_sts_detected():
+    """Two tankers within 50m for 3h, outside anchorages."""
+    fix_times = [_NOW - timedelta(hours=h) for h in reversed(range(0, 3))]
+    rows = []
+    for t in fix_times:
+        rows.append({"mmsi": 9020, "snapshot_ts": t, "lat": 26.0, "lon": 56.0})
+        # ~44m offset at lat=26
+        rows.append({"mmsi": 9021, "snapshot_ts": t, "lat": 26.0004, "lon": 56.0})
+    df = _sts_df(rows)
+    result = sts_candidates(df)
+    assert len(result) >= 1
+    assert result[0]["type"] == "sts"
+    assert {result[0]["mmsi"], result[0]["mmsi2"]} == {9020, 9021}
+
+
+def test_sts_not_fired_far_apart():
+    """Two tankers 2km apart: below 500m threshold."""
+    fix_times = [_NOW - timedelta(hours=h) for h in reversed(range(0, 3))]
+    rows = []
+    for t in fix_times:
+        rows.append({"mmsi": 9022, "snapshot_ts": t, "lat": 26.0, "lon": 56.0})
+        rows.append({"mmsi": 9023, "snapshot_ts": t, "lat": 26.02, "lon": 56.0})  # ~2.2km
+    df = _sts_df(rows)
+    result = sts_candidates(df)
+    assert len(result) == 0
+
+
+def test_sts_not_fired_short_duration():
+    """Two tankers within 50m but only for 1h (below 2h minimum)."""
+    fix_times = [_NOW - timedelta(hours=h) for h in reversed(range(0, 1))]
+    rows = []
+    for t in fix_times:
+        rows.append({"mmsi": 9024, "snapshot_ts": t, "lat": 26.0, "lon": 56.0})
+        rows.append({"mmsi": 9025, "snapshot_ts": t, "lat": 26.0004, "lon": 56.0})
+    df = _sts_df(rows)
+    result = sts_candidates(df)
+    assert len(result) == 0

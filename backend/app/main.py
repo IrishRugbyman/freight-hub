@@ -27,11 +27,13 @@ from .runner_dispersion import run_dispersion_default
 from .runner_routes import run_routes_default
 from .schemas import (
     AisDispersionRow,
+    AisEvent,
     AnalyticsZone,
     ChokepointCount,
     CongestionResponse,
     DensityResponse,
     DispersionResponse,
+    EventsResponse,
     LadenResponse,
     LadenSegment,
     Meta,
@@ -378,3 +380,88 @@ def _iso(ts) -> str | None:
     if ts is None:
         return None
     return ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
+
+
+@app.get("/api/events", response_model=EventsResponse)
+def events(
+    type: str | None = None,
+    days: int = 7,
+    limit: int = 200,
+):
+    """Intelligence event feed: AIS gaps, loitering, STS candidates.
+
+    ?type=gap|loiter|sts  - filter by event type (omit for all)
+    ?days=7               - lookback window (clamped 1..30)
+    ?limit=200            - max events returned (clamped 1..500)
+    """
+    days = max(1, min(30, days))
+    limit = max(1, min(500, limit))
+    _db = db.analytics_db_path()
+
+    from datetime import UTC, datetime, timedelta as _td
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - _td(days=days)
+
+    where_clauses = ["start_ts >= ?"]
+    params: list = [cutoff]
+    if type:
+        where_clauses.append("type = ?")
+        params.append(type)
+
+    events_sql = (
+        "SELECT event_id, type, mmsi, mmsi2, start_ts, end_ts, lat, lon, "
+        "       region, kind, segment, details "
+        "FROM ais_events "
+        "WHERE " + " AND ".join(where_clauses) +
+        " ORDER BY start_ts DESC LIMIT ?"
+    )
+    params.append(limit)
+
+    rows_df = db.query(events_sql, params, db=_db)
+    if rows_df.empty:
+        return EventsResponse(events=[], total=0)
+
+    # Enrich with vessel names from live_positions (separate AIS DB query)
+    all_mmsis = list(set(rows_df["mmsi"].dropna().astype(int).tolist()) |
+                     set(rows_df["mmsi2"].dropna().astype(int).tolist()))
+    name_map: dict[int, str] = {}
+    if all_mmsis:
+        placeholders = ",".join(["?"] * len(all_mmsis))
+        name_df = db.query(
+            f"SELECT mmsi, name FROM live_positions WHERE mmsi IN ({placeholders})",
+            all_mmsis,
+        )
+        if not name_df.empty:
+            name_map = dict(zip(name_df["mmsi"].astype(int), name_df["name"].fillna("")))
+
+    import json as _json
+
+    result_events = []
+    for _, row in rows_df.iterrows():
+        mmsi_int = int(row["mmsi"])
+        import pandas as _pd
+        mmsi2_val = row["mmsi2"]
+        mmsi2_int = int(mmsi2_val) if mmsi2_val is not None and not _pd.isna(mmsi2_val) else None
+        try:
+            details_dict = _json.loads(row["details"]) if row["details"] else {}
+        except (ValueError, TypeError):
+            details_dict = {}
+        result_events.append(
+            AisEvent(
+                event_id=str(row["event_id"]),
+                type=str(row["type"]),
+                mmsi=mmsi_int,
+                mmsi2=mmsi2_int,
+                start_ts=_iso(row["start_ts"]) or "",
+                end_ts=_iso(row["end_ts"]) or "",
+                lat=float(row["lat"]),
+                lon=float(row["lon"]),
+                region=str(row["region"]) if row["region"] else None,
+                kind=str(row["kind"]) if row["kind"] else None,
+                segment=str(row["segment"]) if row["segment"] else None,
+                details=details_dict,
+                vessel_name=name_map.get(mmsi_int),
+                vessel2_name=name_map.get(mmsi2_int) if mmsi2_int else None,
+            )
+        )
+
+    return EventsResponse(events=result_events, total=len(result_events))

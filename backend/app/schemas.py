@@ -205,3 +205,25 @@ class AnalyticsZone(BaseModel):
     name: str
     bbox: list[list[float]]  # [[lat_min, lon_min], [lat_max, lon_max]]
     type: str  # 'anchorage' or 'chokepoint'
+
+
+class AisEvent(BaseModel):
+    event_id: str
+    type: str  # 'gap', 'loiter', 'sts'
+    mmsi: int
+    mmsi2: int | None
+    start_ts: str
+    end_ts: str
+    lat: float
+    lon: float
+    region: str | None
+    kind: str | None
+    segment: str | None
+    details: dict
+    vessel_name: str | None = None
+    vessel2_name: str | None = None
+
+
+class EventsResponse(BaseModel):
+    events: list[AisEvent]
+    total: int
