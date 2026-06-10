@@ -113,6 +113,7 @@ def vessels(kind: str | None = None, segment: str | None = None, region: str | N
     if df.empty:
         return []
     df = df.astype(object).where(df.notna(), None)  # NaN -> None for pydantic
+    cols = set(df.columns)
     return [
         Vessel(
             mmsi=int(r.mmsi),
@@ -127,6 +128,10 @@ def vessels(kind: str | None = None, segment: str | None = None, region: str | N
             segment=r.segment,
             region=r.region,
             updated_ts=_iso(r.updated_ts),
+            imo=getattr(r, "imo", None) if "imo" in cols else None,
+            draught=getattr(r, "draught", None) if "draught" in cols else None,
+            nav_status=getattr(r, "nav_status", None) if "nav_status" in cols else None,
+            eta=getattr(r, "eta", None) if "eta" in cols else None,
         )
         for r in df.itertuples()
     ]

@@ -28,6 +28,21 @@ def test_vessels_have_rich_fields(client):
     assert cape_a["destination"] == "CNSHA"
 
 
+def test_vessels_new_fields_round_trip(client):
+    vessels = client.get("/api/vessels").json()
+    vlcc = next(v for v in vessels if v["name"] == "VLCC A")
+    assert vlcc["imo"] == 9876543
+    assert vlcc["draught"] == 20.5
+    assert vlcc["nav_status"] == 0
+    assert vlcc["eta"] == "06-20 06:00"
+    # vessel with no new fields returns None
+    coaster = next(v for v in vessels if v["name"] == "COASTER")
+    assert coaster["imo"] is None
+    assert coaster["draught"] is None
+    assert coaster["nav_status"] is None
+    assert coaster["eta"] is None
+
+
 def test_filter_kind(client):
     rows = client.get("/api/vessels", params={"kind": "tanker"}).json()
     assert len(rows) == 1

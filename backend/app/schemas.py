@@ -19,6 +19,10 @@ class Vessel(BaseModel):
     segment: str | None = None
     region: str | None = None
     updated_ts: str
+    imo: int | None = None
+    draught: float | None = None
+    nav_status: int | None = None
+    eta: str | None = None
 
 
 class ChokepointCount(BaseModel):
