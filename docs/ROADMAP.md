@@ -97,7 +97,7 @@ ais_events            event_id VARCHAR PK, type VARCHAR ('gap'|'loiter'|'sts'),
 
 ---
 
-## Phase 0 - Collector Capture Upgrade ✅ priority: do this first, today
+## Phase 0 - Collector Capture Upgrade (top priority: do this first, today)
 
 *Goal: stop discarding draught, IMO, nav status and ETA, and densify history to 10-minute
 snapshots, so every later phase has the data it needs.*
