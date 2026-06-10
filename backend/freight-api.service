@@ -1,0 +1,26 @@
+# freight-api — live vessel data for the freight hub tracker.
+#
+# Install:
+#   sudo cp ~/quant/freight-hub/backend/freight-api.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now freight-api.service
+# Check:
+#   systemctl status freight-api.service
+#   journalctl -u freight-api.service -f
+
+[Unit]
+Description=Freight hub API (live vessel tracker)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lbzgiu
+WorkingDirectory=/home/lbzgiu/quant/freight-hub/backend
+ExecStart=/home/lbzgiu/quant/freight-hub/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8003
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

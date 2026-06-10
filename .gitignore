@@ -1,0 +1,14 @@
+# python
+backend/.venv/
+**/__pycache__/
+*.pyc
+backend/*.egg-info/
+.pytest_cache/
+
+# node / vite
+frontend/node_modules/
+frontend/dist/
+frontend/src/routeTree.gen.ts
+
+# env
+.env
