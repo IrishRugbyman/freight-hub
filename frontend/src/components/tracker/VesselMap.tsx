@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { MapContainer, TileLayer, useMap } from 'react-leaflet'
+import { MapContainer, TileLayer, ZoomControl, useMap } from 'react-leaflet'
 import type { Vessel, TrackPoint } from '@/lib/api'
 import type { LayerState } from './types'
 import { VesselLayer } from './VesselLayer'
@@ -15,7 +15,7 @@ function MapFocuser({ target }: { target: Vessel | null | undefined }) {
   return null
 }
 
-/** The Leaflet map + its active layers. */
+/** The Leaflet map + its active layers. Zoom control moved to bottom-right. */
 export function VesselMap({
   vessels,
   layers,
@@ -39,11 +39,13 @@ export function VesselMap({
       worldCopyJump
       className="h-full w-full"
       preferCanvas
+      zoomControl={false}
     >
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
         url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
       />
+      <ZoomControl position="bottomright" />
       <VesselLayer
         vessels={vessels}
         clustering={layers.clustering}

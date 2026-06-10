@@ -37,31 +37,28 @@ export function VesselSearch({
 
   return (
     <div className="relative">
-      <div className="flex items-center gap-1.5 rounded-md border border-border bg-background/80 px-2 py-1.5 text-sm backdrop-blur">
-        <Search size={13} className="text-muted-foreground" />
+      <div className="flex items-center gap-1.5 rounded-md bg-secondary px-2 py-1.5 text-sm">
+        <Search size={12} className="shrink-0 text-muted-foreground" />
         <input
           ref={inputRef}
           value={query}
-          onChange={(e) => {
-            setQuery(e.target.value)
-            setOpen(true)
-          }}
+          onChange={(e) => { setQuery(e.target.value); setOpen(true) }}
           onFocus={() => setOpen(true)}
           onBlur={() => setTimeout(() => setOpen(false), 150)}
-          placeholder="Search vessel, MMSI, destination..."
-          className="w-full bg-transparent outline-none placeholder:text-muted-foreground"
+          placeholder="Name, MMSI, destination..."
+          className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground/60"
         />
       </div>
       {open && results.length > 0 && (
-        <div className="absolute left-0 top-full z-[1100] mt-1 w-full overflow-hidden rounded-md border border-border bg-background shadow-lg">
+        <div className="absolute left-0 top-full z-[1200] mt-1 w-full overflow-hidden rounded-md border border-border bg-card shadow-xl">
           {results.map((v) => (
             <button
               key={v.mmsi}
               onMouseDown={() => pick(v)}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-muted"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-muted"
             >
-              <span className="font-medium">{v.name ?? `MMSI ${v.mmsi}`}</span>
-              <span className="ml-auto text-xs text-muted-foreground">{v.segment}</span>
+              <span className="flex-1 truncate text-sm font-medium">{v.name ?? `MMSI ${v.mmsi}`}</span>
+              <span className="shrink-0 text-[10px] text-muted-foreground">{v.segment}</span>
             </button>
           ))}
         </div>

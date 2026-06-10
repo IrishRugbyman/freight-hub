@@ -25,7 +25,7 @@ export function FilterControls({
 }) {
   const segments = segmentsForKind((filters.kind as Kind) || '')
   return (
-    <div className="space-y-3 p-3">
+    <div className="space-y-2 px-3 py-2">
       <Field label="Vessel type">
         <select
           className={selectCls}

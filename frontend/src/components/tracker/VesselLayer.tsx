@@ -8,25 +8,46 @@ import { projectPosition } from '@/lib/deadReckoning'
 
 const DR_HZ = 2 // dead-reckoning update rate (times per second)
 
+/**
+ * Top-down vessel silhouette SVG: pointed bow at top (12 o'clock), wider amidships,
+ * flat stern. CSS transform rotates it to heading/cog. Width=10, Height=16.
+ */
+function shipSvg(color: string, anchored: boolean): string {
+  if (anchored) {
+    // Stationary: filled square-ish diamond, no direction indicator
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 10 10">
+      <rect x="1" y="1" width="8" height="8" rx="1.5" fill="${color}" stroke="rgba(0,0,0,0.5)" stroke-width="1"/>
+    </svg>`
+  }
+  // Underway: elongated hull with pointed bow at top
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="16" viewBox="0 0 10 16">
+    <path d="M5,0 L9.5,5 L8.5,16 L1.5,16 L0.5,5 Z"
+      fill="${color}" stroke="rgba(0,0,0,0.55)" stroke-width="0.8" stroke-linejoin="round"/>
+    <line x1="5" y1="1" x2="5" y2="14" stroke="rgba(0,0,0,0.25)" stroke-width="0.6"/>
+  </svg>`
+}
+
 function makeMarker(v: Vessel, headingArrows: boolean): L.Layer {
   const color = colorFor(v.kind, v.segment)
-  const course = headingArrows ? (v.heading ?? v.cog) : null
-  if (course != null) {
+  const anchored = (v.nav_status === 1 || v.nav_status === 5) || ((v.sog ?? 99) < 0.3)
+  const course = headingArrows && !anchored ? (v.heading ?? v.cog) : null
+
+  if (headingArrows) {
     return L.marker([v.lat, v.lon], {
       icon: L.divIcon({
-        className: 'vessel-arrow',
-        html: `<div style="transform:rotate(${course}deg);color:${color};line-height:1;font-size:14px">&#9650;</div>`,
-        iconSize: [14, 14],
-        iconAnchor: [7, 7],
+        className: '',
+        html: `<div style="transform:rotate(${course ?? 0}deg);line-height:0">${shipSvg(color, anchored)}</div>`,
+        iconSize: anchored ? [10, 10] : [10, 16],
+        iconAnchor: anchored ? [5, 5] : [5, 8],
       }),
     })
   }
   return L.circleMarker([v.lat, v.lon], {
-    radius: 4,
+    radius: anchored ? 3 : 4,
     color,
-    weight: 1,
+    weight: anchored ? 2 : 1,
     fillColor: color,
-    fillOpacity: 0.8,
+    fillOpacity: anchored ? 0.5 : 0.85,
   })
 }
 

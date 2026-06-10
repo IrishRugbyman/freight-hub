@@ -11,7 +11,7 @@ export function LayerToggles({
 }) {
   const set = (k: keyof LayerState) => (v: boolean) => onChange({ ...layers, [k]: v })
   return (
-    <div className="flex flex-col gap-2 p-3">
+    <div className="flex flex-col gap-2">
       <Switch checked={layers.clustering} onChange={set('clustering')} label="Cluster markers" />
       <Switch checked={layers.headingArrows} onChange={set('headingArrows')} label="Heading arrows" />
       <Switch checked={layers.counts} onChange={set('counts')} label="Counts panel" />

@@ -1,38 +1,54 @@
 import { useMemo } from 'react'
 import type { Vessel } from '@/lib/api'
-import { colorFor } from '@/lib/segments'
+import { colorFor, SEGMENTS_BY_KIND } from '@/lib/segments'
 
-/** Live tally per (kind, segment), doubling as the map legend. */
+type KindGroup = { kind: string; label: string; total: number; rows: { segment: string; n: number }[] }
+
+/** Live vessel count legend grouped by kind, ordered by segment size. */
 export function CountsPanel({ vessels }: { vessels: Vessel[] }) {
-  const rows = useMemo(() => {
-    const m = new Map<string, { kind: string; segment: string; n: number }>()
+  const groups = useMemo((): KindGroup[] => {
+    const counts = new Map<string, number>()
     for (const v of vessels) {
-      const seg = v.segment ?? 'Unknown'
-      const key = `${v.kind}/${seg}`
-      const cur = m.get(key) ?? { kind: v.kind, segment: seg, n: 0 }
-      cur.n += 1
-      m.set(key, cur)
+      const key = `${v.kind}/${v.segment ?? 'Unknown'}`
+      counts.set(key, (counts.get(key) ?? 0) + 1)
     }
-    return [...m.values()].sort((a, b) => b.n - a.n)
+
+    return (['tanker', 'bulk'] as const).map((kind) => {
+      const segOrder = SEGMENTS_BY_KIND[kind]
+      const rows = segOrder
+        .map((seg) => ({ segment: seg, n: counts.get(`${kind}/${seg}`) ?? 0 }))
+        .filter((r) => r.n > 0)
+      return { kind, label: kind === 'tanker' ? 'Tankers' : 'Bulk carriers', total: rows.reduce((s, r) => s + r.n, 0), rows }
+    }).filter((g) => g.total > 0)
   }, [vessels])
 
+  if (!groups.length) return <div className="p-3 text-xs text-muted-foreground">No vessels</div>
+
   return (
-    <div className="max-h-[40vh] overflow-y-auto p-3">
-      <div className="mb-2 text-sm font-medium">{vessels.length} vessels</div>
-      <ul className="space-y-1">
-        {rows.map((r) => (
-          <li key={`${r.kind}/${r.segment}`} className="flex items-center gap-2 text-xs">
-            <span
-              className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
-              style={{ background: colorFor(r.kind, r.segment) }}
-            />
-            <span className="flex-1 text-muted-foreground">
-              {r.segment} <span className="opacity-50">({r.kind})</span>
-            </span>
-            <span className="font-mono tabular-nums">{r.n}</span>
-          </li>
-        ))}
-      </ul>
+    <div className="max-h-[45vh] overflow-y-auto py-2">
+      {groups.map((g, gi) => (
+        <div key={g.kind} className={gi > 0 ? 'border-t border-border pt-2 mt-1' : ''}>
+          <div className="flex items-center justify-between px-3 pb-1">
+            <span className="text-xs font-medium text-muted-foreground">{g.label}</span>
+            <span className="text-xs font-mono tabular-nums text-muted-foreground">{g.total}</span>
+          </div>
+          <ul>
+            {g.rows.map((r) => (
+              <li key={r.segment} className="flex items-center gap-2 px-3 py-0.5 text-xs hover:bg-muted/40">
+                <span
+                  className="inline-block h-2 w-2 shrink-0 rounded-sm"
+                  style={{ background: colorFor(g.kind, r.segment) }}
+                />
+                <span className="flex-1 text-foreground/80">{r.segment}</span>
+                <span className="font-mono tabular-nums">{r.n}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+      <div className="mt-2 border-t border-border px-3 pt-2 text-xs font-medium tabular-nums">
+        {vessels.length} total
+      </div>
     </div>
   )
 }
