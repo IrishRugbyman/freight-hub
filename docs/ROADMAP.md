@@ -251,7 +251,7 @@ history exists).*
 
 ---
 
-## Phase 2 - Analytics: transits, congestion, laden/ballast, density - Completed: 2026-06-10
+## Phase 2 - Analytics: transits, congestion, laden/ballast, density - Completed: 2026-06-10 ✅
 
 *Goal: an Analytics page with daily chokepoint transit counts, port congestion, and
 laden/ballast fleet splits, computed hourly from owned history.*
@@ -341,8 +341,8 @@ analytics job owns the other, the API writes nothing.
 - [x] Run `analytics.build` manually: detected 419 transit episodes from 157k snapshot rows.
       Timer active (fires hourly). Second run will be incremental via watermark.
 - [x] All pytest + vitest green (44 backend tests); `/analytics` live with real data.
-- [ ] Spot-check one transit event against the map trail of that MMSI (sanity).
-- [ ] Update `~/quant/PROJECTS.md` freight row + `docs/CHANGELOG.md`. Commit.
+- [x] Spot-check one transit event against the map trail of that MMSI (sanity). MMSI 357932000 cape_good_hope westbound: lon 18.49->18.11 over 5 fixes, 0.37 deg displacement. Correct.
+- [x] Update `~/quant/PROJECTS.md` freight row + `docs/CHANGELOG.md`. Commit.
 
 ---
 

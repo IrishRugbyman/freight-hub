@@ -130,7 +130,7 @@ export function VesselLayer({
         markerMap.set(v.mmsi, marker)
       }
     }
-  }, [vessels, headingArrows])
+  }, [vessels, headingArrows, clustering])
 
   // Dead-reckoning animation: nudge markers at ~2 Hz between polls
   useEffect(() => {

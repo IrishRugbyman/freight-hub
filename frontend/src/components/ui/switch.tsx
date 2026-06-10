@@ -15,18 +15,18 @@ export function Switch({
       role="switch"
       aria-checked={checked}
       onClick={() => onChange(!checked)}
-      className="flex items-center gap-2 text-sm text-foreground/90 hover:text-foreground"
+      className="flex items-center gap-3 text-sm text-foreground/90 hover:text-foreground"
     >
       <span
         className={cn(
-          'relative h-4 w-7 shrink-0 rounded-full transition-colors',
+          'relative h-4 w-8 shrink-0 rounded-full transition-colors',
           checked ? 'bg-primary' : 'bg-secondary',
         )}
       >
         <span
           className={cn(
-            'absolute top-0.5 h-3 w-3 rounded-full bg-white transition-transform',
-            checked ? 'translate-x-3.5' : 'translate-x-0.5',
+            'absolute left-0.5 top-0.5 h-3 w-3 rounded-full bg-white transition-transform',
+            checked ? 'translate-x-4' : 'translate-x-0',
           )}
         />
       </span>
