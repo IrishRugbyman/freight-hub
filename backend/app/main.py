@@ -1,23 +1,63 @@
-"""freight-api — read-only live vessel data for the freight hub tracker.
+"""freight-api — live vessel tracker + transport-arb routes + dispersion analytics.
 
-Thin layer over the AIS collector's live_positions table. No heavy compute; just
-freshness-filtered reads + per-region aggregation. Vessels older than STALE_HOURS
-are excluded everywhere (the map shows only currently-tracked ships).
+Live endpoints (AIS) read ais_positions.duckdb via db.py.
+Static-backed endpoints (routes, dispersion backtest) serve precomputed JSON from
+app/static/, with a live-compute fallback if the static file is absent.
+The live dispersion series reads ais_vessel_dispersion from commo.duckdb via loaders.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+import os
+import tempfile
+from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 
+import pandas as pd
 from ais.regions import REGIONS
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from loaders.freight import load_ais_dispersion
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from . import db
-from .schemas import ChokepointCount, Meta, Vessel
+from .runner_dispersion import run_dispersion_default
+from .runner_routes import run_routes_default
+from .schemas import (
+    AisDispersionRow,
+    ChokepointCount,
+    DispersionResponse,
+    Meta,
+    RoutesResponse,
+    Vessel,
+)
+
+_STATIC = Path(__file__).parent / "static"
+_STATIC_ROUTES = _STATIC / "routes_default.json"
+_STATIC_DISPERSION = _STATIC / "dispersion_default.json"
+
+def _write_atomic(path: Path, text: str) -> None:
+    path.parent.mkdir(exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except Exception:
+        import contextlib
+
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
+def _serve_cached(static_path: Path, compute_fn, schema_class):
+    if static_path.exists():
+        return schema_class.model_validate_json(static_path.read_text())
+    return compute_fn()
+
 
 limiter = Limiter(key_func=get_remote_address, default_limits=["240/minute"])
 app = FastAPI(title="freight-api", version="0.1.0")
@@ -121,6 +161,40 @@ def meta():
         total_tracked=int(len(df)),
         last_update=_iso(df["updated_ts"].max()),
     )
+
+
+@app.get("/api/routes", response_model=RoutesResponse)
+def routes():
+    """Transport-arb route matrix (precomputed, static JSON fallback to live compute)."""
+    return _serve_cached(_STATIC_ROUTES, run_routes_default, RoutesResponse)
+
+
+@app.get("/api/dispersion", response_model=DispersionResponse)
+def dispersion():
+    """Freight-dispersion backtest results (precomputed, static JSON fallback)."""
+    return _serve_cached(_STATIC_DISPERSION, run_dispersion_default, DispersionResponse)
+
+
+@app.get("/api/dispersion/live", response_model=list[AisDispersionRow])
+def dispersion_live(segment: str | None = None):
+    """Live AIS fleet-dispersion series from commo.duckdb (last 2 years, long format)."""
+    end = date.today()
+    start = end - timedelta(days=730)
+    df = load_ais_dispersion(start, end, segment=segment)
+    if df.empty:
+        return []
+    rows = []
+    for idx, row in df.iterrows():
+        rows.append(
+            AisDispersionRow(
+                date=str(idx.date()),
+                kind=str(row.get("kind", "")),
+                segment=str(row.get("segment", "")),
+                vessel_count=int(row.get("vessel_count", 0)),
+                dispersion_nm=round(float(row.get("dispersion_nm", 0)), 2),
+            )
+        )
+    return rows
 
 
 def _iso(ts) -> str | None:

@@ -1,10 +1,13 @@
 """Pytest fixtures: a temporary ais_positions.duckdb seeded with known vessels,
 wired into the app via the AIS_POSITIONS_DB env var, exposed as a TestClient.
+Also includes fixtures that seed static JSON for the routes/dispersion endpoints.
 """
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import duckdb
 import pytest
@@ -113,3 +116,101 @@ def empty_client(tmp_path, monkeypatch) -> TestClient:
     from app.main import app
 
     return TestClient(app)
+
+
+_ROUTES_FIXTURE = {
+    "name": "test_routes",
+    "as_of": "2026-01-01",
+    "spots": {"WTI": 70.0},
+    "routes": [
+        {
+            "id": "rt1",
+            "origin": "Cushing",
+            "destination": "Rotterdam",
+            "product_class": "crude",
+            "vessel_class": "VLCC",
+            "voyage_days": 38,
+            "description": "Cushing to Rotterdam VLCC",
+            "origin_spot": 70.0,
+            "origin_price": 70.0,
+            "dest_spot": 72.0,
+            "dest_fwd": 71.0,
+            "fwd_curve_effect": -1.0,
+            "freight": 1.5,
+            "freight_base": 1.5,
+            "freight_bwet_adjusted": False,
+            "port_cost": 0.2,
+            "finance_cost": 0.1,
+            "insurance_cost": 0.05,
+            "total_cost": 1.85,
+            "gross_margin": 1.0,
+            "net_margin": 0.85,
+            "net_margin_baseline": 0.5,
+            "breakeven_freight": 0.65,
+            "status": "open",
+            "status_near": "open",
+        }
+    ],
+    "n_open": 1,
+    "n_closed": 0,
+    "n_near": 0,
+    "hist_series": [],
+    "bwet": {
+        "bwet_close": 16.6,
+        "bwet_baseline": 16.6,
+        "scale_factor": 1.0,
+        "source": "static",
+        "bwet_date": None,
+    },
+    "matrix": [],
+    "matrix_origins": [],
+    "matrix_destinations": [],
+}
+
+_DISPERSION_FIXTURE = {
+    "name": "test_disp",
+    "strategy": "mean_reversion",
+    "stats": {
+        "total_return": 40000.0,
+        "ann_return": 4000.0,
+        "ann_volatility": 5000.0,
+        "sharpe": 0.76,
+        "max_drawdown": -7000.0,
+        "n_trades": 70,
+        "hit_rate": 0.56,
+        "n_years": 10.0,
+    },
+    "equity": [{"date": "2016-01-04", "value": 0.0}, {"date": "2026-01-01", "value": 40000.0}],
+    "price_5tc": [{"date": "2016-01-04", "value": 5000.0}],
+    "avg_dispersion": [{"date": "2016-01-04", "value": 1234.5}],
+}
+
+_STATIC_DIR = Path(__file__).parent.parent / "app" / "static"
+
+
+@pytest.fixture
+def static_routes_json():
+    """Seed the routes static JSON with a minimal fixture, restore afterwards."""
+    path = _STATIC_DIR / "routes_default.json"
+    original = path.read_bytes() if path.exists() else None
+    _STATIC_DIR.mkdir(exist_ok=True)
+    path.write_text(json.dumps(_ROUTES_FIXTURE))
+    yield path
+    if original is not None:
+        path.write_bytes(original)
+    else:
+        path.unlink(missing_ok=True)
+
+
+@pytest.fixture
+def static_dispersion_json():
+    """Seed the dispersion static JSON with a minimal fixture, restore afterwards."""
+    path = _STATIC_DIR / "dispersion_default.json"
+    original = path.read_bytes() if path.exists() else None
+    _STATIC_DIR.mkdir(exist_ok=True)
+    path.write_text(json.dumps(_DISPERSION_FIXTURE))
+    yield path
+    if original is not None:
+        path.write_bytes(original)
+    else:
+        path.unlink(missing_ok=True)

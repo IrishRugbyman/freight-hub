@@ -31,8 +31,8 @@ export const Route = createRootRoute({
         </div>
         <nav className="flex items-center">
           <NavItem to="/">Tracker</NavItem>
-          <NavItem disabled>Routes</NavItem>
-          <NavItem disabled>Dispersion</NavItem>
+          <NavItem to="/routes">Routes</NavItem>
+          <NavItem to="/dispersion">Dispersion</NavItem>
         </nav>
         <a
           href="https://quant.lbzgiu.xyz"

@@ -68,3 +68,36 @@ def test_empty_db_resilience(empty_client):
     # chokepoints still returns one row per region, all zero
     cps = empty_client.get("/api/chokepoints").json()
     assert all(c["total"] == 0 for c in cps)
+
+
+def test_routes_serves_static(client, static_routes_json):
+    r = client.get("/api/routes")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["name"] == "test_routes"
+    assert body["n_open"] == 1
+    assert len(body["routes"]) == 1
+    assert body["routes"][0]["id"] == "rt1"
+    assert body["routes"][0]["status"] == "open"
+
+
+def test_dispersion_serves_static(client, static_dispersion_json):
+    r = client.get("/api/dispersion")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["name"] == "test_disp"
+    assert body["stats"]["sharpe"] == 0.76
+    assert len(body["equity"]) == 2
+
+
+def test_dispersion_live(client):
+    r = client.get("/api/dispersion/live")
+    assert r.status_code == 200
+    rows = r.json()
+    # Either the live collector has data (non-empty list) or it has not run yet (empty).
+    # Either way the response shape must be valid.
+    for row in rows:
+        assert "date" in row
+        assert "segment" in row
+        assert "dispersion_nm" in row
+        assert "vessel_count" in row
