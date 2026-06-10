@@ -40,8 +40,9 @@ export function ControlsPanel({
   }
 
   return (
-    <Panel className="w-56">
-      <div className="flex items-center justify-between border-b border-border px-3 py-2">
+    <Panel className="flex w-56 max-h-[calc(100vh-5rem)] flex-col overflow-hidden">
+      {/* sticky header */}
+      <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-2">
         <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Controls</span>
         <button
           onClick={() => setOpen(false)}
@@ -52,18 +53,21 @@ export function ControlsPanel({
         </button>
       </div>
 
-      {/* Search */}
-      <div className="border-b border-border px-3 py-2">
-        <VesselSearch vessels={vessels} onSelect={onVesselSelect} />
-      </div>
+      {/* scrollable body */}
+      <div className="overflow-y-auto">
+        {/* Search */}
+        <div className="border-b border-border px-3 py-2">
+          <VesselSearch vessels={vessels} onSelect={onVesselSelect} />
+        </div>
 
-      {/* Filters */}
-      <FilterControls filters={filters} regions={regions} onChange={onFiltersChange} />
+        {/* Filters */}
+        <FilterControls filters={filters} regions={regions} onChange={onFiltersChange} />
 
-      {/* Layer toggles */}
-      <div className="border-t border-border px-3 py-2">
-        <div className="mb-2 text-[10px] uppercase tracking-wide text-muted-foreground">Layers</div>
-        <LayerToggles layers={layers} onChange={onLayersChange} />
+        {/* Layer toggles */}
+        <div className="border-t border-border px-3 py-2">
+          <div className="mb-2 text-[10px] uppercase tracking-wide text-muted-foreground">Layers</div>
+          <LayerToggles layers={layers} onChange={onLayersChange} />
+        </div>
       </div>
     </Panel>
   )
