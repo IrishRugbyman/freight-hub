@@ -48,7 +48,7 @@ npm run build      # tsc -b && vite build -> dist/ (nginx root)
 ## Deploy
 
 - `backend/freight-api.service` → systemd (`:8003`). `sudo systemctl restart freight-api` after backend changes.
-- `nginx-freight-hub.conf` → symlinked into sites-enabled; TLS via certbot (already issued). After a frontend change just `npm run build` (dist is the nginx root, no reload).
+- `nginx-freight.conf` → symlinked into sites-enabled; TLS via certbot (already issued). After a frontend change just `npm run build` (dist is the nginx root, no reload).
 - Cloudflare A record `freight.lbzgiu.xyz` → 178.104.244.177 (orange-cloud; certbot HTTP-01 passed through the proxy fine).
 
 ## Conventions
