@@ -123,6 +123,26 @@ export function VesselDetail({
         <Row label="Last seen" value={new Date(vessel.updated_ts + 'Z').toLocaleTimeString()} />
       </Section>
 
+      {/* External links */}
+      <div className="flex gap-2 border-t border-border/60 px-3 py-2">
+        <a
+          href={`https://www.marinetraffic.com/en/ais/details/ships/mmsi:${vessel.mmsi}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-[10px] text-primary hover:underline"
+        >
+          MarineTraffic
+        </a>
+        <a
+          href={`https://www.vesselfinder.com/?mmsi=${vessel.mmsi}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-[10px] text-primary hover:underline"
+        >
+          VesselFinder
+        </a>
+      </div>
+
       {/* Trail window toggle */}
       <div className="flex items-center gap-2 border-t border-border/60 px-3 py-2">
         <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Trail</span>
