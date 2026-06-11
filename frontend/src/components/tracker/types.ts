@@ -6,6 +6,8 @@ export interface LayerState {
   counts: boolean
   chokepoints: boolean
   eventPins: boolean
+  deckgl: boolean
+  heatmap: boolean
 }
 
 export const DEFAULT_LAYERS: LayerState = {
@@ -14,6 +16,8 @@ export const DEFAULT_LAYERS: LayerState = {
   counts: true,
   chokepoints: false,
   eventPins: true,
+  deckgl: false,
+  heatmap: false,
 }
 
 export type Filters = VesselFilters

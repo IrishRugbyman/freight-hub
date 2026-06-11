@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useMemo } from 'react'
 import { Search } from 'lucide-react'
 import type { Vessel } from '@/lib/api'
 
@@ -27,7 +27,7 @@ export function VesselSearch({
   const [open, setOpen] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  const results = searchVessels(vessels, query)
+  const results = useMemo(() => searchVessels(vessels, query), [vessels, query])
 
   function pick(v: Vessel) {
     onSelect(v)

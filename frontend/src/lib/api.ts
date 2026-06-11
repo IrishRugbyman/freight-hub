@@ -1,4 +1,5 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useRef } from 'react'
 
 // ---- Routes (transport-arb) ----
 
@@ -159,7 +160,52 @@ export function useVessels(filters: VesselFilters) {
     queryFn: () => getJSON<Vessel[]>(vesselsUrl(filters)),
     refetchInterval: REFETCH_MS,
     placeholderData: (prev) => prev,
+    retry: 3,
+    retryDelay: 5000,
   })
+}
+
+/**
+ * Opens an SSE connection to /api/stream and pushes vessel updates directly into
+ * the TanStack Query cache, bypassing the 60s polling interval.
+ * Falls back silently if EventSource is unsupported or the connection drops
+ * (the polling in useVessels remains the reliability backstop).
+ */
+export function useVesselStream(filters: VesselFilters, enabled: boolean) {
+  const queryClient = useQueryClient()
+  const esRef = useRef<EventSource | null>(null)
+
+  useEffect(() => {
+    if (!enabled || typeof EventSource === 'undefined') return
+
+    const es = new EventSource('/api/stream')
+    esRef.current = es
+
+    es.onmessage = (evt) => {
+      try {
+        const raw: Vessel[] = JSON.parse(evt.data)
+        // Apply the same filters that useVessels would apply server-side
+        const filtered = raw.filter((v) => {
+          if (filters.kind && v.kind !== filters.kind) return false
+          if (filters.segment && v.segment !== filters.segment) return false
+          if (filters.region && v.region !== filters.region) return false
+          return true
+        })
+        queryClient.setQueryData(['vessels', filters], filtered)
+      } catch {
+        // ignore malformed events
+      }
+    }
+
+    es.onerror = () => {
+      // EventSource auto-reconnects; no action needed
+    }
+
+    return () => {
+      es.close()
+      esRef.current = null
+    }
+  }, [enabled, filters.kind, filters.segment, filters.region, queryClient])
 }
 
 export interface TrackPoint {
@@ -351,7 +397,7 @@ export interface EventsResponse {
 
 const EVENTS_STALE = 2 * 60 * 1000  // 2 min
 
-export function useEvents(params?: { type?: string; days?: number; limit?: number }) {
+export function useEvents(params?: { type?: string; days?: number; limit?: number }, enabled = true) {
   const searchParams = new URLSearchParams()
   if (params?.type) searchParams.set('type', params.type)
   if (params?.days) searchParams.set('days', String(params.days))
@@ -361,5 +407,6 @@ export function useEvents(params?: { type?: string; days?: number; limit?: numbe
     queryKey: ['events', qs],
     queryFn: () => getJSON<EventsResponse>(`/api/events${qs ? '?' + qs : ''}`),
     staleTime: EVENTS_STALE,
+    enabled,
   })
 }

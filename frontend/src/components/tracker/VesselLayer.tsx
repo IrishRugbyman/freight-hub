@@ -94,6 +94,9 @@ export function VesselLayer({
     }
   }, [map, clustering, headingArrows]) // headingArrows here so icons rebuild on toggle
 
+  // Parsed updated_ts as ms - rebuilt when vessels update, read by the DR loop
+  const updatedMsRef = useRef<Map<number, number>>(new Map())
+
   // Diff vessel updates without tearing down the group (no flash)
   // Also stores latest vessel data in a ref so the DR loop can read it
   const vesselsRef = useRef<Vessel[]>(vessels)
@@ -103,6 +106,10 @@ export function VesselLayer({
     const markerMap = markerMapRef.current
 
     vesselsRef.current = vessels
+    // Cache parsed timestamps - avoids new Date() string parse on every DR tick
+    const updatedMs = new Map<number, number>()
+    for (const v of vessels) updatedMs.set(v.mmsi, Date.parse(v.updated_ts))
+    updatedMsRef.current = updatedMs
     const incoming = new Map(vessels.map((v) => [v.mmsi, v]))
 
     // Remove departed vessels
@@ -143,10 +150,11 @@ export function VesselLayer({
       }
       const markerMap = markerMapRef.current
       const now = Date.now()
+      const updatedMs = updatedMsRef.current
       for (const v of vesselsRef.current) {
         const marker = markerMap.get(v.mmsi)
         if (!marker) continue
-        const dtSec = (now - new Date(v.updated_ts).getTime()) / 1000
+        const dtSec = (now - (updatedMs.get(v.mmsi) ?? now)) / 1000
         const proj = projectPosition(v.lat, v.lon, v.sog, v.cog, dtSec)
         if (!proj) continue
         if (marker instanceof L.Marker || marker instanceof L.CircleMarker) {

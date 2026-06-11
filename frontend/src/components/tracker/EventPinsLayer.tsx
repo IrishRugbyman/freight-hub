@@ -47,7 +47,7 @@ function makeEventMarker(ev: AisEvent): L.Marker {
 
 export function EventPinsLayer({ visible }: { visible: boolean }) {
   const map = useMap()
-  const { data } = useEvents({ days: 2, limit: 100 })
+  const { data } = useEvents({ days: 2, limit: 100 }, visible)
 
   useEffect(() => {
     if (!visible || !data?.events.length) return

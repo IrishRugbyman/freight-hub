@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { Loader2 } from 'lucide-react'
-import { useMeta, useVessels, useVesselTrack, type Vessel } from '@/lib/api'
+import { useMeta, useVessels, useVesselStream, useVesselTrack, type Vessel } from '@/lib/api'
 import { Panel } from '@/components/ui/panel'
 import { ControlsPanel } from '@/components/tracker/ControlsPanel'
 import { CountsPanel } from '@/components/tracker/CountsPanel'
@@ -9,18 +9,47 @@ import { VesselDetail } from '@/components/tracker/VesselDetail'
 import { VesselMap } from '@/components/tracker/VesselMap'
 import { DEFAULT_LAYERS, type Filters, type LayerState } from '@/components/tracker/types'
 
-export const Route = createFileRoute('/')({ component: TrackerPage })
+export const Route = createFileRoute('/')({
+  validateSearch: (search: Record<string, unknown>) => ({
+    mmsi: typeof search.mmsi === 'number' ? search.mmsi : undefined,
+    lat: typeof search.lat === 'number' ? search.lat : undefined,
+    lon: typeof search.lon === 'number' ? search.lon : undefined,
+  }),
+  component: TrackerPage,
+})
 
 function TrackerPage() {
   const [filters, setFilters] = useState<Filters>({})
   const [layers, setLayers] = useState<LayerState>(DEFAULT_LAYERS)
   const [selected, setSelected] = useState<Vessel | null>(null)
   const [trailHours, setTrailHours] = useState<24 | 168>(24)
-  const [focusTarget, setFocusTarget] = useState<Vessel | null>(null)
+  const [focusTarget, setFocusTarget] = useState<{ lat: number; lon: number } | null>(null)
 
   const { data: vessels = [], isLoading, isError, dataUpdatedAt } = useVessels(filters)
+  useVesselStream(filters, layers.deckgl)
   const { data: meta } = useMeta()
   const { data: trailPoints } = useVesselTrack(selected?.mmsi ?? null, trailHours)
+
+  // URL params passed from the events page (mmsi, lat, lon)
+  const { mmsi: urlMmsi, lat: urlLat, lon: urlLon } = Route.useSearch()
+  const urlRef = useRef({ mmsi: urlMmsi, lat: urlLat, lon: urlLon, handled: false })
+
+  // Zoom to event location immediately on mount
+  useEffect(() => {
+    const { lat, lon } = urlRef.current
+    if (lat != null && lon != null) setFocusTarget({ lat, lon })
+  }, [])
+
+  // Once vessels load, select the vessel by mmsi from URL
+  useEffect(() => {
+    const p = urlRef.current
+    if (p.handled || p.mmsi == null || vessels.length === 0) return
+    const v = vessels.find((v) => v.mmsi === p.mmsi)
+    if (v) {
+      setSelected(v)
+      p.handled = true
+    }
+  }, [vessels])
 
   function handleSearchSelect(v: Vessel) {
     setSelected(v)

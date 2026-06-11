@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, Suspense, lazy } from 'react'
 import { MapContainer, TileLayer, ZoomControl, useMap } from 'react-leaflet'
 import type { Vessel, TrackPoint } from '@/lib/api'
 import type { LayerState } from './types'
@@ -8,10 +8,14 @@ import { TrailLayer } from './TrailLayer'
 import { EventPinsLayer } from './EventPinsLayer'
 import { colorFor } from '@/lib/segments'
 
-function MapFocuser({ target }: { target: Vessel | null | undefined }) {
+const DeckGLLayer = lazy(() =>
+  import('./DeckGLLayer').then((m) => ({ default: m.DeckGLLayer }))
+)
+
+function MapFocuser({ target }: { target: { lat: number; lon: number } | null | undefined }) {
   const map = useMap()
   useEffect(() => {
-    if (target) map.setView([target.lat, target.lon], 9, { animate: true })
+    if (target) map.setView([target.lat, target.lon], 12, { animate: true })
   }, [map, target])
   return null
 }
@@ -30,7 +34,7 @@ export function VesselMap({
   onSelect: (v: Vessel) => void
   trailVessel?: Vessel | null
   trailPoints?: TrackPoint[]
-  focusTarget?: Vessel | null
+  focusTarget?: { lat: number; lon: number } | null
 }) {
   return (
     <MapContainer
@@ -47,20 +51,34 @@ export function VesselMap({
         url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
       />
       <ZoomControl position="bottomright" />
-      <VesselLayer
-        vessels={vessels}
-        clustering={layers.clustering}
-        headingArrows={layers.headingArrows}
-        onSelect={onSelect}
-      />
-      {layers.chokepoints && <ChokepointLayer />}
-      {trailVessel && trailPoints && trailPoints.length > 0 && (
-        <TrailLayer
-          mmsi={trailVessel.mmsi}
-          points={trailPoints}
-          color={colorFor(trailVessel.kind, trailVessel.segment)}
-        />
+      {layers.deckgl ? (
+        <Suspense fallback={null}>
+          <DeckGLLayer
+            vessels={vessels}
+            showHeatmap={layers.heatmap}
+            onSelect={onSelect}
+            trailVessel={trailVessel}
+            trailPoints={trailPoints ?? []}
+          />
+        </Suspense>
+      ) : (
+        <>
+          <VesselLayer
+            vessels={vessels}
+            clustering={layers.clustering}
+            headingArrows={layers.headingArrows}
+            onSelect={onSelect}
+          />
+          {trailVessel && trailPoints && trailPoints.length > 0 && (
+            <TrailLayer
+              mmsi={trailVessel.mmsi}
+              points={trailPoints}
+              color={colorFor(trailVessel.kind, trailVessel.segment)}
+            />
+          )}
+        </>
       )}
+      {layers.chokepoints && <ChokepointLayer />}
       <EventPinsLayer visible={layers.eventPins} />
       <MapFocuser target={focusTarget} />
     </MapContainer>

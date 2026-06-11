@@ -8,6 +8,8 @@ The live dispersion series reads ais_vessel_dispersion from commo.duckdb via loa
 
 from __future__ import annotations
 
+import asyncio
+import json as _json
 import os
 import tempfile
 from datetime import UTC, date, datetime, timedelta
@@ -15,8 +17,10 @@ from pathlib import Path
 
 import pandas as pd
 from ais.regions import REGIONS
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import StreamingResponse
 from loaders.freight import load_ais_dispersion
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
@@ -72,6 +76,8 @@ limiter = Limiter(key_func=get_remote_address, default_limits=["240/minute"])
 app = FastAPI(title="freight-api", version="0.1.0")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, lambda r, e: _rate_limited())
+# Gzip large JSON responses (vessels payload is 1.5MB+ raw with 5000+ vessels)
+app.add_middleware(GZipMiddleware, minimum_size=2048)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://freight.lbzgiu.xyz", "http://localhost:5173"],
@@ -121,6 +127,14 @@ def vessels(kind: str | None = None, segment: str | None = None, region: str | N
     df = _live(" AND ".join(conds), params)
     if df.empty:
         return []
+    # Round to AIS-native resolution: cuts JSON size ~35% before gzip, lossless for display
+    df["lat"] = df["lat"].round(5)   # ~1.1 m precision
+    df["lon"] = df["lon"].round(5)
+    for col, nd in (("sog", 1), ("cog", 1), ("draught", 1)):
+        if col in df.columns:
+            df[col] = df[col].round(nd)
+    if "heading" in df.columns:
+        df["heading"] = df["heading"].round(0)
     df = df.astype(object).where(df.notna(), None)  # NaN -> None for pydantic
     cols = set(df.columns)
     return [
@@ -465,3 +479,46 @@ def events(
         )
 
     return EventsResponse(events=result_events, total=len(result_events))
+
+
+@app.get("/api/stream")
+async def stream_vessels(request: Request):
+    """SSE endpoint: emits all live vessels every 15 seconds.
+
+    Clients connect once and receive updates without re-polling. Falls back to the
+    normal /api/vessels polling if EventSource is not supported or the connection drops.
+    The X-Accel-Buffering: no header disables nginx proxy buffering for this response.
+    """
+
+    async def generate():
+        while True:
+            if await request.is_disconnected():
+                break
+
+            try:
+                df = await asyncio.to_thread(
+                    db.query,
+                    "SELECT mmsi, name, lat, lon, sog, cog, heading, destination, "
+                    "       ship_type, length_m, kind, segment, region, updated_ts, "
+                    "       imo, draught, nav_status, eta "
+                    "FROM live_positions "
+                    "WHERE updated_ts >= now() - INTERVAL 30 MINUTE",
+                )
+                if not df.empty:
+                    # Coerce timestamps to ISO strings for JSON serialisation
+                    df["updated_ts"] = df["updated_ts"].astype(str)
+                    records = df.where(pd.notna(df), None).to_dict("records")
+                    yield f"data: {_json.dumps(records)}\n\n"
+            except Exception:
+                pass
+
+            await asyncio.sleep(15)
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )

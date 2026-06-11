@@ -42,3 +42,13 @@ export function segmentsForKind(kind: Kind | '' | null | undefined): string[] {
   if (kind === 'bulk' || kind === 'tanker') return SEGMENTS_BY_KIND[kind]
   return [...SEGMENTS_BY_KIND.bulk, ...SEGMENTS_BY_KIND.tanker.filter((s) => !SEGMENTS_BY_KIND.bulk.includes(s))]
 }
+
+/** Convert a hex color string to an [R, G, B] tuple for deck.gl. */
+export function hexToRgb(hex: string): [number, number, number] {
+  const h = hex.replace('#', '')
+  return [
+    parseInt(h.substring(0, 2), 16),
+    parseInt(h.substring(2, 4), 16),
+    parseInt(h.substring(4, 6), 16),
+  ]
+}
