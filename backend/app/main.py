@@ -26,7 +26,7 @@ from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
-from . import db
+from . import db, equasis
 from .runner_dispersion import run_dispersion_default
 from .runner_routes import run_routes_default
 from .schemas import (
@@ -177,6 +177,16 @@ def vessel_track(mmsi: int, hours: int = 24):
         TrackPoint(ts=_iso(r.snapshot_ts), lat=r.lat, lon=r.lon, sog=r.sog)
         for r in df.itertuples()
     ]
+
+
+@app.get("/api/vessels/{imo}/equasis")
+def vessel_equasis(imo: int):
+    """Equasis registry data for a vessel by IMO number. Cached 12h."""
+    data = equasis.get_ship_info(imo)
+    if data is None:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=503, detail="Equasis unavailable")
+    return data
 
 
 @app.get("/api/chokepoints", response_model=list[ChokepointCount])

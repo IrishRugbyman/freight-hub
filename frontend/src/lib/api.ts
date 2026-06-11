@@ -397,6 +397,40 @@ export interface EventsResponse {
 
 const EVENTS_STALE = 2 * 60 * 1000  // 2 min
 
+// ---- Equasis registry data ----
+
+export interface EquasisData {
+  imo: number
+  ship_name?: string
+  flag?: string
+  flag_code?: string
+  call_sign?: string
+  gross_tonnage?: string
+  dwt?: string
+  ship_type?: string
+  year_built?: string
+  ship_status?: string
+  owner?: string
+  ism_manager?: string
+  ship_manager?: string
+  class_society?: string
+  pi_club?: string
+  detention_rate_pct?: number
+  paris_mou?: string
+  tokyo_mou?: string
+  uscg_targeting?: string
+}
+
+export function useEquasis(imo: number | null | undefined) {
+  return useQuery({
+    queryKey: ['equasis', imo],
+    queryFn: () => getJSON<EquasisData>(`/api/vessels/${imo}/equasis`),
+    enabled: imo != null,
+    staleTime: 12 * 60 * 60 * 1000, // 12h - Equasis data is static
+    retry: 1,
+  })
+}
+
 export function useEvents(params?: { type?: string; days?: number; limit?: number }, enabled = true) {
   const searchParams = new URLSearchParams()
   if (params?.type) searchParams.set('type', params.type)

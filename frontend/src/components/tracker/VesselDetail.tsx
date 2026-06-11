@@ -1,4 +1,5 @@
 import { X, Anchor, Navigation } from 'lucide-react'
+import { useEquasis } from '@/lib/api'
 import type { Vessel } from '@/lib/api'
 import { colorFor } from '@/lib/segments'
 
@@ -38,6 +39,22 @@ function Section({ children }: { children: React.ReactNode }) {
   return <div className="border-t border-border/60 px-3 py-2 space-y-0.5">{children}</div>
 }
 
+function MouBadge({ label, value }: { label: string; value?: string }) {
+  if (!value) return null
+  const color =
+    value === 'White'
+      ? 'text-emerald-400'
+      : value === 'Grey'
+        ? 'text-yellow-400'
+        : 'text-red-400'
+  return (
+    <span className="text-[10px]">
+      <span className="text-muted-foreground">{label} </span>
+      <span className={color}>{value}</span>
+    </span>
+  )
+}
+
 /** MarineTraffic-inspired vessel detail panel. */
 export function VesselDetail({
   vessel,
@@ -52,6 +69,7 @@ export function VesselDetail({
 }) {
   const color = colorFor(vessel.kind, vessel.segment)
   const anchored = isAnchored(vessel)
+  const { data: eq, isLoading: eqLoading } = useEquasis(vessel.imo)
 
   return (
     <div className="w-64">
@@ -122,6 +140,53 @@ export function VesselDetail({
         <Row label="Position" value={`${vessel.lat.toFixed(3)}, ${vessel.lon.toFixed(3)}`} />
         <Row label="Last seen" value={new Date(vessel.updated_ts + 'Z').toLocaleTimeString()} />
       </Section>
+
+      {/* Equasis registry data (only shown when IMO present) */}
+      {vessel.imo != null && (
+        <Section>
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">
+            Registry (Equasis)
+          </div>
+          {eqLoading && (
+            <div className="text-[10px] text-muted-foreground">Loading...</div>
+          )}
+          {eq && (
+            <>
+              <Row label="Owner" value={eq.owner} />
+              <Row label="ISM Manager" value={eq.ism_manager} />
+              <Row label="Class" value={eq.class_society} />
+              <Row label="P&I" value={eq.pi_club} />
+              <Row label="Flag" value={eq.flag} />
+              <Row label="Type" value={eq.ship_type} />
+              <Row label="Built" value={eq.year_built} />
+              <Row label="GT" value={eq.gross_tonnage} />
+              <Row label="DWT" value={eq.dwt} />
+              {eq.detention_rate_pct != null && (
+                <div className="flex items-baseline justify-between gap-3 py-0.5">
+                  <span className="text-xs text-muted-foreground">Detention</span>
+                  <span
+                    className={`text-right text-xs font-mono ${
+                      eq.detention_rate_pct >= 10
+                        ? 'text-red-400'
+                        : eq.detention_rate_pct >= 5
+                          ? 'text-yellow-400'
+                          : 'text-emerald-400'
+                    }`}
+                  >
+                    {eq.detention_rate_pct}%
+                  </span>
+                </div>
+              )}
+              {(eq.paris_mou || eq.tokyo_mou) && (
+                <div className="flex gap-3 py-0.5">
+                  <MouBadge label="Paris" value={eq.paris_mou} />
+                  <MouBadge label="Tokyo" value={eq.tokyo_mou} />
+                </div>
+              )}
+            </>
+          )}
+        </Section>
+      )}
 
       {/* External links */}
       <div className="flex gap-2 border-t border-border/60 px-3 py-2">

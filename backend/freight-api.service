@@ -16,6 +16,7 @@ Wants=network-online.target
 Type=simple
 User=lbzgiu
 WorkingDirectory=/home/lbzgiu/quant/freight/backend
+EnvironmentFile=-/home/lbzgiu/quant/freight/backend/.env
 ExecStart=/home/lbzgiu/quant/freight/backend/.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8003
 Restart=always
 RestartSec=5
