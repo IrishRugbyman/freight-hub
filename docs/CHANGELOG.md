@@ -1,5 +1,17 @@
 # Freight Hub Changelog
 
+## 2026-06-12 - Phase 50: Zero-downtime analytics build + vectorized zone detection
+
+**Tried:** Analytics build held an exclusive DuckDB write lock for the entire 7-10 min build window. All analytics API calls returned empty data during that time. Root cause: `_open_analytics()` opened a write connection at the start and held it until the last line.
+
+**Found:** First full run had 91MB AIS DB with 2,697 transit events, 2,723 anchored episodes, 5,184 AIS events, 7,413 vessel states. STS `apply(lambda r: _any_zone...)` was the biggest hot-path (Python row iteration on all slow tanker rows = O(n) with interpreter overhead). After the job finished, analytics page showed real data: 1,404 laden tankers, 1,599 ballast, 319 transits/24h.
+
+**Decision:** Analytics build now writes to `freight_analytics.new.duckdb`, atomically renames it to live at completion (`os.replace` = POSIX rename, atomic on same filesystem). Live DB is never locked during the build. Added `_in_any_zone_vec()` vectorized zone check using numpy broadcasting; replaced `apply` in `sts_candidates` and the per-row loop in `loitering_events`. 311 tests still passing.
+
+**Artifacts:** `backend/analytics/build.py` (`_open_analytics_scratch`, `_commit_scratch`, `run` -> `_run_inner` refactor), `backend/analytics/detect.py` (`_in_any_zone_vec`, vectorized STS/loiter zone checks).
+
+---
+
 ## 2026-06-12 - Phase 49: SOTA tabbed analytics layout
 
 **Tried:** Restructured the monolithic analytics page (3,624-line `AnalyticsCharts.tsx`, 41 cards, all in one chunk) into a 6-tab production layout inspired by Kpler/Vortexa/MarineTraffic.
