@@ -9,6 +9,10 @@ Usage:
     python -m analytics.build --reset      # wipe watermark and re-process all history
 
 The job is idempotent: all writes use INSERT OR REPLACE, so re-runs are safe.
+
+Concurrency strategy: the job writes to a scratch file (freight_analytics.new.duckdb),
+then atomically renames it over the live DB at the very end. This keeps the production
+file fully readable by the API throughout the ~5-10 min build window.
 """
 
 from __future__ import annotations
@@ -16,6 +20,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import shutil
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -152,11 +157,40 @@ def _ais_query(sql: str, params: list | None = None) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 
-def _open_analytics() -> duckdb.DuckDBPyConnection:
+_ANALYTICS_NEW = ANALYTICS_DB.with_suffix(".new.duckdb")
+
+
+def _open_analytics_scratch() -> duckdb.DuckDBPyConnection:
+    """Open a scratch DB for this build run.
+
+    Copies the current live DB (so historical data is preserved), then opens
+    the scratch file exclusively. The live DB is never locked during the build;
+    only at the very end do we atomically rename scratch -> live.
+    """
     ANALYTICS_DB.parent.mkdir(parents=True, exist_ok=True)
-    conn = duckdb.connect(str(ANALYTICS_DB))
+
+    # Remove any leftover scratch from a prior crashed run.
+    if _ANALYTICS_NEW.exists():
+        _ANALYTICS_NEW.unlink()
+
+    # Seed scratch with all existing historical data so INSERT OR REPLACE
+    # only needs to add/update incremental rows.
+    if ANALYTICS_DB.exists():
+        shutil.copy2(ANALYTICS_DB, _ANALYTICS_NEW)
+
+    conn = duckdb.connect(str(_ANALYTICS_NEW))
     conn.execute(_SCHEMA)
     return conn
+
+
+def _commit_scratch() -> None:
+    """Atomically replace the live analytics DB with the completed scratch file."""
+    if not _ANALYTICS_NEW.exists():
+        log.warning("scratch file missing at commit time; nothing to promote")
+        return
+    # On Linux, os.replace is POSIX rename(2) - atomic within the same filesystem.
+    os.replace(_ANALYTICS_NEW, ANALYTICS_DB)
+    log.info("scratch promoted to live: %s", ANALYTICS_DB)
 
 
 def _get_watermark(conn: duckdb.DuckDBPyConnection) -> datetime | None:
@@ -196,7 +230,18 @@ def _load_vessel_states(conn: duckdb.DuckDBPyConnection) -> dict:
 def run(reset: bool = False) -> None:
     log.info("analytics.build starting (AIS=%s, analytics=%s)", AIS_DB, ANALYTICS_DB)
 
-    conn = _open_analytics()
+    conn = _open_analytics_scratch()
+    try:
+        _run_inner(conn, reset)
+    except Exception:
+        conn.close()
+        # Clean up scratch so next run starts fresh.
+        if _ANALYTICS_NEW.exists():
+            _ANALYTICS_NEW.unlink()
+        raise
+
+
+def _run_inner(conn: duckdb.DuckDBPyConnection, reset: bool) -> None:
 
     if reset:
         log.info("--reset: clearing watermark")
@@ -225,6 +270,8 @@ def run(reset: bool = False) -> None:
 
     if df.empty:
         log.info("no new snapshots; nothing to process")
+        conn.close()
+        _commit_scratch()
         return
 
     # Coerce timestamps to datetime
@@ -471,13 +518,17 @@ def run(reset: bool = False) -> None:
         )
 
     # ------------------------------------------------------------------
-    # 8. Advance watermark
+    # 8. Advance watermark and promote scratch to live
     # ------------------------------------------------------------------
     new_watermark = max_ts_dt
     _set_watermark(conn, new_watermark)
     log.info("watermark advanced to %s", new_watermark)
 
     conn.close()
+
+    # Atomic swap: live DB was never locked during the build.
+    _commit_scratch()
+
     log.info(
         "analytics.build complete: transits=%d anchored=%d density=%d reroutes=%d dark_voyages=%d spoof=%d",
         len(transits), len(anchored), len(density_rows), len(reroutes), len(dark_voyages), len(spoof_events),
