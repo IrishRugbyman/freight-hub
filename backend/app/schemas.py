@@ -986,3 +986,22 @@ class OwnerIntelResponse(BaseModel):
     as_of: str
     total_owners: int
     rows: list[OwnerIntelRow]
+
+
+class ChokepointAnomalyRow(BaseModel):
+    chokepoint: str
+    recent_count: int
+    baseline_avg: float | None
+    baseline_std: float | None
+    z_score: float | None
+    pct_change: float | None
+    direction: str
+    window_hours: int
+    baseline_hours: int
+
+
+class ChokepointAnomalyResponse(BaseModel):
+    as_of: str
+    window_hours: int
+    baseline_hours: int
+    rows: list[ChokepointAnomalyRow]

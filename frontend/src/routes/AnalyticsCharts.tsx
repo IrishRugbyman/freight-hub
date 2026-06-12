@@ -14,7 +14,7 @@ import {
   YAxis,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion, useDestinationFlows, useMarketSummary, useVesselRiskScores, useChokepointHeatmap, useTradeLaneMatrix, useAnomalyWatchlist, useStsProximity, useRegionMomentum, useEventRateTimeline, useTransitRateTimeline, useAnchorageOccupancy, useStsOffenders, useFleetAtTime, useDestinationChanges, useOwnerIntelligence } from '@/lib/api'
+import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion, useDestinationFlows, useMarketSummary, useVesselRiskScores, useChokepointHeatmap, useTradeLaneMatrix, useAnomalyWatchlist, useStsProximity, useRegionMomentum, useEventRateTimeline, useTransitRateTimeline, useAnchorageOccupancy, useStsOffenders, useFleetAtTime, useDestinationChanges, useOwnerIntelligence, useChokepointAnomaly } from '@/lib/api'
 import type { RiskEventItem } from '@/lib/api'
 
 const CHOKEPOINTS = [
@@ -3101,6 +3101,126 @@ export function OwnerIntelligenceCard() {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Phase 44: Chokepoint Throughput Anomaly
+// ---------------------------------------------------------------------------
+
+const CP_LABEL: Record<string, string> = {
+  suez: 'Suez',
+  bosphorus_dardanelles: 'Bosphorus',
+  strait_of_hormuz: 'Hormuz',
+  singapore_malacca: 'Malacca',
+  dover_channel: 'Dover',
+  gibraltar: 'Gibraltar',
+  cape_good_hope: 'Cape',
+  lombok: 'Lombok',
+  sunda: 'Sunda',
+}
+
+function anomalyBadge(direction: string, zScore: number | null, pctChange: number | null) {
+  if (direction === 'high') {
+    return (
+      <span className="rounded bg-red-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-red-400">
+        +{pctChange != null ? Math.round(pctChange) + '%' : 'HIGH'} z={zScore?.toFixed(1)}
+      </span>
+    )
+  }
+  if (direction === 'low') {
+    return (
+      <span className="rounded bg-blue-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-blue-400">
+        {pctChange != null ? Math.round(pctChange) + '%' : 'LOW'} z={zScore?.toFixed(1)}
+      </span>
+    )
+  }
+  if (direction === 'no_baseline') {
+    return <span className="rounded bg-muted/30 px-1.5 py-0.5 text-[10px] text-muted-foreground">new</span>
+  }
+  return null
+}
+
+export function ChokepointAnomalyCard() {
+  const [windowHours, setWindowHours] = useState(6)
+  const [baselineHours, setBaselineHours] = useState(48)
+  const { data, isLoading } = useChokepointAnomaly(windowHours, baselineHours)
+  const rows = data?.rows ?? []
+  const anomalies = rows.filter(r => r.direction === 'high' || r.direction === 'low')
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex flex-wrap items-center justify-between gap-2">
+          <span>Chokepoint Traffic Anomaly</span>
+          <div className="flex flex-wrap gap-2 text-sm font-normal">
+            <select
+              className="rounded border border-border bg-background px-2 py-1 text-xs"
+              value={windowHours}
+              onChange={e => setWindowHours(Number(e.target.value))}
+            >
+              <option value={3}>3h window</option>
+              <option value={6}>6h window</option>
+              <option value={12}>12h window</option>
+            </select>
+            <select
+              className="rounded border border-border bg-background px-2 py-1 text-xs"
+              value={baselineHours}
+              onChange={e => setBaselineHours(Number(e.target.value))}
+            >
+              <option value={24}>24h baseline</option>
+              <option value={48}>48h baseline</option>
+              <option value={168}>7d baseline</option>
+            </select>
+          </div>
+        </CardTitle>
+        {data && (
+          <p className="text-xs text-muted-foreground">
+            Last {data.window_hours}h vs {data.baseline_hours}h baseline (Z {'≥'} 2 = anomaly).
+            {anomalies.length > 0
+              ? ` ${anomalies.length} chokepoint${anomalies.length > 1 ? 's' : ''} outside normal range.`
+              : ' All chokepoints within normal range.'}
+          </p>
+        )}
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="h-32 animate-pulse rounded bg-muted/40" />
+        ) : rows.length === 0 ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">No transit data available.</p>
+        ) : (
+          <div className="space-y-1.5">
+            {rows.map(row => {
+              const pct = row.baseline_avg != null && row.baseline_avg > 0
+                ? row.recent_count / row.baseline_avg
+                : null
+              const barWidth = pct != null ? Math.min(100, Math.round(pct * 50)) : 0
+              return (
+                <div key={row.chokepoint} className="grid grid-cols-[100px_1fr_auto] items-center gap-2">
+                  <span className="text-xs font-medium">{CP_LABEL[row.chokepoint] ?? row.chokepoint.replace(/_/g, ' ')}</span>
+                  <div className="relative h-3 overflow-hidden rounded-full bg-muted/30">
+                    <div
+                      className={`h-full rounded-full transition-all ${row.direction === 'high' ? 'bg-red-500/60' : row.direction === 'low' ? 'bg-blue-500/40' : 'bg-primary/50'}`}
+                      style={{ width: `${barWidth}%` }}
+                    />
+                    {row.baseline_avg != null && (
+                      <div className="absolute inset-y-0 left-1/2 w-px bg-muted-foreground/40" title="baseline avg" />
+                    )}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1.5 text-right text-xs tabular-nums">
+                    <span className="font-semibold">{row.recent_count}</span>
+                    {row.baseline_avg != null && (
+                      <span className="text-muted-foreground">/ {row.baseline_avg.toFixed(1)} avg</span>
+                    )}
+                    {anomalyBadge(row.direction, row.z_score, row.pct_change)}
+                  </div>
+                </div>
+              )
+            })}
           </div>
         )}
       </CardContent>

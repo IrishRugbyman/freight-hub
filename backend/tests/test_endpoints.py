@@ -3676,3 +3676,161 @@ def test_owner_intel_min_vessels_filter(owner_intel_client):
     d = r.json()
     for row in d["rows"]:
         assert row["vessel_count"] >= 2
+
+
+# ---------------------------------------------------------------------------
+# Phase 44: Chokepoint Throughput Anomaly Detection
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def chokepoint_anomaly_client(tmp_path, monkeypatch):
+    """Fixture: transit_events with high activity at suez (recent spike) and normal elsewhere."""
+    import duckdb
+    from fastapi.testclient import TestClient
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+
+    ais_file = tmp_path / "ais_ca.duckdb"
+    conn = duckdb.connect(str(ais_file))
+    conn.execute("""
+    CREATE TABLE live_positions (
+        mmsi BIGINT PRIMARY KEY, name VARCHAR, lat DOUBLE, lon DOUBLE,
+        sog DOUBLE, cog DOUBLE, heading DOUBLE, destination VARCHAR,
+        ship_type INTEGER, length_m DOUBLE, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, updated_ts TIMESTAMP,
+        imo BIGINT, draught DOUBLE, nav_status INTEGER, eta VARCHAR
+    );
+    CREATE TABLE ais_snapshots (
+        snapshot_ts TIMESTAMP, mmsi BIGINT, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, lat DOUBLE, lon DOUBLE, ship_type INTEGER, length_m DOUBLE,
+        sog DOUBLE, nav_status INTEGER, draught DOUBLE, destination VARCHAR,
+        PRIMARY KEY (snapshot_ts, mmsi)
+    );
+    CREATE TABLE vessels (
+        mmsi BIGINT PRIMARY KEY, imo BIGINT, name VARCHAR, flag VARCHAR,
+        flag_iso2 VARCHAR, mid INTEGER, call_sign VARCHAR, vessel_type VARCHAR,
+        dwt INTEGER, grt INTEGER, build_year INTEGER, length_m DOUBLE, beam_m DOUBLE,
+        owner VARCHAR, manager VARCHAR, class_society VARCHAR, enriched_at TIMESTAMP, equasis_ok BOOLEAN
+    );
+    """)
+    conn.close()
+
+    an_file = tmp_path / "analytics_ca.duckdb"
+    an_conn = duckdb.connect(str(an_file))
+    an_conn.execute("""
+    CREATE TABLE meta_watermark (key VARCHAR PRIMARY KEY, ts TIMESTAMP);
+    CREATE TABLE ais_events (
+        event_id VARCHAR PRIMARY KEY, type VARCHAR, mmsi BIGINT, mmsi2 BIGINT,
+        start_ts TIMESTAMP, end_ts TIMESTAMP, lat DOUBLE, lon DOUBLE,
+        region VARCHAR, kind VARCHAR, segment VARCHAR, details VARCHAR
+    );
+    CREATE TABLE transit_events (
+        mmsi BIGINT, chokepoint VARCHAR, entered_ts TIMESTAMP, exited_ts TIMESTAMP,
+        direction VARCHAR, kind VARCHAR, segment VARCHAR, laden BOOLEAN,
+        PRIMARY KEY (mmsi, chokepoint, entered_ts)
+    );
+    CREATE TABLE anchored_episodes (
+        mmsi BIGINT, zone VARCHAR, start_ts TIMESTAMP, end_ts TIMESTAMP,
+        kind VARCHAR, segment VARCHAR, PRIMARY KEY (mmsi, zone, start_ts)
+    );
+    CREATE TABLE fleet_density (
+        ts TIMESTAMP, region VARCHAR, kind VARCHAR, segment VARCHAR,
+        laden_count INTEGER, ballast_count INTEGER, unknown_count INTEGER,
+        PRIMARY KEY (ts, region, kind, segment)
+    );
+    CREATE TABLE vessel_state (
+        mmsi BIGINT PRIMARY KEY, max_draught_seen DOUBLE, last_draught DOUBLE,
+        laden VARCHAR, updated_ts TIMESTAMP
+    );
+    """)
+    # Baseline: suez with varying hourly counts (1-3) to produce non-zero std
+    # so that z_score can be computed
+    baseline_entries = []
+    mmsi_counter = 9000
+    for h in range(3, 27):  # 3-27h ago = inside baseline (outside 2h recent window)
+        # alternate 1, 2, 3 vessels per hour to produce variance
+        count = (h % 3) + 1
+        for v in range(count):
+            baseline_entries.append((
+                mmsi_counter, "suez", now - timedelta(hours=h + 0.1 + v * 0.01),
+                now - timedelta(hours=h - 0.1 + 0.5 + v * 0.01), "N", "tanker", "VLCC", True
+            ))
+            mmsi_counter += 1
+    # Recent: suez 20 vessels in last 2h (massive spike vs baseline avg of 2)
+    for v in range(20):
+        baseline_entries.append((
+            8000 + v, "suez", now - timedelta(hours=1.0, minutes=v),
+            now - timedelta(hours=0.5, minutes=v), "N", "tanker", "VLCC", True
+        ))
+    # Dover: varying 2-4 per hour for baseline, 0 recent (should show as low)
+    for h in range(3, 27):
+        count = (h % 3) + 2
+        for v in range(count):
+            baseline_entries.append((
+                7000 + h * 10 + v, "dover_channel", now - timedelta(hours=h + 0.1 + v * 0.01),
+                now - timedelta(hours=h - 0.1 + 0.5 + v * 0.01), "N", "bulk", "Capesize", False
+            ))
+    an_conn.executemany(
+        "INSERT INTO transit_events VALUES (?,?,?,?,?,?,?,?)",
+        baseline_entries,
+    )
+    an_conn.close()
+
+    reg_file = tmp_path / "reg_ca.duckdb"
+    duckdb.connect(str(reg_file)).execute("""
+    CREATE TABLE vessel_registry (
+        imo BIGINT PRIMARY KEY, ship_name VARCHAR, flag VARCHAR, flag_code VARCHAR,
+        call_sign VARCHAR, gross_tonnage INTEGER, dwt INTEGER, ship_type VARCHAR,
+        year_built INTEGER, ship_status VARCHAR, owner VARCHAR, ism_manager VARCHAR,
+        ship_manager VARCHAR, class_society VARCHAR, pi_club VARCHAR,
+        detention_rate_pct DOUBLE, paris_mou VARCHAR, tokyo_mou VARCHAR,
+        uscg_targeting VARCHAR, fetched_ts TIMESTAMP, fetch_ok BOOLEAN,
+        risk_score INTEGER, risk_indicators VARCHAR, ofac_sanctioned BOOLEAN
+    );
+    """).close()
+
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
+    monkeypatch.setenv("ANALYTICS_DB", str(an_file))
+    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
+
+    from app.main import app as freight_app
+    return TestClient(freight_app)
+
+
+def test_chokepoint_anomaly_structure(chokepoint_anomaly_client):
+    r = chokepoint_anomaly_client.get("/api/analytics/chokepoint-anomaly")
+    assert r.status_code == 200
+    d = r.json()
+    assert "rows" in d and "window_hours" in d and "baseline_hours" in d
+    for row in d["rows"]:
+        assert "chokepoint" in row and "recent_count" in row and "direction" in row
+
+
+def test_chokepoint_anomaly_detects_spike(chokepoint_anomaly_client):
+    r = chokepoint_anomaly_client.get("/api/analytics/chokepoint-anomaly?window_hours=2&baseline_hours=24")
+    d = r.json()
+    suez = next(row for row in d["rows"] if row["chokepoint"] == "suez")
+    assert suez["recent_count"] == 20
+    assert suez["z_score"] is not None
+    assert suez["z_score"] > 2.0
+    assert suez["direction"] == "high"
+
+
+def test_chokepoint_anomaly_detects_low(chokepoint_anomaly_client):
+    r = chokepoint_anomaly_client.get("/api/analytics/chokepoint-anomaly?window_hours=2&baseline_hours=24")
+    d = r.json()
+    dover = next(row for row in d["rows"] if row["chokepoint"] == "dover_channel")
+    assert dover["recent_count"] == 0
+    assert dover["z_score"] is not None
+    assert dover["z_score"] < -2.0
+    assert dover["direction"] == "low"
+
+
+def test_chokepoint_anomaly_sorted_by_magnitude(chokepoint_anomaly_client):
+    r = chokepoint_anomaly_client.get("/api/analytics/chokepoint-anomaly?window_hours=2&baseline_hours=24")
+    d = r.json()
+    rows_with_z = [row for row in d["rows"] if row["z_score"] is not None]
+    if len(rows_with_z) >= 2:
+        z_magnitudes = [abs(row["z_score"]) for row in rows_with_z]
+        assert z_magnitudes == sorted(z_magnitudes, reverse=True)

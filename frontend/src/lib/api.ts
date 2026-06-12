@@ -1641,3 +1641,34 @@ export function useOwnerIntelligence(minVessels = 2, limit = 50) {
     refetchInterval: 10 * 60 * 1000,
   })
 }
+
+export interface ChokepointAnomalyRow {
+  chokepoint: string
+  recent_count: number
+  baseline_avg: number | null
+  baseline_std: number | null
+  z_score: number | null
+  pct_change: number | null
+  direction: string
+  window_hours: number
+  baseline_hours: number
+}
+
+export interface ChokepointAnomalyResponse {
+  as_of: string
+  window_hours: number
+  baseline_hours: number
+  rows: ChokepointAnomalyRow[]
+}
+
+export function useChokepointAnomaly(windowHours = 6, baselineHours = 48) {
+  return useQuery({
+    queryKey: ['chokepoint-anomaly', windowHours, baselineHours],
+    queryFn: () =>
+      getJSON<ChokepointAnomalyResponse>(
+        `/api/analytics/chokepoint-anomaly?window_hours=${windowHours}&baseline_hours=${baselineHours}`,
+      ),
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+  })
+}

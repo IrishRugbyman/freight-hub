@@ -117,6 +117,8 @@ from .schemas import (
     DestinationChangesResponse,
     OwnerIntelRow,
     OwnerIntelResponse,
+    ChokepointAnomalyRow,
+    ChokepointAnomalyResponse,
 )
 
 _STATIC = Path(__file__).parent / "static"
@@ -4032,5 +4034,122 @@ def analytics_owner_intelligence(min_vessels: int = 2, min_risk: int = 0, limit:
     return OwnerIntelResponse(
         as_of=now_dt.isoformat(),
         total_owners=len(owners),
+        rows=rows,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase 44: Chokepoint Throughput Anomaly Detection
+# ---------------------------------------------------------------------------
+
+@app.get("/api/analytics/chokepoint-anomaly", response_model=ChokepointAnomalyResponse)
+def analytics_chokepoint_anomaly(window_hours: int = 6, baseline_hours: int = 48):
+    """Compare recent chokepoint transit rate vs historical baseline.
+
+    window_hours: recent period to measure (default 6h).
+    baseline_hours: historical period for baseline (default 48h).
+    Returns Z-score and pct_change per chokepoint; flags high/low/normal.
+    """
+    import math
+
+    window_hours = max(1, min(window_hours, 24))
+    baseline_hours = max(6, min(baseline_hours, 336))
+    now_dt = datetime.now(UTC).replace(tzinfo=None)
+    window_start = now_dt - timedelta(hours=window_hours)
+    baseline_start = now_dt - timedelta(hours=window_hours + baseline_hours)
+
+    # Recent transits per chokepoint
+    recent_df = db.query(
+        "SELECT chokepoint, count(*) AS cnt "
+        "FROM transit_events "
+        "WHERE entered_ts >= ? "
+        "GROUP BY chokepoint",
+        [window_start],
+        db=db.analytics_db_path(),
+    )
+
+    # Baseline: hourly bucket counts per chokepoint
+    baseline_df = db.query(
+        "SELECT chokepoint, "
+        "  DATE_TRUNC('hour', entered_ts) AS hr, "
+        "  count(*) AS cnt "
+        "FROM transit_events "
+        "WHERE entered_ts >= ? AND entered_ts < ? "
+        "GROUP BY 1, 2",
+        [baseline_start, window_start],
+        db=db.analytics_db_path(),
+    )
+
+    recent_map: dict[str, int] = {}
+    if not recent_df.empty:
+        for _, r in recent_df.iterrows():
+            recent_map[str(r["chokepoint"])] = int(r["cnt"])
+
+    # Build per-chokepoint baseline stats
+    baseline_stats: dict[str, tuple[float, float]] = {}
+    if not baseline_df.empty:
+        for cp, grp in baseline_df.groupby("chokepoint"):
+            counts = grp["cnt"].astype(float).tolist()
+            n = len(counts)
+            if n == 0:
+                continue
+            avg = sum(counts) / n
+            variance = sum((c - avg) ** 2 for c in counts) / n
+            std = math.sqrt(variance)
+            baseline_stats[str(cp)] = (avg, std)
+
+    # All chokepoints seen in either window
+    all_cps = sorted(set(list(recent_map.keys()) + list(baseline_stats.keys())))
+
+    rows = []
+    for cp in all_cps:
+        recent_count = recent_map.get(cp, 0)
+        stats = baseline_stats.get(cp)
+        if stats is not None:
+            baseline_avg, baseline_std = stats
+            if baseline_std > 0:
+                z = (recent_count - baseline_avg) / baseline_std
+                z_score = round(max(-5.0, min(5.0, z)), 2)
+            else:
+                z_score = None
+            pct_change = round((recent_count - baseline_avg) / max(baseline_avg, 0.01) * 100, 1) if baseline_avg > 0 else None
+        else:
+            baseline_avg = None
+            baseline_std = None
+            z_score = None
+            pct_change = None
+
+        if z_score is not None:
+            if z_score >= 2.0:
+                direction = "high"
+            elif z_score <= -2.0:
+                direction = "low"
+            else:
+                direction = "normal"
+        elif recent_count > 0:
+            direction = "no_baseline"
+        else:
+            direction = "normal"
+
+        rows.append(
+            ChokepointAnomalyRow(
+                chokepoint=cp,
+                recent_count=recent_count,
+                baseline_avg=round(baseline_avg, 2) if baseline_avg is not None else None,
+                baseline_std=round(baseline_std, 2) if baseline_std is not None else None,
+                z_score=z_score,
+                pct_change=pct_change,
+                direction=direction,
+                window_hours=window_hours,
+                baseline_hours=baseline_hours,
+            )
+        )
+
+    rows.sort(key=lambda r: (r.z_score is None, -(r.z_score or 0) ** 2))
+
+    return ChokepointAnomalyResponse(
+        as_of=now_dt.isoformat(),
+        window_hours=window_hours,
+        baseline_hours=baseline_hours,
         rows=rows,
     )
