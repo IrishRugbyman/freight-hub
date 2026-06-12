@@ -414,6 +414,235 @@ just serves JS.*
 
 ---
 
+## Phase 5 - Vessel Registry: persistent Equasis store + enrichment crawler
+
+*Goal: every IMO-bearing vessel in the live fleet has its Equasis registry data (flag,
+owner, class, P&I, detention, MOU status) stored in a queryable database, refreshed
+automatically, instead of scraped one-at-a-time into an in-process cache.*
+*Depends on: the existing Equasis integration (`backend/app/equasis.py`, commit f4b6d46).*
+*Estimated effort: 1-2 sessions.*
+
+### Why
+
+The current `/api/vessels/{imo}/equasis` endpoint scrapes on click and caches in
+process: the cache dies on every restart, only vessels someone clicked are ever
+fetched, and nothing can be filtered or aggregated. A fleet explorer (Phase 6) and risk
+scoring (Phase 7) need the whole fleet's registry data in SQL.
+
+### Architecture
+
+New batch crawler `backend/registry/crawl.py` run by a systemd timer. It is the SINGLE
+WRITER of a new `backend/data/vessel_registry.duckdb` (same ownership pattern as the
+analytics job: collector owns ais_positions, analytics job owns freight_analytics,
+crawler owns vessel_registry, freight-api reads all three read-only with lock-retry).
+
+Crawl policy (politeness is mandatory, this is someone else's free service):
+- One Equasis request every 6-10 s (randomized jitter), max ~200 ships per run.
+- Timer every 2 h => full ~3,000-IMO fleet covered in roughly 1-2 days, then steady
+  state refresh.
+- Priority order each run: (1) IMOs currently in `live_positions` never fetched,
+  (2) rows with `fetch_ok = false` older than 7 days (retry), (3) rows older than
+  30 days (refresh, registry data drifts slowly).
+- Reuse `equasis.EquasisClient` (login/re-login/session logic already works). Move the
+  module to a shared location importable by both the API and the crawler if needed.
+
+### Database (vessel_registry.duckdb)
+
+```
+vessel_registry
+  imo BIGINT PRIMARY KEY,
+  ship_name VARCHAR, flag VARCHAR, flag_code VARCHAR, call_sign VARCHAR,
+  gross_tonnage INTEGER, dwt INTEGER,            -- cast to INT at write time (currently strings)
+  ship_type VARCHAR, year_built INTEGER, ship_status VARCHAR,
+  owner VARCHAR, ism_manager VARCHAR, ship_manager VARCHAR,
+  class_society VARCHAR, pi_club VARCHAR,
+  detention_rate_pct DOUBLE, paris_mou VARCHAR, tokyo_mou VARCHAR, uscg_targeting VARCHAR,
+  fetched_ts TIMESTAMP, fetch_ok BOOLEAN         -- fetch_ok=false rows record failed lookups
+```
+
+### Task Checklist
+
+#### Crawler
+
+- [ ] `backend/registry/__init__.py` + `crawl.py`: open ais_positions read-only to list
+      candidate IMOs (`SELECT DISTINCT imo FROM live_positions WHERE imo IS NOT NULL`),
+      apply the priority policy above, scrape via `equasis.get_ship_info`, cast
+      gross_tonnage/dwt/year_built to int (None on failure), `INSERT OR REPLACE` into
+      vessel_registry. Sleep 6-10 s (random.uniform) between requests. Log a one-line
+      summary (n_new, n_refreshed, n_failed) per run.
+- [ ] Failed scrape (None or parse-empty): still write the row with `fetch_ok = false`
+      and `fetched_ts = now` so it is not retried every run.
+- [ ] `backend/freight-registry.service` (Type=oneshot, `.venv/bin/python -m
+      registry.crawl`, WorkingDirectory=backend, EnvironmentFile for the credentials) +
+      `freight-registry.timer` (OnCalendar 2-hourly, Persistent=true).
+      `sudo systemctl enable --now freight-registry.timer`.
+- [ ] pytest for the pure parts (priority ordering, int casting, upsert idempotence)
+      with a seeded temp registry DB. Do NOT hit equasis.org in tests: monkeypatch
+      `get_ship_info`.
+
+#### API
+
+- [ ] Add `REGISTRY_DB` path to `app/db.py` (env-overridable for tests), same lock-retry
+      read pattern.
+- [ ] Rework `GET /api/vessels/{imo}/equasis`: read vessel_registry first; if the row
+      exists and `fetch_ok`, return it. On miss, fall back to the existing live scrape +
+      in-process cache (do NOT write the DB from the API: single-writer rule; the
+      crawler will persist it within 2 h). Existing response shape stays unchanged so
+      the frontend needs no edits.
+- [ ] pytest: registry-hit path, registry-miss fallback path, fetch_ok=false treated as
+      miss.
+
+#### Definition of Done
+
+- [ ] First manual run (`.venv/bin/python -m registry.crawl --limit 20` for a smoke
+      test) populates 20 rows; timer enabled; after a day the registry covers the
+      large majority of IMO-bearing live vessels.
+- [ ] Detail panel still shows Equasis data, now instantly for crawled vessels.
+- [ ] All pytest green. Commit, update CHANGELOG.
+
+---
+
+## Phase 6 - Fleet Explorer: the no-map data page
+
+*Goal: a `/fleet` page where the whole tracked fleet is a filterable, sortable,
+exportable table: show me every Barbados-flagged tanker, every vessel of a given owner,
+everything classed by a non-IACS society, every Tokyo-MOU-grey flag, sorted by
+detention rate.*
+*Depends on: Phase 5 (registry DB).*
+*Estimated effort: 1-2 sessions.*
+
+### What's New (user-visible)
+
+- New nav entry "Fleet". Page = filter bar + summary strip + data table. No map.
+- Filters: free-text search (name/IMO/MMSI/owner), flag (dropdown with counts), owner
+  (typeahead), class society, P&I club, Paris/Tokyo MOU colour, kind, segment, year
+  built range, DWT range, detention rate >= X, live-only toggle (currently on the map
+  vs everything ever registered).
+- Sortable columns; pagination (100/page, server-side).
+- Summary strip above the table recomputed for the current filter: vessel count, total
+  DWT, average age, detention-rate distribution, top 5 flags / owners as clickable
+  chips (clicking adds the filter).
+- Row click: focus that vessel on the tracker map (reuse the existing
+  mmsi/lat/lon URL-param navigation built for the Events page).
+- CSV export of the current filtered set.
+
+### API Routes
+
+- `GET /api/fleet` - params: `q, flag, owner, class_society, pi_club, paris_mou,
+  tokyo_mou, kind, segment, built_min, built_max, dwt_min, dwt_max, detention_min,
+  live_only, sort, order, page`. Implementation: registry LEFT JOINed with
+  live_positions on imo (joining in SQL across two DuckDB files: `ATTACH ... (READ_ONLY)`
+  both, or read both into pandas and merge - pick whichever fits `db.py` cleanest).
+  Returns `{total, page, rows: [...]}` where rows carry both registry fields and live
+  fields (lat/lon/region/sog when the vessel is currently tracked).
+- `GET /api/fleet/facets` - distinct value + count lists for the dropdown filters
+  (flags, class societies, P&I clubs, MOU colours; owners top-200 by vessel count,
+  full owner list is typeahead via `q` on /api/fleet).
+- `GET /api/fleet/export` - same filters, streams `text/csv`.
+
+### Task Checklist
+
+#### API
+
+- [ ] Schemas + the three endpoints. Build the WHERE clause from params with proper
+      parameter binding (no string interpolation of user input into SQL).
+- [ ] pytest: seed both temp DBs (registry + live), assert each filter narrows
+      correctly, sort works, pagination math, facet counts, CSV header row.
+
+#### Frontend
+
+- [ ] New route `src/routes/fleet.tsx` (regen routeTree: `npx vite build
+      --emptyOutDir=false`). Enable nav entry in `__root.tsx`.
+- [ ] Filter state in URL search params (TanStack Router `validateSearch`) so filtered
+      views are shareable/bookmarkable.
+- [ ] Plain table (no new table library; ~20 columns max, 100 rows/page renders fine),
+      sticky header, MOU colours reuse the `MouBadge` idea, detention colour-coding
+      reuses the VesselDetail thresholds. Loading/empty states.
+- [ ] Facet dropdowns show counts ("Liberia (412)"). Owner field = debounced text input.
+- [ ] Summary strip + clickable top-flag/top-owner chips.
+- [ ] "Show on map" per row -> navigate to `/` with the existing focus params (only for
+      rows with live positions; otherwise the cell is blank).
+- [ ] Export button hits `/api/fleet/export` with current params.
+
+#### Definition of Done
+
+- [ ] Filter flag=Barbados: table shows exactly the Barbados-flagged vessels, summary
+      strip matches, CSV downloads the same rows.
+- [ ] Filter by a top-5 owner chip, then row-click jumps to the vessel on the map.
+- [ ] pytest + vitest green, `npm run build` clean. Commit, CHANGELOG.
+
+---
+
+## Phase 7 - Risk scoring: shadow-fleet indicators (innovation)
+
+*Goal: a transparent, documented 0-100 risk score per vessel combining registry red
+flags with the Phase 3 behavioural events, surfaced on the detail panel, as a Fleet
+Explorer filter, and as a "High risk vessels" view.*
+*Depends on: Phases 3 (events), 5 (registry), 6 (explorer).*
+*Estimated effort: 1-2 sessions.*
+
+### Why this is the differentiator
+
+This is exactly what commercial maritime-intelligence vendors sell: combining static
+registry weakness (no real P&I, non-IACS class, grey/black flag, old tanker) with
+behavioural anomalies (AIS gaps, loitering, STS transfers) to flag likely shadow-fleet
+/ sanctions-evasion candidates. All inputs are already owned: no new data source.
+
+### Scoring (pure function, weights as constants, fully documented in the UI)
+
+Indicators (each contributes points; tune weights after eyeballing results):
+- Tanker AND age >= 15 years (shadow fleet skews old)
+- `pi_club` missing OR not one of the 12 International Group clubs (static list in code)
+- `class_society` does not contain "(IACS)" (Equasis already labels IACS members)
+- Flag Paris MOU grey (+) or black (++); same for Tokyo MOU
+- `detention_rate_pct` >= 5 (+) or >= 10 (++)
+- Behavioural, from ais_events last 90 days: each gap event (+), each STS event (+),
+  each loiter event (small +); cap the behavioural contribution.
+- Owner is a single-vessel owner (count of imo per owner == 1 in registry): small +.
+  One-ship shell companies are the classic shadow-fleet ownership pattern.
+
+Honest framing rule: the UI must call these "risk indicators", never "sanctions
+violator". Each vessel's score page lists exactly which indicators fired. No synthetic
+data, no external sanctions lists (OFAC list ingestion is out of scope: see
+Deliberately Not Building).
+
+### Task Checklist
+
+- [ ] `backend/registry/risk.py`: `risk_score(registry_row, event_counts) -> (score,
+      fired_indicators)` pure function + the IG P&I club list. pytest with hand-built
+      cases (clean modern VLCC ~0; old tanker, no P&I, black flag, 2 gaps -> high).
+- [ ] Crawler run computes and stores `risk_score INTEGER` + `risk_indicators VARCHAR
+      (JSON)` columns on vessel_registry (ALTER TABLE ADD COLUMN IF NOT EXISTS), reading
+      event counts from freight_analytics.duckdb read-only.
+- [ ] API: include score + indicators in `/api/fleet` rows and `/api/vessels/{imo}/equasis`;
+      add `risk_min` filter param.
+- [ ] Frontend: score badge (green < 25, yellow < 50, red >= 50) on VesselDetail with an
+      expandable "why" list; risk filter + sortable column in Fleet Explorer; a "High
+      risk" preset link (risk_min=50, sorted desc).
+- [ ] Eyeball the top-20 list: do the flagged vessels make sense (old tankers, odd
+      flags, gap history)? Record findings + weight tuning in CHANGELOG.
+
+#### Definition of Done
+
+- [ ] Score visible end-to-end; top-20 list is plausible; all tests green; commit.
+
+---
+
+## Backlog ideas (not yet phased)
+
+Captured for later; promote to a phase only with a written plan:
+
+- **Port-call history:** derive arrival/departure events per vessel from anchored
+  episodes + destination changes; per-vessel voyage timeline on the detail panel.
+- **Owner/fleet dashboards:** aggregate Phase 2 analytics by owner (e.g. which owners'
+  VLCCs are laden vs ballast right now); needs Phase 5 join.
+- **Destination-change log:** snapshot `destination` is already stored; a diff over
+  history gives "vessel X re-routed from ROTTERDAM to SINGAPORE" events.
+- **Email/RSS digest:** daily summary of new high-risk events (gaps, STS, new
+  high-score vessels).
+
+---
+
 ## Build Order Summary
 
 | Phase | Goal | Repo | New tables | New routes | Sessions |
@@ -423,15 +652,19 @@ just serves JS.*
 | 2 | Transits, congestion, laden, density + Analytics page | freight | +5 | +5 | 2-3 |
 | 3 | Gaps, loitering, STS + Events feed | freight | +1 | +1 | 2 |
 | 4 | deck.gl, heatmap, SSE (optional) | freight | 0 | +1 | 2-3 |
+| 5 | Persistent Equasis registry + crawler | freight | +1 | 0 (reworks 1) | 1-2 |
+| 6 | Fleet Explorer data page | freight | 0 | +3 | 1-2 |
+| 7 | Shadow-fleet risk scoring | freight | 0 (+2 cols) | 0 (extends 2) | 1-2 |
 
 ## Schema Evolution Map
 
-| Table | Phase 0 | Phase 2 | Phase 3 |
-|---|---|---|---|
-| live_positions | +imo, draught, nav_status, eta | | |
-| ais_snapshots | +sog, nav_status, draught, destination | | |
-| meta_watermark / transit_events / anchored_episodes / fleet_density / vessel_state | | ✓ | |
-| ais_events | | | ✓ |
+| Table | Phase 0 | Phase 2 | Phase 3 | Phase 5 | Phase 7 |
+|---|---|---|---|---|---|
+| live_positions | +imo, draught, nav_status, eta | | | | |
+| ais_snapshots | +sog, nav_status, draught, destination | | | | |
+| meta_watermark / transit_events / anchored_episodes / fleet_density / vessel_state | | ✓ | | | |
+| ais_events | | | ✓ | | |
+| vessel_registry | | | | ✓ | +risk_score, risk_indicators |
 
 ## API Surface Map
 
@@ -446,6 +679,10 @@ just serves JS.*
 | GET /api/analytics/zones | 2 | Anchorage zone geometry |
 | GET /api/events | 3 | Intelligence event feed |
 | GET /api/stream (SSE) | 4 | Optional live push |
+| GET /api/vessels/{imo}/equasis | done (f4b6d46), reworked in 5 | Registry data per vessel |
+| GET /api/fleet | 6 | Filterable/sortable fleet table |
+| GET /api/fleet/facets | 6 | Filter dropdown values + counts |
+| GET /api/fleet/export | 6 | CSV of current filter |
 
 ## Deliberately Not Building
 
@@ -460,6 +697,12 @@ just serves JS.*
 - **Backfilling history:** impossible by definition; charts honestly start at their
   collection date.
 - **Per-visitor accounts/auth:** it is a public showcase.
+- **External sanctions lists (OFAC/EU) ingestion:** Phase 7 scores only from owned
+  data and public registry facts; matching named sanctioned entities is a legal-grade
+  exercise this project should not pretend to do.
+- **Aggressive Equasis crawling:** the crawler stays at one request per 6-10 s with a
+  per-run cap, full stop. If Equasis blocks the account, the feature degrades to the
+  on-click path; do not rotate accounts or evade.
 
 ## Execution Notes for the Implementing Model
 
