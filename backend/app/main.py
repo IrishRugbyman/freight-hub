@@ -2450,16 +2450,17 @@ def analytics_slow_steamers(kind: str = "", limit: int = 50):
     limit = max(5, min(200, limit))
     now = datetime.now(UTC).replace(tzinfo=None)
 
-    # All underway vessels with reliable SOG (nav_status 0 = underway engine; exclude anchored=1, moored=5)
-    lp_df = db.query(
-        "SELECT mmsi, name, kind, segment, region, sog, imo "
-        "FROM live_positions "
-        "WHERE sog IS NOT NULL AND sog > 0.5 AND sog < 25.0 "
-        "  AND (nav_status IS NULL OR nav_status NOT IN (1, 5))"
-    )
-
-    if kind:
-        lp_df = lp_df[lp_df["kind"] == kind]
+    # All underway vessels with reliable SOG - use in-process cache
+    lp_df = _live_all()
+    if not lp_df.empty:
+        sog_num = pd.to_numeric(lp_df["sog"], errors="coerce")
+        ns_num = pd.to_numeric(lp_df.get("nav_status", pd.Series()), errors="coerce")
+        ns_ok = ns_num.isna() | ~ns_num.isin([1, 5])
+        lp_df = lp_df[(sog_num > 0.5) & (sog_num < 25.0) & ns_ok].copy()
+        needed = ["mmsi", "name", "kind", "segment", "region", "sog", "imo"]
+        lp_df = lp_df[[c for c in needed if c in lp_df.columns]]
+        if kind:
+            lp_df = lp_df[lp_df["kind"] == kind]
 
     if lp_df.empty:
         return SlowSteamersResponse(as_of=_iso(now) or "", total_fleet_underway=0, rows=[])
@@ -2585,10 +2586,11 @@ def analytics_market_summary():
             elif r["laden"] == "ballast":
                 ballast_mmsi.add(m)
 
-    # Live fleet from AIS DB (segment/kind/nav_status)
-    lp_df = db.query(
-        "SELECT mmsi, segment, kind, nav_status, sog FROM live_positions WHERE segment != 'Small'",
-    )
+    # Live fleet from in-process cache (avoids AIS DB lock contention)
+    lp_df = _live_all()
+    if not lp_df.empty:
+        lp_df = lp_df[lp_df["segment"].notna() & (lp_df["segment"] != "Small")]
+        lp_df = lp_df[["mmsi", "segment", "kind", "nav_status", "sog"]].copy()
 
     total_fleet = len(lp_df) if not lp_df.empty else 0
     # Restrict laden/ballast counts to non-Small fleet for consistency with by_segment
@@ -3120,14 +3122,14 @@ def analytics_sts_proximity(max_dist_m: float = 2000, max_sog: float = 3.0):
     d_m = max(200.0, min(max_dist_m, 10000.0))
     sog_cap = max(0.5, min(max_sog, 8.0))
 
-    df = db.query(
-        "SELECT mmsi, name, imo, lat, lon, sog, kind, segment, region, nav_status "
-        "FROM live_positions "
-        "WHERE sog IS NOT NULL AND sog <= ? "
-        "  AND (nav_status IS NULL OR nav_status NOT IN (1, 5)) "
-        "  AND lat IS NOT NULL AND lon IS NOT NULL",
-        [sog_cap],
-    )
+    df = _live_all()
+    if not df.empty:
+        sog_num = pd.to_numeric(df["sog"], errors="coerce")
+        ns_num = pd.to_numeric(df.get("nav_status", pd.Series()), errors="coerce")
+        ns_ok = ns_num.isna() | ~ns_num.isin([1, 5])
+        df = df[(sog_num.notna()) & (sog_num <= sog_cap) & ns_ok & df["lat"].notna() & df["lon"].notna()].copy()
+        needed = ["mmsi", "name", "imo", "lat", "lon", "sog", "kind", "segment", "region", "nav_status"]
+        df = df[[c for c in needed if c in df.columns]]
     now = datetime.now(UTC)
     if df.empty or len(df) < 2:
         return StsProximityResponse(
@@ -3396,11 +3398,17 @@ def analytics_trade_lane_matrix(
         lp_conds.append("kind = ?")
         lp_params.append(kind)
 
-    lp_df = db.query(
-        "SELECT mmsi, imo, region, destination FROM live_positions WHERE " +
-        " AND ".join(lp_conds),
-        lp_params or None,
-    )
+    lp_df = _live_all()
+    if not lp_df.empty:
+        lp_df = lp_df[
+            (lp_df["segment"] != "Small") &
+            lp_df["destination"].notna() &
+            (lp_df["destination"] != "")
+        ].copy()
+        if kind:
+            lp_df = lp_df[lp_df["kind"] == kind]
+        needed = ["mmsi", "imo", "region", "destination"]
+        lp_df = lp_df[[c for c in needed if c in lp_df.columns]]
     if lp_df.empty:
         return TradeLaneMatrixResponse(
             as_of=_iso(now_ts) or "",
@@ -3657,20 +3665,16 @@ def analytics_vessel_risk_scores(
         for _, r in rr_df.iterrows():
             reroute_counts[int(r["mmsi"])] = int(r["cnt"])
 
-    # Step 2: live positions (segment/kind filter applied here)
-    lp_conds = ["segment != 'Small'"]
-    lp_params: list = []
-    if segment:
-        lp_conds.append("segment = ?")
-        lp_params.append(segment)
-    if kind:
-        lp_conds.append("kind = ?")
-        lp_params.append(kind)
-    lp_df = db.query(
-        "SELECT mmsi, imo, name, kind, segment, region, lat, lon "
-        "FROM live_positions WHERE " + " AND ".join(lp_conds),
-        lp_params or None,
-    )
+    # Step 2: live positions (segment/kind filter applied here) - use cache
+    lp_df = _live_all()
+    if not lp_df.empty:
+        lp_df = lp_df[lp_df["segment"].notna() & (lp_df["segment"] != "Small")].copy()
+        if segment:
+            lp_df = lp_df[lp_df["segment"] == segment]
+        if kind:
+            lp_df = lp_df[lp_df["kind"] == kind]
+        needed = ["mmsi", "imo", "name", "kind", "segment", "region", "lat", "lon"]
+        lp_df = lp_df[[c for c in needed if c in lp_df.columns]]
     if lp_df.empty:
         return VesselRiskResponse(
             as_of=_iso(now_ts) or "",
