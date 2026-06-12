@@ -14,7 +14,7 @@ import {
   YAxis,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion, useDestinationFlows, useMarketSummary, useVesselRiskScores, useChokepointHeatmap, useTradeLaneMatrix, useAnomalyWatchlist, useStsProximity, useRegionMomentum, useEventRateTimeline, useTransitRateTimeline } from '@/lib/api'
+import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion, useDestinationFlows, useMarketSummary, useVesselRiskScores, useChokepointHeatmap, useTradeLaneMatrix, useAnomalyWatchlist, useStsProximity, useRegionMomentum, useEventRateTimeline, useTransitRateTimeline, useAnchorageOccupancy } from '@/lib/api'
 import type { RiskEventItem } from '@/lib/api'
 
 const CHOKEPOINTS = [
@@ -2601,6 +2601,129 @@ export function TransitRateTimelineCard() {
                   dot={false}
                   strokeWidth={1.5}
                   name={cp}
+                />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Phase 39: Anchorage Occupancy Timeline
+// ---------------------------------------------------------------------------
+
+const ZONE_COLORS: Record<string, string> = {
+  singapore_west: '#22c55e',
+  singapore_east: '#4ade80',
+  rotterdam: '#3b82f6',
+  port_said: '#f97316',
+  suez_roads: '#facc15',
+  galveston_ltg: '#a855f7',
+  richards_bay: '#64748b',
+  fujairah: '#ef4444',
+}
+
+const ZONE_SHORT: Record<string, string> = {
+  singapore_west: 'Sing West',
+  singapore_east: 'Sing East',
+  rotterdam: 'Rotterdam',
+  port_said: 'Port Said',
+  suez_roads: 'Suez Roads',
+  galveston_ltg: 'Galveston',
+  richards_bay: "Richard's Bay",
+  fujairah: 'Fujairah',
+}
+
+const DEFAULT_ZONES = 'singapore_west,rotterdam,port_said,singapore_east,suez_roads'
+
+export function AnchorageOccupancyCard() {
+  const [hours, setHours] = useState(72)
+  const [selectedZones, setSelectedZones] = useState<string[]>(['singapore_west', 'rotterdam', 'suez_roads'])
+  const { data, isLoading } = useAnchorageOccupancy(hours, selectedZones.join(',') || DEFAULT_ZONES)
+
+  const chartData = React.useMemo(() => {
+    if (!data?.points.length) return []
+    const hourSet: Set<string> = new Set(data.points.map(p => p.hour))
+    const sortedHours = [...hourSet].sort()
+    return sortedHours.map(h => {
+      const row: Record<string, string | number> = {
+        hour: new Date(h).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit' }),
+      }
+      for (const zone of selectedZones) {
+        const pt = data.points.find(p => p.hour === h && p.zone === zone)
+        row[zone] = pt?.vessel_count ?? 0
+      }
+      return row
+    })
+  }, [data, selectedZones])
+
+  const availableZones = data?.zones ?? Object.keys(ZONE_SHORT)
+
+  function toggleZone(z: string) {
+    setSelectedZones(prev => prev.includes(z) ? prev.filter(z2 => z2 !== z) : [...prev, z])
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex flex-wrap items-center justify-between gap-2">
+          <span>Anchorage Occupancy</span>
+          <select
+            className="rounded border border-border bg-background px-2 py-1 text-xs font-normal"
+            value={hours}
+            onChange={e => setHours(Number(e.target.value))}
+          >
+            <option value={24}>Last 24h</option>
+            <option value={48}>Last 48h</option>
+            <option value={72}>Last 72h</option>
+            <option value={168}>Last 7d</option>
+          </select>
+        </CardTitle>
+        <div className="flex flex-wrap gap-1.5 pt-1">
+          {availableZones.map(z => (
+            <button
+              key={z}
+              onClick={() => toggleZone(z)}
+              className={`rounded px-2 py-0.5 text-[10px] transition-opacity ${selectedZones.includes(z) ? 'opacity-100' : 'opacity-30'}`}
+              style={{ backgroundColor: (ZONE_COLORS[z] ?? '#888') + '33', color: ZONE_COLORS[z] ?? '#888', border: `1px solid ${ZONE_COLORS[z] ?? '#888'}55` }}
+            >
+              {ZONE_SHORT[z] ?? z.replace(/_/g, ' ')}
+            </button>
+          ))}
+        </div>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="h-64 animate-pulse rounded bg-muted/40" />
+        ) : chartData.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">No anchorage data in window.</p>
+        ) : (
+          <ResponsiveContainer width="100%" height={240}>
+            <LineChart data={chartData} margin={{ left: -10 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+              <XAxis
+                dataKey="hour"
+                tick={{ fontSize: 9 }}
+                interval={Math.max(0, Math.floor(chartData.length / 8) - 1)}
+                angle={-25}
+                textAnchor="end"
+                height={40}
+              />
+              <YAxis tick={{ fontSize: 10 }} />
+              <Tooltip />
+              <Legend wrapperStyle={{ fontSize: 10 }} formatter={z => ZONE_SHORT[String(z)] ?? String(z).replace(/_/g, ' ')} />
+              {selectedZones.map(z => (
+                <Line
+                  key={z}
+                  type="monotone"
+                  dataKey={z}
+                  stroke={ZONE_COLORS[z] ?? '#888'}
+                  dot={false}
+                  strokeWidth={1.5}
+                  name={z}
                 />
               ))}
             </LineChart>

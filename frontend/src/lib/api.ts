@@ -1488,3 +1488,28 @@ export function useTransitRateTimeline(hours = 72, chopointsCSV = '') {
     refetchInterval: 5 * 60 * 1000,
   })
 }
+
+export interface AnchorageOccupancyPoint {
+  hour: string
+  zone: string
+  vessel_count: number
+}
+
+export interface AnchorageOccupancyResponse {
+  as_of: string
+  hours: number
+  zones: string[]
+  points: AnchorageOccupancyPoint[]
+}
+
+export function useAnchorageOccupancy(hours = 72, zonesCSV = '') {
+  return useQuery({
+    queryKey: ['anchorage-occupancy', hours, zonesCSV],
+    queryFn: () =>
+      getJSON<AnchorageOccupancyResponse>(
+        `/api/analytics/anchorage-occupancy?hours=${hours}&zones_csv=${encodeURIComponent(zonesCSV)}`,
+      ),
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+  })
+}

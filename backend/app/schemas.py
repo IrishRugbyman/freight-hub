@@ -891,3 +891,16 @@ class TransitRateTimelineResponse(BaseModel):
     hours: int
     chokepoints: list[str]
     points: list[TransitRatePoint]
+
+
+class AnchorageOccupancyPoint(BaseModel):
+    hour: str
+    zone: str
+    vessel_count: int
+
+
+class AnchorageOccupancyResponse(BaseModel):
+    as_of: str
+    hours: int
+    zones: list[str]
+    points: list[AnchorageOccupancyPoint]

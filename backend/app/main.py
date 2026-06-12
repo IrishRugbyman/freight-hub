@@ -87,6 +87,8 @@ from .schemas import (
     TransitRiskEvent,
     TransitRiskResponse,
     SpeedAnalyticsResponse,
+    AnchorageOccupancyPoint,
+    AnchorageOccupancyResponse,
     EventRatePoint,
     EventRateTimelineResponse,
     TransitRatePoint,
@@ -1626,6 +1628,61 @@ def analytics_density(region: str = "singapore_malacca", days: int = 30):
             )
         series.sort(key=lambda r: r.date)
     return DensityResponse(region=region, days=d, series=series)
+
+
+@app.get("/api/analytics/anchorage-occupancy", response_model=AnchorageOccupancyResponse)
+def analytics_anchorage_occupancy(hours: int = 72, zones_csv: str = ""):
+    """Concurrent vessel count per anchorage zone, computed hourly over the last N hours.
+
+    Uses anchored_episodes: an episode contributes to all hours from start_ts to
+    end_ts (or NOW if still anchored). zones_csv: optional comma-separated filter.
+    Default zones: singapore_west, rotterdam, port_said, singapore_east, suez_roads.
+    """
+    import numpy as np
+
+    h = max(6, min(hours, 336))
+    now_dt = datetime.now(UTC).replace(tzinfo=None)
+    cutoff = now_dt - timedelta(hours=h)
+
+    default_zones = ["singapore_west", "rotterdam", "port_said", "singapore_east", "suez_roads"]
+    zone_filter = [z.strip() for z in zones_csv.split(",") if z.strip()] or default_zones
+
+    df = db.query(
+        "SELECT zone, start_ts, end_ts FROM anchored_episodes "
+        "WHERE zone = ANY(?) AND start_ts <= ? AND (end_ts IS NULL OR end_ts >= ?)",
+        [zone_filter, now_dt, cutoff],
+        db=db.analytics_db_path(),
+    )
+    as_of = _iso(now_dt) or ""
+    if df.empty:
+        return AnchorageOccupancyResponse(as_of=as_of, hours=h, zones=zone_filter, points=[])
+
+    df["start_ts"] = pd.to_datetime(df["start_ts"]).dt.floor("h").clip(lower=pd.Timestamp(cutoff))
+    df["end_ts"] = pd.to_datetime(df["end_ts"].fillna(pd.Timestamp(now_dt))).dt.floor("h")
+
+    hour_range = pd.date_range(cutoff.replace(minute=0, second=0, microsecond=0), now_dt, freq="h")
+    hour_index = {h_val: i for i, h_val in enumerate(hour_range)}
+    n_hours = len(hour_range)
+
+    points: list[AnchorageOccupancyPoint] = []
+    for zone in zone_filter:
+        counts = np.zeros(n_hours, dtype=int)
+        zone_df = df[df["zone"] == zone]
+        for _, row in zone_df.iterrows():
+            s_idx = hour_index.get(row["start_ts"], 0)
+            e_idx = hour_index.get(row["end_ts"], n_hours - 1) + 1
+            counts[s_idx:e_idx] += 1
+        for i, h_val in enumerate(hour_range):
+            if counts[i] > 0:
+                points.append(
+                    AnchorageOccupancyPoint(
+                        hour=_iso(h_val.to_pydatetime()) or str(h_val),
+                        zone=zone,
+                        vessel_count=int(counts[i]),
+                    )
+                )
+    active_zones = [z for z in zone_filter if any(p.zone == z for p in points)]
+    return AnchorageOccupancyResponse(as_of=as_of, hours=h, zones=active_zones, points=points)
 
 
 @app.get("/api/analytics/transit-rate-timeline", response_model=TransitRateTimelineResponse)

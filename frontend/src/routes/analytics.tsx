@@ -33,6 +33,7 @@ const StsProximityCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ d
 const RegionMomentumCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.RegionMomentumCard })))
 const EventRateTimelineCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.EventRateTimelineCard })))
 const TransitRateTimelineCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.TransitRateTimelineCard })))
+const AnchorageOccupancyCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.AnchorageOccupancyCard })))
 
 function ChartSkeleton() {
   return <div className="h-[300px] animate-pulse rounded-lg bg-muted/40" />
@@ -72,6 +73,7 @@ function AnalyticsPage() {
         <Suspense fallback={<ChartSkeleton />}><PortFlowCard /></Suspense>
 
         <h2 className="text-base font-semibold text-foreground">Port Congestion</h2>
+        <Suspense fallback={<ChartSkeleton />}><AnchorageOccupancyCard /></Suspense>
         <Suspense fallback={<ChartSkeleton />}><PortCongestionCard /></Suspense>
 
         <h2 className="text-base font-semibold text-foreground">Cargo Flows</h2>

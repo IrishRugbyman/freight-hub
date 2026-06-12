@@ -3072,3 +3072,138 @@ def test_transit_rate_chokepoints_list(transit_rate_client):
     d = r.json()
     assert "dover_channel" in d["chokepoints"]
     assert "suez" in d["chokepoints"]
+
+
+# ---------------------------------------------------------------------------
+# Phase 39: Anchorage Occupancy Timeline
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def anchorage_occ_client(tmp_path, monkeypatch):
+    """Fixture for anchorage-occupancy endpoint.
+
+    anchored_episodes at singapore_west:
+      Episode 1: h0-3h to h0-1h (2 hours overlap with last 24h window)
+      Episode 2: h0-1h to h0+1h (open right side, current hour)
+      Episode 3: h0-5h to h0-4h (1 hour, earlier)
+    rotterdam:
+      Episode 4: h0-2h to h0 (2 hours)
+    """
+    import duckdb
+    from fastapi.testclient import TestClient
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+    h0 = now.replace(minute=30, second=0, microsecond=0)  # mid-hour, floor will align
+
+    ais_file = tmp_path / "ais_ao.duckdb"
+    duckdb.connect(str(ais_file)).execute("""
+    CREATE TABLE live_positions (
+        mmsi BIGINT PRIMARY KEY, name VARCHAR, lat DOUBLE, lon DOUBLE,
+        sog DOUBLE, cog DOUBLE, heading DOUBLE, destination VARCHAR,
+        ship_type INTEGER, length_m DOUBLE, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, updated_ts TIMESTAMP,
+        imo BIGINT, draught DOUBLE, nav_status INTEGER, eta VARCHAR
+    );
+    CREATE TABLE ais_snapshots (
+        snapshot_ts TIMESTAMP, mmsi BIGINT, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, lat DOUBLE, lon DOUBLE, ship_type INTEGER, length_m DOUBLE,
+        sog DOUBLE, nav_status INTEGER, draught DOUBLE, destination VARCHAR,
+        PRIMARY KEY (snapshot_ts, mmsi)
+    );
+    CREATE TABLE vessels (
+        mmsi BIGINT PRIMARY KEY, imo BIGINT, name VARCHAR, flag VARCHAR,
+        flag_iso2 VARCHAR, mid INTEGER, call_sign VARCHAR, vessel_type VARCHAR,
+        dwt INTEGER, grt INTEGER, build_year INTEGER, length_m DOUBLE, beam_m DOUBLE,
+        owner VARCHAR, manager VARCHAR, class_society VARCHAR, enriched_at TIMESTAMP, equasis_ok BOOLEAN
+    );
+    """).close()
+
+    an_file = tmp_path / "analytics_ao.duckdb"
+    an_conn = duckdb.connect(str(an_file))
+    an_conn.execute("""
+    CREATE TABLE meta_watermark (key VARCHAR PRIMARY KEY, ts TIMESTAMP);
+    CREATE TABLE ais_events (
+        event_id VARCHAR PRIMARY KEY, type VARCHAR, mmsi BIGINT, mmsi2 BIGINT,
+        start_ts TIMESTAMP, end_ts TIMESTAMP, lat DOUBLE, lon DOUBLE,
+        region VARCHAR, kind VARCHAR, segment VARCHAR, details VARCHAR
+    );
+    CREATE TABLE transit_events (
+        mmsi BIGINT, chokepoint VARCHAR, entered_ts TIMESTAMP, exited_ts TIMESTAMP,
+        direction VARCHAR, kind VARCHAR, segment VARCHAR, laden BOOLEAN,
+        PRIMARY KEY (mmsi, chokepoint, entered_ts)
+    );
+    CREATE TABLE anchored_episodes (
+        mmsi BIGINT, zone VARCHAR, start_ts TIMESTAMP, end_ts TIMESTAMP,
+        kind VARCHAR, segment VARCHAR, PRIMARY KEY (mmsi, zone, start_ts)
+    );
+    CREATE TABLE fleet_density (
+        ts TIMESTAMP, region VARCHAR, kind VARCHAR, segment VARCHAR,
+        laden_count INTEGER, ballast_count INTEGER, unknown_count INTEGER,
+        PRIMARY KEY (ts, region, kind, segment)
+    );
+    CREATE TABLE vessel_state (
+        mmsi BIGINT PRIMARY KEY, max_draught_seen DOUBLE, last_draught DOUBLE,
+        laden VARCHAR, updated_ts TIMESTAMP
+    );
+    """)
+    an_conn.executemany(
+        "INSERT INTO anchored_episodes VALUES (?,?,?,?,?,?)",
+        [
+            (9501, "singapore_west", h0 - timedelta(hours=3), h0 - timedelta(hours=1), "tanker", "VLCC"),
+            (9502, "singapore_west", h0 - timedelta(hours=1), h0 + timedelta(hours=1), "tanker", "Suezmax"),
+            (9503, "singapore_west", h0 - timedelta(hours=5), h0 - timedelta(hours=4), "bulk",   "Capesize"),
+            (9504, "rotterdam",      h0 - timedelta(hours=2), h0, "tanker", "VLCC"),
+        ],
+    )
+    an_conn.close()
+
+    reg_file = tmp_path / "reg_ao.duckdb"
+    duckdb.connect(str(reg_file)).execute("""
+    CREATE TABLE vessel_registry (
+        imo BIGINT PRIMARY KEY, ship_name VARCHAR, flag VARCHAR, flag_code VARCHAR,
+        call_sign VARCHAR, gross_tonnage INTEGER, dwt INTEGER, ship_type VARCHAR,
+        year_built INTEGER, ship_status VARCHAR, owner VARCHAR, ism_manager VARCHAR,
+        ship_manager VARCHAR, class_society VARCHAR, pi_club VARCHAR,
+        detention_rate_pct DOUBLE, paris_mou VARCHAR, tokyo_mou VARCHAR,
+        uscg_targeting VARCHAR, fetched_ts TIMESTAMP, fetch_ok BOOLEAN,
+        risk_score INTEGER, risk_indicators VARCHAR, ofac_sanctioned BOOLEAN
+    );
+    """).close()
+
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
+    monkeypatch.setenv("ANALYTICS_DB", str(an_file))
+    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
+
+    from app.main import app as freight_app
+    return TestClient(freight_app)
+
+
+def test_anchorage_occupancy_structure(anchorage_occ_client):
+    r = anchorage_occ_client.get("/api/analytics/anchorage-occupancy")
+    assert r.status_code == 200
+    d = r.json()
+    assert "as_of" in d and "hours" in d and "zones" in d and "points" in d
+    for pt in d["points"]:
+        assert "hour" in pt and "zone" in pt and "vessel_count" in pt
+
+
+def test_anchorage_occupancy_returns_data(anchorage_occ_client):
+    r = anchorage_occ_client.get("/api/analytics/anchorage-occupancy?hours=72&zones_csv=singapore_west,rotterdam")
+    d = r.json()
+    assert len(d["points"]) > 0
+    zones = {p["zone"] for p in d["points"]}
+    assert "singapore_west" in zones
+    assert "rotterdam" in zones
+
+
+def test_anchorage_occupancy_zone_filter(anchorage_occ_client):
+    r = anchorage_occ_client.get("/api/analytics/anchorage-occupancy?hours=72&zones_csv=rotterdam")
+    d = r.json()
+    assert all(p["zone"] == "rotterdam" for p in d["points"])
+
+
+def test_anchorage_occupancy_nonzero_counts(anchorage_occ_client):
+    r = anchorage_occ_client.get("/api/analytics/anchorage-occupancy?hours=72&zones_csv=singapore_west")
+    d = r.json()
+    assert all(p["vessel_count"] > 0 for p in d["points"])
