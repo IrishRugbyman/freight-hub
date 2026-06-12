@@ -407,7 +407,7 @@ def _run_inner(conn: duckdb.DuckDBPyConnection, reset: bool) -> None:
         if gaps:
             # Close any gap events for vessels that have reappeared
             active_recent = set(
-                df_48h[df_48h["snapshot_ts"] >= max_ts - timedelta(hours=_GAP_RECHECK_H)]["mmsi"].astype(int).unique()
+                df_48h[df_48h["snapshot_ts"] >= max_ts - timedelta(hours=_GAP_RECHECK_H)]["mmsi"].astype(int).unique().tolist()
             )
             for mmsi_int in active_recent:
                 row = conn.execute(

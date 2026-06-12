@@ -506,15 +506,19 @@ def loitering_events(df: pd.DataFrame) -> list[dict]:
 
 # --- Destination change detection -------------------------------------------
 
-def _dest_edit_dist(a: str, b: str) -> int:
+def _dest_edit_dist(a, b) -> int:
     """Compute Levenshtein edit distance between two destination strings.
 
     Truncation noise: "PORT A" -> "PORT AB" has distance 1 (just appended).
     Real reroutes: "ROTTERDAM" -> "SINGAPORE" has distance 8.
     Using a simple O(n*m) DP; strings are short (< 50 chars) so this is fast.
+    Accepts any input type; non-strings (NaN, None, float) are treated as "".
     """
+    import math
+    a = "" if (a is None or (isinstance(a, float) and math.isnan(a))) else str(a)
+    b = "" if (b is None or (isinstance(b, float) and math.isnan(b))) else str(b)
     if not a or not b:
-        return max(len(a or ""), len(b or ""))
+        return max(len(a), len(b))
     n, m = len(a), len(b)
     prev = list(range(m + 1))
     for i in range(1, n + 1):

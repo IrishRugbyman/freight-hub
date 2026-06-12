@@ -4629,18 +4629,18 @@ def analytics_port_arrivals(horizon_h: int = 48, kind: str = "tanker"):
     horizon_h = max(12, min(120, horizon_h))
     now_dt = datetime.now(UTC).replace(tzinfo=None)
 
-    kind_clause = "AND kind = ? " if kind else ""
-    params: list = [1.5]
-    if kind:
-        params.append(kind)
-
-    fleet_df = db.query(
-        "SELECT mmsi, name, lat, lon, sog, destination, segment, kind, imo "
-        "FROM live_positions "
-        f"WHERE sog >= ? {kind_clause}"
-        "AND destination IS NOT NULL AND segment IS NOT NULL",
-        params,
-    )
+    fleet_df = _live_all()
+    if not fleet_df.empty:
+        sog_num = pd.to_numeric(fleet_df["sog"], errors="coerce")
+        fleet_df = fleet_df[
+            (sog_num >= 1.5) &
+            fleet_df["destination"].notna() &
+            fleet_df["segment"].notna()
+        ].copy()
+        if kind:
+            fleet_df = fleet_df[fleet_df["kind"] == kind]
+        needed = ["mmsi", "name", "lat", "lon", "sog", "destination", "segment", "kind", "imo"]
+        fleet_df = fleet_df[[c for c in needed if c in fleet_df.columns]]
 
     if fleet_df.empty:
         return PortArrivalResponse(as_of=now_dt.isoformat(), total_inbound=0, ports=[])
