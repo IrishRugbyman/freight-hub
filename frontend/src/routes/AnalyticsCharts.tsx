@@ -14,7 +14,7 @@ import {
   YAxis,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion, useDestinationFlows, useMarketSummary, useVesselRiskScores, useChokepointHeatmap, useTradeLaneMatrix, useAnomalyWatchlist, useStsProximity, useRegionMomentum, useEventRateTimeline, useTransitRateTimeline, useAnchorageOccupancy, useStsOffenders, useFleetAtTime, useDestinationChanges, useOwnerIntelligence, useChokepointAnomaly, useCargoStateChanges, useSpeedAnomalies } from '@/lib/api'
+import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion, useDestinationFlows, useMarketSummary, useVesselRiskScores, useChokepointHeatmap, useTradeLaneMatrix, useAnomalyWatchlist, useStsProximity, useRegionMomentum, useEventRateTimeline, useTransitRateTimeline, useAnchorageOccupancy, useStsOffenders, useFleetAtTime, useDestinationChanges, useOwnerIntelligence, useChokepointAnomaly, useCargoStateChanges, useSpeedAnomalies, usePortArrivals } from '@/lib/api'
 import type { RiskEventItem } from '@/lib/api'
 
 const CHOKEPOINTS = [
@@ -3412,6 +3412,111 @@ export function SpeedAnomaliesCard() {
                     z={row.z_score > 0 ? '+' : ''}{row.z_score.toFixed(1)}
                   </span>
                 </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// Phase 47: 48h Port Arrival Forecast
+const LADEN_COLOR: Record<string, string> = {
+  laden: 'text-blue-400',
+  ballast: 'text-muted-foreground',
+  unknown: 'text-muted-foreground/60',
+}
+
+export function PortArrivalForecastCard() {
+  const [kind, setKind] = useState<string>('tanker')
+  const [horizonH, setHorizonH] = useState<number>(48)
+  const [expandedPort, setExpandedPort] = useState<string | null>(null)
+  const { data, isLoading } = usePortArrivals(kind, horizonH)
+  const ports = data?.ports ?? []
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center justify-between gap-2">
+          <span>Port Arrival Forecast</span>
+          <div className="flex gap-2">
+            <select
+              className="rounded border border-border bg-background px-2 py-1 text-xs"
+              value={kind}
+              onChange={e => setKind(e.target.value)}
+            >
+              <option value="tanker">Tankers</option>
+              <option value="bulk">Bulkers</option>
+              <option value="">All types</option>
+            </select>
+            <select
+              className="rounded border border-border bg-background px-2 py-1 text-xs"
+              value={horizonH}
+              onChange={e => setHorizonH(Number(e.target.value))}
+            >
+              <option value={24}>24h</option>
+              <option value={48}>48h</option>
+              <option value={72}>72h</option>
+            </select>
+          </div>
+        </CardTitle>
+        {data && (
+          <p className="text-xs text-muted-foreground">
+            {data.total_inbound} vessels inbound to {ports.length} ports within {horizonH}h.
+            ETA computed from live position + SOG + great-circle distance.
+          </p>
+        )}
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="h-40 animate-pulse rounded bg-muted/40" />
+        ) : ports.length === 0 ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">No inbound vessels matched.</p>
+        ) : (
+          <div className="space-y-1">
+            {ports.map((port) => (
+              <div key={port.port} className="rounded border border-border/50 overflow-hidden">
+                <button
+                  className="w-full flex items-center gap-3 px-3 py-2 text-left text-xs hover:bg-muted/30"
+                  onClick={() => setExpandedPort(expandedPort === port.port ? null : port.port)}
+                >
+                  <span className="font-semibold flex-1">{port.port}</span>
+                  <span className="text-muted-foreground">
+                    <span className="font-bold text-foreground">{port.arrivals_24h}</span> in 24h
+                    {' / '}
+                    <span className="font-bold text-foreground">{port.arrivals_48h}</span> in {horizonH}h
+                  </span>
+                  <span className="text-muted-foreground/60">{expandedPort === port.port ? '▲' : '▼'}</span>
+                </button>
+                {expandedPort === port.port && (
+                  <div className="border-t border-border/30 divide-y divide-border/20">
+                    {port.vessels.map((v) => (
+                      <div key={v.mmsi} className="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-muted/20">
+                        <div className="min-w-0 flex-1">
+                          <span className="font-medium">{v.name ?? `MMSI ${v.mmsi}`}</span>
+                          {v.segment && <span className="ml-1 text-muted-foreground">{v.segment}</span>}
+                          {v.laden && (
+                            <span className={`ml-1 font-medium ${LADEN_COLOR[v.laden] ?? 'text-muted-foreground'}`}>
+                              {v.laden}
+                            </span>
+                          )}
+                          {v.registry_risk != null && (
+                            <span className={`ml-1 rounded px-1 text-[10px] ${v.registry_risk >= 70 ? 'bg-red-500/20 text-red-400' : v.registry_risk >= 40 ? 'bg-yellow-500/20 text-yellow-400' : 'bg-green-500/20 text-green-400'}`}>
+                              risk {v.registry_risk}
+                            </span>
+                          )}
+                        </div>
+                        <div className="shrink-0 text-right tabular-nums">
+                          <span className={`font-bold ${v.eta_hours <= 6 ? 'text-orange-400' : v.eta_hours <= 24 ? 'text-yellow-400' : 'text-muted-foreground'}`}>
+                            ETA {v.eta_hours < 1 ? `${Math.round(v.eta_hours * 60)}m` : `${v.eta_hours.toFixed(1)}h`}
+                          </span>
+                          <span className="ml-1.5 text-muted-foreground">{v.distance_nm.toFixed(0)} nm @ {v.sog}kn</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
           </div>

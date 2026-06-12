@@ -4068,3 +4068,94 @@ def test_speed_anomaly_sorted_by_z(speed_anomaly_client):
     d = r.json()
     scores = [abs(row["z_score"]) for row in d["rows"]]
     assert scores == sorted(scores, reverse=True)
+
+
+# ---------------------------------------------------------------------------
+# Phase 47: Port Arrival Forecast
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def port_arrival_client(tmp_path, monkeypatch):
+    """Fixture: tanker heading for Rotterdam (NLRTM) with ETA ~20h."""
+    import duckdb
+    from fastapi.testclient import TestClient
+    from datetime import UTC, datetime
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+    ais_file = tmp_path / "ais_pa.duckdb"
+    conn = duckdb.connect(str(ais_file))
+    conn.execute("""
+    CREATE TABLE live_positions (
+        mmsi BIGINT PRIMARY KEY, name VARCHAR, lat DOUBLE, lon DOUBLE,
+        sog DOUBLE, cog DOUBLE, heading DOUBLE, destination VARCHAR,
+        ship_type INTEGER, length_m DOUBLE, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, updated_ts TIMESTAMP,
+        imo BIGINT, draught DOUBLE, nav_status INTEGER, eta VARCHAR
+    );
+    """)
+    # Vessel heading to Rotterdam from ~220 nm away at 12 kn -> ETA ~18h
+    conn.executemany("INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [
+        (5001, "TANKER A", 49.0, 3.5, 12.0, 60.0, 60.0, "NLRTM", 80, 330.0, "tanker", "Aframax", "north_sea", now, None, 20.0, 0, None),
+        (5002, "TANKER B", 50.0, 2.0, 10.0, 60.0, 60.0, "ROTTERDAM", 80, 300.0, "tanker", "Suezmax", "north_sea", now, None, 18.0, 0, None),
+        # This one is > 48h away (very slow and far)
+        (5003, "TANKER C", 20.0, 0.0, 2.0, 30.0, 30.0, "NLRTM", 80, 300.0, "tanker", "VLCC", "west_africa", now, None, 22.0, 0, None),
+        # Not a tanker - should be excluded by kind filter
+        (5004, "BULKER X", 49.5, 3.0, 11.0, 60.0, 60.0, "NLRTM", 70, 200.0, "bulk", "Capesize", "north_sea", now, None, 15.0, 0, None),
+    ])
+    conn.close()
+
+    analytics_file = tmp_path / "analytics_pa.duckdb"
+    ac = duckdb.connect(str(analytics_file))
+    ac.execute("CREATE TABLE vessel_state (mmsi BIGINT PRIMARY KEY, laden VARCHAR, last_draught DOUBLE, max_draught_seen DOUBLE, updated_ts TIMESTAMP)")
+    ac.executemany("INSERT INTO vessel_state VALUES (?,?,?,?,?)", [
+        (5001, "laden", 20.0, 21.0, now),
+        (5002, "ballast", 12.0, 21.0, now),
+    ])
+    ac.close()
+
+    registry_file = tmp_path / "registry_pa.duckdb"
+    rc = duckdb.connect(str(registry_file))
+    rc.execute("CREATE TABLE vessel_registry (imo BIGINT PRIMARY KEY, risk_score INTEGER, fetch_ok BOOLEAN)")
+    rc.close()
+
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
+    monkeypatch.setenv("ANALYTICS_DB", str(analytics_file))
+    monkeypatch.setenv("REGISTRY_DB", str(registry_file))
+    from app.main import app
+    return TestClient(app)
+
+
+def test_port_arrival_structure(port_arrival_client):
+    r = port_arrival_client.get("/api/analytics/port-arrivals?kind=tanker&horizon_h=48")
+    assert r.status_code == 200
+    d = r.json()
+    assert "ports" in d
+    assert "total_inbound" in d
+    assert d["total_inbound"] >= 1
+
+
+def test_port_arrival_matches_rotterdam(port_arrival_client):
+    r = port_arrival_client.get("/api/analytics/port-arrivals?kind=tanker&horizon_h=48")
+    d = r.json()
+    rdam = next((p for p in d["ports"] if p["port"] == "Rotterdam"), None)
+    assert rdam is not None
+    assert rdam["arrivals_48h"] >= 1
+    mmsis = [v["mmsi"] for v in rdam["vessels"]]
+    assert 5001 in mmsis or 5002 in mmsis
+
+
+def test_port_arrival_horizon_filter(port_arrival_client):
+    # With a tight 5h horizon, slow vessel far away should not appear
+    r = port_arrival_client.get("/api/analytics/port-arrivals?kind=tanker&horizon_h=12")
+    d = r.json()
+    rdam = next((p for p in d["ports"] if p["port"] == "Rotterdam"), None)
+    # VLCC at sog=2 from lat=20 is ~1650nm away -> ETA=825h >> 12h
+    if rdam:
+        assert all(v["mmsi"] != 5003 for v in rdam["vessels"])
+
+
+def test_port_arrival_kind_filter(port_arrival_client):
+    r = port_arrival_client.get("/api/analytics/port-arrivals?kind=tanker&horizon_h=48")
+    d = r.json()
+    all_kinds = [v["kind"] for p in d["ports"] for v in p["vessels"]]
+    assert all(k == "tanker" for k in all_kinds), "non-tanker appeared in tanker-filtered response"

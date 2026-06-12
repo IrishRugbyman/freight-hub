@@ -123,6 +123,9 @@ from .schemas import (
     CargoStateChangesResponse,
     SpeedAnomalyRow,
     SpeedAnomalyResponse,
+    ArrivalVessel,
+    PortArrivalForecast,
+    PortArrivalResponse,
 )
 
 _STATIC = Path(__file__).parent / "static"
@@ -4473,4 +4476,227 @@ def analytics_speed_anomalies(kind: str = "tanker", min_z: float = 2.5, min_sog:
         total_vessels_checked=len(fleet_df),
         anomaly_count=len(rows),
         rows=rows,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase 47: 48h Port Arrival Forecast
+# ---------------------------------------------------------------------------
+
+# Curated major ports: LOCODE aliases + lat/lon for ETA computation.
+# Alias list is used with substring matching after destination normalization.
+_CURATED_PORTS: dict[str, dict] = {
+    "Rotterdam": {
+        "lat": 51.96, "lon": 4.10,
+        "aliases": ["NLRTM", "ROTTERDAM", "NLAMS", "AMSTERDAM", "NL RTM", "NLRTM", "DORDRECHT"],
+    },
+    "Antwerp": {
+        "lat": 51.26, "lon": 4.40,
+        "aliases": ["BEANR", "ANTWERPEN", "ANTWERP", "BE ANR", "GENT", "GHENT"],
+    },
+    "Singapore": {
+        "lat": 1.26, "lon": 103.82,
+        "aliases": ["SGSIN", "SINGAPORE", "SG SIN"],
+    },
+    "Busan": {
+        "lat": 35.11, "lon": 129.04,
+        "aliases": ["KRPUS", "BUSAN", "KR PUS", "PUSAN"],
+    },
+    "Ulsan": {
+        "lat": 35.54, "lon": 129.39,
+        "aliases": ["KRUSN", "ULSAN", "KR USN"],
+    },
+    "Houston": {
+        "lat": 29.73, "lon": -95.08,
+        "aliases": ["USHOU", "HOUSTON", "GALVESTON", "USGLS"],
+    },
+    "Fujairah": {
+        "lat": 25.13, "lon": 56.34,
+        "aliases": ["AEFJR", "FUJAIRAH", "FUJAIRA", "AEFUJ"],
+    },
+    "Port Said": {
+        "lat": 31.28, "lon": 32.30,
+        "aliases": ["EGPSD", "PORT SAID", "PORTSAID"],
+    },
+    "Gibraltar": {
+        "lat": 36.14, "lon": -5.35,
+        "aliases": ["GIGIB", "GIBRALTAR"],
+    },
+    "Port Klang": {
+        "lat": 3.00, "lon": 101.37,
+        "aliases": ["MYPKG", "PORT KLANG", "WESTPORT", "KLANG"],
+    },
+    "Durban": {
+        "lat": -29.88, "lon": 31.04,
+        "aliases": ["ZADUR", "DURBAN", "ZA DUR"],
+    },
+    "Trieste": {
+        "lat": 45.65, "lon": 13.76,
+        "aliases": ["ITTRS", "TRIESTE", "TRIST"],
+    },
+    "Algeciras": {
+        "lat": 36.13, "lon": -5.45,
+        "aliases": ["ESALG", "ALGECIRAS"],
+    },
+    "Qingdao": {
+        "lat": 36.07, "lon": 120.33,
+        "aliases": ["CNTAO", "QINGDAO", "TSINGTAO"],
+    },
+    "Shanghai": {
+        "lat": 30.78, "lon": 121.96,
+        "aliases": ["CNSHA", "SHANGHAI"],
+    },
+}
+
+# Pre-build a flat lookup: normalized alias -> port name
+_ALIAS_TO_PORT: dict[str, str] = {}
+for _pname, _pdata in _CURATED_PORTS.items():
+    for _alias in _pdata["aliases"]:
+        _ALIAS_TO_PORT[_alias] = _pname
+
+
+def _match_port(destination: str | None) -> str | None:
+    """Return curated port name if destination matches any known alias, else None."""
+    if not destination:
+        return None
+    norm = _norm_dest(destination)
+    if not norm:
+        return None
+    # Direct lookup first
+    if norm in _ALIAS_TO_PORT:
+        return _ALIAS_TO_PORT[norm]
+    # Substring: alias appears inside destination (handles "FOR ORDERS ROTTERDAM")
+    for alias, pname in _ALIAS_TO_PORT.items():
+        if alias in norm:
+            return pname
+    return None
+
+
+def _haversine_nm(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Great-circle distance in nautical miles."""
+    import math
+    R = 3440.065  # Earth radius in nautical miles
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlam = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2
+    return 2 * R * math.asin(min(1.0, math.sqrt(a)))
+
+
+@app.get("/api/analytics/port-arrivals", response_model=PortArrivalResponse)
+def analytics_port_arrivals(horizon_h: int = 48, kind: str = "tanker"):
+    """48h port arrival forecast for major tanker/bulk terminals.
+
+    For each underway vessel with a parseable destination, computes ETA from
+    current position + SOG + great-circle distance to the matched port.
+    Returns per-port arrival counts and vessel lists.
+    """
+    horizon_h = max(12, min(120, horizon_h))
+    now_dt = datetime.now(UTC).replace(tzinfo=None)
+
+    kind_clause = "AND kind = ? " if kind else ""
+    params: list = [1.5]
+    if kind:
+        params.append(kind)
+
+    fleet_df = db.query(
+        "SELECT mmsi, name, lat, lon, sog, destination, segment, kind, imo "
+        "FROM live_positions "
+        f"WHERE sog >= ? {kind_clause}"
+        "AND destination IS NOT NULL AND segment IS NOT NULL",
+        params,
+    )
+
+    if fleet_df.empty:
+        return PortArrivalResponse(as_of=now_dt.isoformat(), total_inbound=0, ports=[])
+
+    # Load laden status from vessel_state
+    state_df = db.query(
+        "SELECT mmsi, laden FROM vessel_state",
+        db=db.analytics_db_path(),
+    )
+    laden_map: dict[int, str | None] = {}
+    if not state_df.empty:
+        for _, r in state_df.iterrows():
+            laden_map[int(r["mmsi"])] = _str_or_none(r.get("laden"))
+
+    # Collect inbound vessels per port
+    port_buckets: dict[str, list[dict]] = {p: [] for p in _CURATED_PORTS}
+    total_inbound = 0
+
+    for _, r in fleet_df.iterrows():
+        port_name = _match_port(_str_or_none(r.get("destination")))
+        if not port_name:
+            continue
+        port = _CURATED_PORTS[port_name]
+        try:
+            dist_nm = _haversine_nm(float(r["lat"]), float(r["lon"]), port["lat"], port["lon"])
+        except Exception:
+            continue
+        sog_val = float(r["sog"])
+        if sog_val < 0.5:
+            continue
+        eta_h = dist_nm / sog_val  # hours until arrival at current speed
+
+        # Skip vessels that are already at the port (< 10 nm) or beyond horizon
+        if dist_nm < 10 or eta_h > horizon_h:
+            continue
+
+        mmsi_int = int(r["mmsi"])
+        port_buckets[port_name].append({
+            "mmsi": mmsi_int,
+            "name": _str_or_none(r.get("name")),
+            "segment": _str_or_none(r.get("segment")),
+            "kind": _str_or_none(r.get("kind")),
+            "laden": laden_map.get(mmsi_int),
+            "eta_hours": round(eta_h, 1),
+            "distance_nm": round(dist_nm, 0),
+            "sog": round(sog_val, 1),
+            "destination_raw": _str_or_none(r.get("destination")),
+            "registry_risk": None,
+            "imo": _valid_imo(r.get("imo")),
+        })
+        total_inbound += 1
+
+    # Enrich top vessels per port with registry risk
+    all_imos = [d["imo"] for buckets in port_buckets.values() for d in buckets if d["imo"]]
+    risk_m: dict[int, int] = {}
+    if all_imos:
+        reg_df = db.query(
+            "SELECT imo, risk_score FROM vessel_registry "
+            "WHERE imo IN (" + ",".join("?" * len(all_imos)) + ") AND fetch_ok = true",
+            all_imos,
+            db=db.registry_db_path(),
+        )
+        if not reg_df.empty:
+            for _, rr in reg_df.iterrows():
+                iv = _valid_imo(rr.get("imo"))
+                rv = rr.get("risk_score")
+                if iv and rv is not None and not (isinstance(rv, float) and pd.isna(rv)):
+                    risk_m[iv] = int(rv)
+    for buckets in port_buckets.values():
+        for d in buckets:
+            if d["imo"]:
+                d["registry_risk"] = risk_m.get(d["imo"])
+
+    # Build response - only include ports with arrivals
+    result_ports: list[PortArrivalForecast] = []
+    for pname, buckets in port_buckets.items():
+        if not buckets:
+            continue
+        buckets.sort(key=lambda d: d["eta_hours"])
+        vessels = [ArrivalVessel(**{k: v for k, v in d.items() if k != "imo"}) for d in buckets]
+        result_ports.append(PortArrivalForecast(
+            port=pname,
+            arrivals_24h=sum(1 for v in vessels if v.eta_hours <= 24),
+            arrivals_48h=len(vessels),
+            vessels=vessels[:20],  # cap to 20 per port for payload
+        ))
+
+    result_ports.sort(key=lambda p: p.arrivals_48h, reverse=True)
+
+    return PortArrivalResponse(
+        as_of=now_dt.isoformat(),
+        total_inbound=total_inbound,
+        ports=result_ports,
     )

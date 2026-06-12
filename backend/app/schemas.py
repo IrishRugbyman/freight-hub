@@ -1057,3 +1057,30 @@ class SpeedAnomalyResponse(BaseModel):
     total_vessels_checked: int
     anomaly_count: int
     rows: list[SpeedAnomalyRow]
+
+
+# Phase 47: 48h Port Arrival Forecast
+class ArrivalVessel(BaseModel):
+    mmsi: int
+    name: str | None
+    segment: str | None
+    kind: str | None
+    laden: str | None
+    eta_hours: float
+    distance_nm: float
+    sog: float
+    destination_raw: str | None
+    registry_risk: int | None
+
+
+class PortArrivalForecast(BaseModel):
+    port: str
+    arrivals_24h: int
+    arrivals_48h: int
+    vessels: list[ArrivalVessel]
+
+
+class PortArrivalResponse(BaseModel):
+    as_of: str
+    total_inbound: int
+    ports: list[PortArrivalForecast]

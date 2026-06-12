@@ -25,7 +25,7 @@ function TrackerPage() {
   const [trailHours, setTrailHours] = useState<24 | 168>(24)
   const [focusTarget, setFocusTarget] = useState<{ lat: number; lon: number } | null>(null)
 
-  const { data: vessels = [], isLoading, isError, dataUpdatedAt } = useVessels(filters)
+  const { data: vessels = [], isLoading, isError, dataUpdatedAt, isPlaceholderData } = useVessels(filters)
   useVesselStream(filters, layers.deckgl)
   const { data: meta } = useMeta()
   const { data: trailPoints } = useVesselTrack(selected?.mmsi ?? null, trailHours)
@@ -110,8 +110,10 @@ function TrackerPage() {
             <span className="flex items-center gap-1.5">
               <Loader2 size={12} className="animate-spin" /> Loading...
             </span>
-          ) : isError ? (
+          ) : isError && !isPlaceholderData ? (
             <span className="text-destructive">Feed unavailable, retrying</span>
+          ) : isError && isPlaceholderData ? (
+            <span className="text-yellow-500">Refreshing...</span>
           ) : vessels.length === 0 ? (
             <span>No vessels match</span>
           ) : (

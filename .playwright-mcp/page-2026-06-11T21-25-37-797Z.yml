@@ -1,0 +1,255 @@
+- generic [ref=e2]:
+  - banner:
+    - navigation [ref=e3]:
+      - generic [ref=e6]:
+        - generic [ref=e8]:
+          - text: 
+          - link "logo" [ref=e9] [cursor=pointer]:
+            - /url: HomePage?fs=HomePage
+            - img "logo" [ref=e10]
+        - text:   
+        - generic [ref=e11]:
+          - list [ref=e15]:
+            - listitem [ref=e16]:
+              - link "" [ref=e17] [cursor=pointer]:
+                - /url: "#"
+                - generic [ref=e19]: 
+              - text:    
+          - list [ref=e21]:
+            - listitem [ref=e22]:
+              - link "Home" [ref=e23] [cursor=pointer]:
+                - /url: ../public/HomePage?fs=HomePage
+                - text: Home 
+            - listitem [ref=e24]:
+              - link "About Equasis " [expanded] [ref=e25] [cursor=pointer]:
+                - /url: ../restricted/About?fs=HomePage
+                - text: About Equasis
+                - generic [ref=e26]: 
+                - text: 
+              - text:       
+            - listitem [ref=e27]:
+              - link "News" [ref=e28] [cursor=pointer]:
+                - /url: ../public/News?fs=HomePage&P_NEWS=News.html
+            - listitem
+            - listitem [ref=e29]:
+              - link "Support " [expanded] [ref=e30] [cursor=pointer]:
+                - /url: ../restricted/Support?fs=HomePage
+                - text: Support
+                - generic [ref=e31]: 
+                - text: 
+              - text:  
+  - generic [ref=e33]:
+    - generic:
+      - generic [ref=e35]:
+        - generic [ref=e37]: 
+        - generic [ref=e38]:
+          - heading "Access" [level=3] [ref=e39]
+          - form [ref=e41]:
+            - generic [ref=e43]:
+              - generic [ref=e44]:
+                - textbox "E-mail" [ref=e45]
+                - generic [ref=e46]: E-mail
+              - generic [ref=e48]:
+                - textbox "Password" [ref=e49]
+                - generic [ref=e50]: Password
+                - generic [ref=e52]: 
+            - generic [ref=e54]:
+              - generic [ref=e55]:
+                - link "Lost password " [ref=e56] [cursor=pointer]:
+                  - /url: ../public/LostPassword?fs=HomePage
+                  - text: Lost password
+                  - generic [ref=e57]: 
+                - link "Registration " [ref=e59] [cursor=pointer]:
+                  - /url: ../public/ConditionsRegistration?fs=HomePage
+                  - text: Registration
+                  - generic [ref=e60]: 
+              - button "Login" [ref=e62] [cursor=pointer]
+      - generic [ref=e65]:
+        - generic [ref=e67]: 
+        - generic [ref=e68]:
+          - heading "Search" [level=3] [ref=e69]
+          - form [ref=e71]:
+            - generic [ref=e72]:
+              - textbox "IMO, Name, Company" [ref=e73]
+              - button "" [ref=e75] [cursor=pointer]:
+                - generic [ref=e76]: 
+            - link "Advanced Search " [ref=e78] [cursor=pointer]:
+              - /url: "#"
+              - text: Advanced Search
+              - generic [ref=e79]: 
+            - link "Go to My Equasis " [ref=e81] [cursor=pointer]:
+              - /url: ../restricted/ShipSubcription?fs=HomePage
+              - text: Go to My Equasis
+              - generic [ref=e82]: 
+  - generic [ref=e85]:
+    - generic:
+      - heading "Welcome to Equasis, a public site promoting maritime safety and quality" [level=3] [ref=e89]
+      - text:  
+      - generic [ref=e93]:
+        - paragraph [ref=e96]:
+          - text: More news
+          - link "" [ref=e97] [cursor=pointer]:
+            - /url: //www.facebook.com/equasis.news
+            - generic [ref=e98]: 
+          - link "" [ref=e99] [cursor=pointer]:
+            - /url: //twitter.com/equasis_news
+            - generic [ref=e100]: 
+        - generic [ref=e103]:
+          - generic:
+            - heading "News" [level=3] [ref=e105]
+            - heading "2026-06-05" [level=3] [ref=e107]
+            - generic [ref=e108]:
+              - paragraph
+              - paragraph [ref=e109]:
+                - text: Equasis team is pleased to announce the conclusion of the platform developments required to integrate DYNAMARINe s data into Equasis.
+                - text: The data is now available for consultation on the Ship Info page under the STS Operations section.
+              - paragraph [ref=e110]:
+                - text: More details
+                - link "here" [ref=e111] [cursor=pointer]:
+                  - /url: https://www.equasis.org/EquasisWeb/public/News?fs=About&P_NEWS=News.html
+                - text: .
+              - paragraph
+  - generic [ref=e114]:
+    - generic:
+      - generic [ref=e115]:
+        - heading "LAST DATA UPDATE :" [level=3] [ref=e120]
+        - generic [ref=e121]:
+          - generic:
+            - generic:
+              - generic:
+                - generic [ref=e122]:
+                  - generic [ref=e123]:
+                    - generic [ref=e124]: 12 hour(s) ago
+                    - paragraph [ref=e125]: Paris MoU
+                  - generic [ref=e126]:
+                    - generic [ref=e127]: 12 hour(s) ago
+                    - paragraph [ref=e128]: Russian Maritime Register of Shipping
+                  - generic [ref=e129]:
+                    - generic [ref=e130]: 12 hour(s) ago
+                    - paragraph [ref=e131]: Türk Loydu
+                  - generic [ref=e132]:
+                    - generic [ref=e133]: 13 hour(s) ago
+                    - paragraph [ref=e134]: Croatian Register of Shipping
+                  - generic [ref=e135]:
+                    - generic [ref=e136]: 13 hour(s) ago
+                    - paragraph [ref=e137]: American Bureau of Shipping
+                - generic [ref=e138]:
+                  - generic [ref=e139]:
+                    - generic [ref=e140]: 1 day(s) ago
+                    - paragraph [ref=e141]: Indian Ocean MoU
+                  - generic [ref=e142]:
+                    - generic [ref=e143]: 1 day(s) ago
+                    - paragraph [ref=e144]: IHS Maritime
+                  - generic [ref=e145]:
+                    - generic [ref=e146]: 1 day(s) ago
+                    - paragraph [ref=e147]: Türk Loydu
+                  - generic [ref=e148]:
+                    - generic [ref=e149]: 1 day(s) ago
+                    - paragraph [ref=e150]: Mediterranean MoU
+                  - generic [ref=e151]:
+                    - generic [ref=e152]: 1 day(s) ago
+                    - paragraph [ref=e153]: Paris MoU
+      - generic [ref=e155]:
+        - heading "USER ACTIVITY :" [level=3] [ref=e160]
+        - generic [ref=e164]:
+          - paragraph [ref=e165]: "Connections : 96,036,695 since 2007"
+          - paragraph [ref=e166]: "Users connected : 4438"
+          - link:
+            - /url: https://www.clustrmaps.com/map/equasis.org
+          - button "Cluster Maps" [ref=e167] [cursor=pointer]
+  - generic [ref=e169]:
+    - generic [ref=e175]:
+      - heading "Equasis's contributors" [level=3] [ref=e176]
+      - generic [ref=e178]:
+        - link "Canada" [ref=e180] [cursor=pointer]:
+          - /url: https://www.tc.gc.ca/eng/marinesafety/oep-inspection-menu-770.htm
+          - img "Canada" [ref=e181]
+        - link "EMSA" [ref=e183] [cursor=pointer]:
+          - /url: https://www.emsa.europa.eu/
+          - img "EMSA" [ref=e184]
+        - link "France" [ref=e186] [cursor=pointer]:
+          - /url: https://www.mer.gouv.fr/
+          - img "France" [ref=e187]
+        - link "Japan" [ref=e189] [cursor=pointer]:
+          - /url: https://www.mofa.go.jp/
+          - img "Japan" [ref=e190]
+        - link "Korea (Republic of )" [ref=e192] [cursor=pointer]:
+          - /url: https://www.korea.net/
+          - img "Korea (Republic of )" [ref=e193]
+        - link "Norway" [ref=e195] [cursor=pointer]:
+          - /url: https://www.norway.no/
+          - img "Norway" [ref=e196]
+        - link "Spain" [ref=e198] [cursor=pointer]:
+          - /url: https://www.fomento.gob.es/MFOM/LANG_CASTELLANO/DIRECCIONES_GENERALES/MARINA_MERCANTE/
+          - img "Spain" [ref=e199]
+        - link "United Kingdom" [ref=e201] [cursor=pointer]:
+          - /url: https://www.gov.uk/government/organisations/maritime-and-coastguard-agency
+          - img "United Kingdom" [ref=e202]
+        - link "United States of America" [ref=e204] [cursor=pointer]:
+          - /url: https://www.dco.uscg.mil/Our-Organization/Assistant-Commandant-for-Prevention-Policy-CG-5P/
+          - img "United States of America" [ref=e205]
+    - generic [ref=e207]:
+      - generic:
+        - generic [ref=e208]:
+          - generic:
+            - generic:
+              - generic [ref=e209]:
+                - paragraph [ref=e211]:
+                  - link " Contact us" [ref=e212] [cursor=pointer]:
+                    - /url: Moa?fs=HomePage&P_MOA=contact
+                    - generic [ref=e213]: 
+                    - text: Contact us
+                - paragraph [ref=e215]:
+                  - link " Help" [ref=e216] [cursor=pointer]:
+                    - /url: Moa?fs=HomePage&P_MOA=help
+                    - generic [ref=e217]: 
+                    - text: Help
+              - generic [ref=e218]:
+                - paragraph [ref=e220]:
+                  - text: Join us on
+                  - link "" [ref=e221] [cursor=pointer]:
+                    - /url: //www.facebook.com/equasis.news
+                    - generic [ref=e222]: 
+                  - link "" [ref=e223] [cursor=pointer]:
+                    - /url: //twitter.com/equasis_news
+                    - generic [ref=e224]: 
+                - paragraph [ref=e226]:
+                  - link " FAQ" [ref=e227] [cursor=pointer]:
+                    - /url: Moa?fs=HomePage&P_MOA=faq
+                    - generic [ref=e228]: 
+                    - text: FAQ
+        - generic [ref=e231]:
+          - heading "Site map" [level=3] [ref=e232]
+          - list [ref=e234]:
+            - listitem [ref=e235]:
+              - link "Home" [ref=e236] [cursor=pointer]:
+                - /url: ../public/HomePage?fs=HomePage
+            - listitem [ref=e237]:
+              - link "About Equasis" [ref=e238] [cursor=pointer]:
+                - /url: ../public/About?fs=HomePage
+            - listitem [ref=e239]:
+              - link "Search" [ref=e240] [cursor=pointer]:
+                - /url: "#"
+            - listitem [ref=e241]:
+              - link "Data providers" [ref=e242] [cursor=pointer]:
+                - /url: ../public/About?fs=HomePage&P_ABOUT=Providers.html
+          - list [ref=e244]:
+            - listitem [ref=e245]:
+              - link "Annual Reports" [ref=e246] [cursor=pointer]:
+                - /url: ../restricted/Stat?fs=HomePage
+            - listitem [ref=e247]:
+              - link "News" [ref=e248] [cursor=pointer]:
+                - /url: ../public/News?fs=HomePage&P_NEWS=News.html
+            - listitem [ref=e249]:
+              - link "My Equasis" [ref=e250] [cursor=pointer]:
+                - /url: ../restricted/ShipSubcription?fs=HomePage
+            - listitem [ref=e251]:
+              - link "Equasis policy" [ref=e252] [cursor=pointer]:
+                - /url: ../public/About?fs=HomePage&P_ABOUT=EquasisPolicy.html
+        - text:   
+    - contentinfo [ref=e253]:
+      - generic [ref=e254]:
+        - generic:
+          - paragraph [ref=e256]: "© Copyright 2000-2026; Version : Prod v3.7.1 a; Developed and hosted by French Ministry in charge of the Sea and Fisheries -DGAMPA/SDNUM-Saint-Malo"
+          - text: 
+  - text:  

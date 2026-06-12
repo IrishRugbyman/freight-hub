@@ -1771,3 +1771,42 @@ export function useSpeedAnomalies(kind = 'tanker', minZ = 2.5, limit = 50) {
     refetchInterval: 3 * 60 * 1000,
   })
 }
+
+// Phase 47: 48h Port Arrival Forecast
+export interface ArrivalVessel {
+  mmsi: number
+  name: string | null
+  segment: string | null
+  kind: string | null
+  laden: string | null
+  eta_hours: number
+  distance_nm: number
+  sog: number
+  destination_raw: string | null
+  registry_risk: number | null
+}
+
+export interface PortArrivalForecast {
+  port: string
+  arrivals_24h: number
+  arrivals_48h: number
+  vessels: ArrivalVessel[]
+}
+
+export interface PortArrivalResponse {
+  as_of: string
+  total_inbound: number
+  ports: PortArrivalForecast[]
+}
+
+export function usePortArrivals(kind = 'tanker', horizonH = 48) {
+  return useQuery({
+    queryKey: ['port-arrivals', kind, horizonH],
+    queryFn: () =>
+      getJSON<PortArrivalResponse>(
+        `/api/analytics/port-arrivals?kind=${encodeURIComponent(kind)}&horizon_h=${horizonH}`,
+      ),
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+  })
+}
