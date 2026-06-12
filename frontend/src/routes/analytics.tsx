@@ -28,6 +28,7 @@ const PortCongestionCard = lazy(() => import('./AnalyticsCharts').then((m) => ({
 const DestinationFlowCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.DestinationFlowCard })))
 const MarketSummaryCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.MarketSummaryCard })))
 const VesselRiskLeaderboardCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.VesselRiskLeaderboardCard })))
+const AnomalyWatchlistCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.AnomalyWatchlistCard })))
 
 function ChartSkeleton() {
   return <div className="h-[300px] animate-pulse rounded-lg bg-muted/40" />
@@ -84,6 +85,7 @@ function AnalyticsPage() {
         <Suspense fallback={<ChartSkeleton />}><VesselRiskLeaderboardCard /></Suspense>
 
         <h2 className="text-base font-semibold text-foreground">Intelligence Alerts</h2>
+        <Suspense fallback={<ChartSkeleton />}><AnomalyWatchlistCard /></Suspense>
         <Suspense fallback={<ChartSkeleton />}><RiskEventsCard /></Suspense>
 
         <h2 className="text-base font-semibold text-foreground">Event Intelligence</h2>

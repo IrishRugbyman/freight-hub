@@ -1332,3 +1332,44 @@ export function useVesselBehavioralRisk(mmsi: number | null | undefined, days = 
     refetchInterval: 5 * 60 * 1000,
   })
 }
+
+export interface AnomalyWatchlistItem {
+  mmsi: number
+  imo: number | null
+  name: string | null
+  kind: string | null
+  segment: string | null
+  region: string | null
+  lat: number | null
+  lon: number | null
+  sog: number | null
+  destination: string | null
+  laden: string | null
+  total_score: number
+  behavioral_score: number
+  registry_risk: number | null
+  ofac: boolean
+  risk_level: 'Low' | 'Elevated' | 'High' | 'Critical'
+  sts_count_7d: number
+  reroute_count_7d: number
+  signals: string[]
+}
+
+export interface AnomalyWatchlistResponse {
+  as_of: string
+  min_score: number
+  total_flagged: number
+  rows: AnomalyWatchlistItem[]
+}
+
+export function useAnomalyWatchlist(minScore = 50, limit = 30) {
+  return useQuery({
+    queryKey: ['anomaly-watchlist', minScore, limit],
+    queryFn: () =>
+      getJSON<AnomalyWatchlistResponse>(
+        `/api/analytics/anomaly-watchlist?min_score=${minScore}&limit=${limit}`
+      ),
+    staleTime: 2 * 60 * 1000,
+    refetchInterval: 2 * 60 * 1000,
+  })
+}

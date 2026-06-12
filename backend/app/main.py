@@ -70,6 +70,8 @@ from .schemas import (
     RiskEventsResponse,
     ChokepointHeatmapCell,
     ChokepointHeatmapResponse,
+    AnomalyWatchlistItem,
+    AnomalyWatchlistResponse,
     TradeLaneCell,
     TradeLaneMatrixResponse,
     VesselBehavioralRisk,
@@ -2668,6 +2670,203 @@ def _dest_to_region(dest: str | None) -> str:
     if not dest or len(dest) < 2:
         return "Unknown"
     return _DEST_REGION_MAP.get(dest[:2].upper(), "Unknown")
+
+
+_HIGH_RISK_REGIONS = frozenset({
+    "hormuz", "persian_gulf", "west_africa", "somalia",
+    "red_sea", "bab_el_mandeb", "gulf_of_aden",
+})
+
+
+@app.get("/api/analytics/anomaly-watchlist", response_model=AnomalyWatchlistResponse)
+def analytics_anomaly_watchlist(
+    min_score: int = 50,
+    limit: int = 30,
+):
+    """Multi-signal anomaly watchlist: vessels with elevated composite risk scores.
+
+    Combines behavioral events (STS + reroutes in 7d), Equasis registry risk,
+    OFAC status, and geographic location. Each row includes human-readable signal
+    descriptions explaining why the vessel is flagged.
+    """
+    min_score = max(0, min(100, min_score))
+    limit = max(1, min(100, limit))
+    now_ts = datetime.now(UTC).replace(tzinfo=None)
+    cutoff_7d = now_ts - timedelta(days=7)
+    cutoff_30d = now_ts - timedelta(days=30)
+
+    # Step 1: event counts (30d for scoring, 7d for recency signals)
+    adb = db.analytics_db_path()
+    ev_30d = db.query(
+        "SELECT mmsi, type, COUNT(*) AS cnt FROM ais_events WHERE start_ts >= ? GROUP BY mmsi, type",
+        [cutoff_30d],
+        db=adb,
+    )
+    ev_7d = db.query(
+        "SELECT mmsi, type, COUNT(*) AS cnt FROM ais_events WHERE start_ts >= ? GROUP BY mmsi, type",
+        [cutoff_7d],
+        db=adb,
+    )
+
+    # sts can be either party
+    sts_30d_df = db.query(
+        "SELECT mmsi2 AS mmsi, COUNT(*) AS cnt FROM ais_events "
+        "WHERE type = 'sts' AND mmsi2 IS NOT NULL AND start_ts >= ? GROUP BY mmsi2",
+        [cutoff_30d],
+        db=adb,
+    )
+    sts_7d_df = db.query(
+        "SELECT mmsi2 AS mmsi, COUNT(*) AS cnt FROM ais_events "
+        "WHERE type = 'sts' AND mmsi2 IS NOT NULL AND start_ts >= ? GROUP BY mmsi2",
+        [cutoff_7d],
+        db=adb,
+    )
+
+    def _build_counts(df, mmsi2_df) -> tuple[dict[int, int], dict[int, int]]:
+        sts: dict[int, int] = {}
+        rr: dict[int, int] = {}
+        if not df.empty:
+            for _, r in df.iterrows():
+                m = int(r["mmsi"]); t = str(r["type"]); c = int(r["cnt"])
+                if t == "sts": sts[m] = sts.get(m, 0) + c
+                elif t == "reroute": rr[m] = rr.get(m, 0) + c
+        if not mmsi2_df.empty:
+            for _, r in mmsi2_df.iterrows():
+                m = int(r["mmsi"]); c = int(r["cnt"])
+                sts[m] = sts.get(m, 0) + c
+        return sts, rr
+
+    sts_30d, rr_30d = _build_counts(ev_30d, sts_30d_df)
+    sts_7d, rr_7d = _build_counts(ev_7d, sts_7d_df)
+
+    # Step 2: live positions
+    lp_df = db.query(
+        "SELECT mmsi, imo, name, kind, segment, region, lat, lon, sog, destination "
+        "FROM live_positions WHERE segment != 'Small'"
+    )
+    if lp_df.empty:
+        return AnomalyWatchlistResponse(
+            as_of=_iso(now_ts) or "",
+            min_score=min_score,
+            total_flagged=0,
+            rows=[],
+        )
+
+    # Step 3: vessel state (laden/ballast)
+    vs_df = db.query("SELECT mmsi, laden FROM vessel_state", db=adb)
+    laden_map: dict[int, str] = {}
+    if not vs_df.empty:
+        for _, r in vs_df.iterrows():
+            laden_map[int(r["mmsi"])] = str(r["laden"]) if r.get("laden") else "unknown"
+
+    # Step 4: registry risk for all live IMOs
+    live_imos = [_valid_imo(r.get("imo")) for _, r in lp_df.iterrows() if _valid_imo(r.get("imo")) is not None]
+    reg_map: dict[int, dict] = {}
+    if live_imos:
+        ph = ",".join(["?"] * len(live_imos))
+        reg_df = db.query(
+            f"SELECT imo, risk_score, ofac_sanctioned FROM vessel_registry "
+            f"WHERE imo IN ({ph}) AND fetch_ok = true",
+            live_imos,
+            db=db.registry_db_path(),
+        )
+        if not reg_df.empty:
+            for _, r in reg_df.iterrows():
+                imo_v = _valid_imo(r.get("imo"))
+                if imo_v:
+                    reg_map[imo_v] = {
+                        "risk_score": int(r["risk_score"]) if r.get("risk_score") is not None and not pd.isna(r["risk_score"]) else None,
+                        "ofac": bool(r["ofac_sanctioned"]) if r.get("ofac_sanctioned") is not None and not pd.isna(r["ofac_sanctioned"]) else False,
+                    }
+
+    # Step 5: score and filter
+    rows_out: list[AnomalyWatchlistItem] = []
+    for _, row in lp_df.iterrows():
+        mmsi = int(row["mmsi"])
+        imo = _valid_imo(row.get("imo"))
+        reg = reg_map.get(imo) if imo else None
+
+        sts_c = sts_30d.get(mmsi, 0)
+        rr_c = rr_30d.get(mmsi, 0)
+        behavioral = min(sts_c * 20 + rr_c * 5, 100)
+
+        reg_risk = reg["risk_score"] if reg else None
+        ofac = reg["ofac"] if reg else False
+        if reg_risk is not None:
+            base = round(behavioral * 0.4 + reg_risk * 0.6)
+        else:
+            base = behavioral
+        total = min(base + (25 if ofac else 0), 100)
+
+        if total < min_score:
+            continue
+
+        # Build signal descriptions
+        signals: list[str] = []
+        region = _str_or_none(row.get("region"))
+        if ofac:
+            signals.append("OFAC SDN sanctioned")
+        if reg_risk is not None and reg_risk >= 75:
+            signals.append(f"Critical registry risk ({reg_risk}/100)")
+        elif reg_risk is not None and reg_risk >= 50:
+            signals.append(f"High registry risk ({reg_risk}/100)")
+        elif reg_risk is not None and reg_risk >= 25:
+            signals.append(f"Elevated registry risk ({reg_risk}/100)")
+        sts_7d_c = sts_7d.get(mmsi, 0)
+        rr_7d_c = rr_7d.get(mmsi, 0)
+        if sts_7d_c > 0:
+            signals.append(f"{sts_7d_c} STS event(s) in 7d")
+        if rr_7d_c > 0:
+            signals.append(f"{rr_7d_c} destination change(s) in 7d")
+        if region in _HIGH_RISK_REGIONS:
+            signals.append(f"In high-risk region ({region.replace('_', ' ')})")
+
+        if total >= 75:
+            risk_level = "Critical"
+        elif total >= 50:
+            risk_level = "High"
+        elif total >= 25:
+            risk_level = "Elevated"
+        else:
+            risk_level = "Low"
+
+        laden_val = laden_map.get(mmsi, "unknown")
+        sog_val = row.get("sog")
+        sog_f = float(sog_val) if sog_val is not None and not pd.isna(sog_val) else None
+        lat_f = float(row["lat"]) if row.get("lat") is not None and not pd.isna(row["lat"]) else None
+        lon_f = float(row["lon"]) if row.get("lon") is not None and not pd.isna(row["lon"]) else None
+
+        rows_out.append(AnomalyWatchlistItem(
+            mmsi=mmsi,
+            imo=imo,
+            name=_str_or_none(row.get("name")),
+            kind=_str_or_none(row.get("kind")),
+            segment=_str_or_none(row.get("segment")),
+            region=region,
+            lat=lat_f,
+            lon=lon_f,
+            sog=sog_f,
+            destination=_str_or_none(row.get("destination")),
+            laden=laden_val,
+            total_score=total,
+            behavioral_score=behavioral,
+            registry_risk=reg_risk,
+            ofac=ofac,
+            risk_level=risk_level,
+            sts_count_7d=sts_7d_c,
+            reroute_count_7d=rr_7d_c,
+            signals=signals,
+        ))
+
+    rows_out.sort(key=lambda r: (-r.total_score, -r.behavioral_score))
+    total_flagged = len(rows_out)
+
+    return AnomalyWatchlistResponse(
+        as_of=_iso(now_ts) or "",
+        min_score=min_score,
+        total_flagged=total_flagged,
+        rows=rows_out[:limit],
+    )
 
 
 @app.get("/api/analytics/trade-lane-matrix", response_model=TradeLaneMatrixResponse)

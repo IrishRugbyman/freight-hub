@@ -13,7 +13,7 @@ import {
   YAxis,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion, useDestinationFlows, useMarketSummary, useVesselRiskScores, useChokepointHeatmap, useTradeLaneMatrix } from '@/lib/api'
+import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion, useDestinationFlows, useMarketSummary, useVesselRiskScores, useChokepointHeatmap, useTradeLaneMatrix, useAnomalyWatchlist } from '@/lib/api'
 import type { RiskEventItem } from '@/lib/api'
 
 const CHOKEPOINTS = [
@@ -2096,6 +2096,106 @@ export function TradeLaneMatrixCard() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Phase 34: Anomaly Watchlist
+// ---------------------------------------------------------------------------
+
+function anomalyBg(level: string) {
+  if (level === 'Critical') return 'bg-red-500/10 border-l-2 border-red-500/60'
+  if (level === 'High') return 'bg-orange-500/8 border-l-2 border-orange-500/50'
+  if (level === 'Elevated') return 'bg-yellow-500/8 border-l-2 border-yellow-500/40'
+  return ''
+}
+
+function anomalyScoreColor(level: string) {
+  if (level === 'Critical') return 'text-red-400 font-bold'
+  if (level === 'High') return 'text-orange-400 font-semibold'
+  if (level === 'Elevated') return 'text-yellow-400'
+  return 'text-muted-foreground'
+}
+
+export function AnomalyWatchlistCard() {
+  const [minScore, setMinScore] = useState(50)
+  const [limit, setLimit] = useState(25)
+  const { data, isLoading } = useAnomalyWatchlist(minScore, limit)
+  const rows = data?.rows ?? []
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex flex-wrap items-center justify-between gap-2">
+          <span>Anomaly Watchlist</span>
+          <div className="flex flex-wrap gap-2 text-sm font-normal">
+            <select
+              className="rounded border border-border bg-background px-2 py-1 text-xs"
+              value={minScore}
+              onChange={e => setMinScore(Number(e.target.value))}
+            >
+              <option value={25}>Score 25+</option>
+              <option value={50}>Score 50+</option>
+              <option value={75}>Score 75+</option>
+            </select>
+            <select
+              className="rounded border border-border bg-background px-2 py-1 text-xs"
+              value={limit}
+              onChange={e => setLimit(Number(e.target.value))}
+            >
+              <option value={25}>Top 25</option>
+              <option value={50}>Top 50</option>
+            </select>
+          </div>
+        </CardTitle>
+        {data && (
+          <p className="text-xs text-muted-foreground">
+            {data.total_flagged} vessels flagged (score {'>='} {data.min_score}) as of{' '}
+            {new Date(data.as_of).toLocaleTimeString()}
+          </p>
+        )}
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="h-64 animate-pulse rounded bg-muted/40" />
+        ) : rows.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">
+            No vessels above threshold.
+          </p>
+        ) : (
+          <div className="space-y-1">
+            {rows.map((row) => (
+              <div key={row.mmsi} className={`rounded px-2 py-1.5 ${anomalyBg(row.risk_level)}`}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-sm font-medium truncate">{row.name ?? `MMSI ${row.mmsi}`}</span>
+                      {row.ofac && (
+                        <span className="rounded bg-red-500/20 px-1 py-px text-[9px] font-bold text-red-400 uppercase">OFAC</span>
+                      )}
+                      <span className="text-xs text-muted-foreground">{row.segment ?? row.kind}</span>
+                      {row.region && (
+                        <span className="text-xs text-muted-foreground/70">{row.region.replace(/_/g, ' ')}</span>
+                      )}
+                    </div>
+                    <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5">
+                      {row.signals.map((sig, i) => (
+                        <span key={i} className="text-[10px] text-muted-foreground">
+                          <span className="mr-0.5 opacity-50">+</span>{sig}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <div className={`shrink-0 text-right text-sm tabular-nums ${anomalyScoreColor(row.risk_level)}`}>
+                    {row.total_score}
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </CardContent>

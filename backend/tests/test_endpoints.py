@@ -2387,3 +2387,66 @@ def test_vessel_behavioral_risk_recent_events(risk_leaderboard_client):
         assert "type" in ev
         assert "ts" in ev
         assert ev["type"] in ("sts", "reroute")
+
+
+# ---------------------------------------------------------------------------
+# Phase 34: anomaly watchlist
+# ---------------------------------------------------------------------------
+
+
+def test_anomaly_watchlist_structure(risk_leaderboard_client):
+    r = risk_leaderboard_client.get("/api/analytics/anomaly-watchlist?min_score=0")
+    assert r.status_code == 200
+    d = r.json()
+    for key in ("as_of", "min_score", "total_flagged", "rows"):
+        assert key in d
+    if d["rows"]:
+        row = d["rows"][0]
+        for field in ("mmsi", "name", "total_score", "risk_level", "signals",
+                      "sts_count_7d", "reroute_count_7d", "ofac"):
+            assert field in row
+
+
+def test_anomaly_watchlist_sorted_by_score(risk_leaderboard_client):
+    r = risk_leaderboard_client.get("/api/analytics/anomaly-watchlist?min_score=0")
+    rows = r.json()["rows"]
+    scores = [row["total_score"] for row in rows]
+    assert scores == sorted(scores, reverse=True)
+
+
+def test_anomaly_watchlist_excludes_small(risk_leaderboard_client):
+    r = risk_leaderboard_client.get("/api/analytics/anomaly-watchlist?min_score=0")
+    d = r.json()
+    mmsis = {row["mmsi"] for row in d["rows"]}
+    # 9005 is Small segment -> must be excluded
+    assert 9005 not in mmsis
+
+
+def test_anomaly_watchlist_min_score_filter(risk_leaderboard_client):
+    r_all = risk_leaderboard_client.get("/api/analytics/anomaly-watchlist?min_score=0")
+    r_high = risk_leaderboard_client.get("/api/analytics/anomaly-watchlist?min_score=70")
+    all_rows = r_all.json()["rows"]
+    high_rows = r_high.json()["rows"]
+    # High filter should return fewer or equal rows
+    assert len(high_rows) <= len(all_rows)
+    for row in high_rows:
+        assert row["total_score"] >= 70
+
+
+def test_anomaly_watchlist_signals_populated(risk_leaderboard_client):
+    r = risk_leaderboard_client.get("/api/analytics/anomaly-watchlist?min_score=0")
+    d = r.json()
+    # Find 9003 (OFAC vessel) in rows
+    ofac_row = next((row for row in d["rows"] if row["mmsi"] == 9003), None)
+    if ofac_row:
+        assert ofac_row["ofac"] is True
+        # OFAC signal should appear in signals list
+        assert any("OFAC" in s for s in ofac_row["signals"])
+
+
+def test_anomaly_watchlist_limit_param(risk_leaderboard_client):
+    r = risk_leaderboard_client.get("/api/analytics/anomaly-watchlist?min_score=0&limit=2")
+    d = r.json()
+    assert len(d["rows"]) <= 2
+    # total_flagged is the full count before limit is applied
+    assert d["total_flagged"] >= len(d["rows"])

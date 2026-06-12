@@ -706,6 +706,38 @@ class PortCongestionResponse(BaseModel):
     rows: list[PortCongestionRow]
 
 
+# ---- Phase 34: Anomaly watchlist ----
+
+
+class AnomalyWatchlistItem(BaseModel):
+    mmsi: int
+    imo: int | None
+    name: str | None
+    kind: str | None
+    segment: str | None
+    region: str | None
+    lat: float | None
+    lon: float | None
+    sog: float | None
+    destination: str | None
+    laden: str | None             # laden / ballast / unknown
+    total_score: int              # composite behavioral + registry
+    behavioral_score: int
+    registry_risk: int | None
+    ofac: bool
+    risk_level: str               # Low / Elevated / High / Critical
+    sts_count_7d: int
+    reroute_count_7d: int
+    signals: list[str]            # human-readable signal descriptions
+
+
+class AnomalyWatchlistResponse(BaseModel):
+    as_of: str
+    min_score: int
+    total_flagged: int
+    rows: list[AnomalyWatchlistItem]
+
+
 # ---- Phase 33: Per-vessel behavioral risk ----
 
 
