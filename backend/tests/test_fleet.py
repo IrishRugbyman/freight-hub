@@ -508,3 +508,80 @@ def test_high_risk_no_imo_excluded(tmp_path, monkeypatch):
     r = client.get("/api/analytics/high-risk-positions?min_risk=0")
     mmsis = {row["mmsi"] for row in r.json()["rows"]}
     assert 7003 not in mmsis
+
+
+# ---------------------------------------------------------------------------
+# /api/fleet/flag-risk
+# ---------------------------------------------------------------------------
+
+def test_flag_risk_structure(tmp_path, monkeypatch):
+    client = _make_client(tmp_path, monkeypatch)
+    r = client.get("/api/fleet/flag-risk")
+    assert r.status_code == 200
+    d = r.json()
+    assert "as_of" in d
+    assert isinstance(d["rows"], list)
+    for row in d["rows"]:
+        assert "flag" in row
+        assert "vessel_count" in row
+        assert "avg_risk_score" in row
+        assert "max_risk_score" in row
+        assert "high_risk_count" in row
+        assert "ofac_count" in row
+
+
+def test_flag_risk_values(tmp_path, monkeypatch):
+    client = _make_client(tmp_path, monkeypatch)
+    r = client.get("/api/fleet/flag-risk")
+    assert r.status_code == 200
+    # _REG_ROWS has Liberia (fetch_ok=true) but risk_score is NULL (not set in fixture)
+    # Rows only appear if risk_score IS NOT NULL - so this returns empty unless we set scores
+    # fetch_ok=false vessel (Togo) should be excluded
+    d = r.json()
+    rows_by_flag = {row["flag"]: row for row in d["rows"]}
+    # Togo vessel (fetch_ok=false) never appears
+    assert "Togo" not in rows_by_flag
+
+
+def test_flag_risk_excludes_null_risk(tmp_path, monkeypatch):
+    """Vessels without risk_score are excluded from flag-risk."""
+    client = _make_client(tmp_path, monkeypatch)
+    r = client.get("/api/fleet/flag-risk")
+    assert r.status_code == 200
+    # All vessels in _REG_ROWS have risk_score=NULL -> result is empty
+    assert r.json()["rows"] == []
+
+
+def test_flag_risk_sorted_desc(tmp_path, monkeypatch):
+    """When scores exist, rows are sorted by avg_risk_score descending."""
+    ais_file = tmp_path / "ais.duckdb"
+    ais_conn = duckdb.connect(str(ais_file))
+    ais_conn.execute(_AIS_SCHEMA)
+    ais_conn.close()
+
+    reg_file = tmp_path / "registry.duckdb"
+    reg_conn = duckdb.connect(str(reg_file))
+    reg_conn.execute(_REG_SCHEMA)
+    reg_conn.executemany(
+        "INSERT INTO vessel_registry (imo, ship_name, flag, flag_code, risk_score, fetch_ok, fetched_ts) VALUES (?,?,?,?,?,true,?)",
+        [
+            (9900001, "SHIP1", "Togo", "TGO", 80, _NOW),
+            (9900002, "SHIP2", "Malta", "MLT", 30, _NOW),
+            (9900003, "SHIP3", "Togo", "TGO", 60, _NOW),
+        ],
+    )
+    reg_conn.close()
+
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
+    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
+    from app.main import app
+    client = TestClient(app)
+
+    r = client.get("/api/fleet/flag-risk")
+    assert r.status_code == 200
+    rows = r.json()["rows"]
+    # Togo: avg=(80+60)/2=70, Malta: avg=30 -> Togo first
+    assert rows[0]["flag"] == "Togo"
+    assert rows[0]["vessel_count"] == 2
+    assert rows[0]["avg_risk_score"] == pytest.approx(70.0, abs=0.5)
+    assert rows[1]["flag"] == "Malta"

@@ -319,6 +319,23 @@ class OwnerRiskResponse(BaseModel):
     as_of: str
     rows: list[OwnerRiskItem]
 
+class FlagRiskRow(BaseModel):
+    flag: str
+    flag_code: str | None
+    vessel_count: int
+    avg_risk_score: float
+    max_risk_score: int
+    high_risk_count: int  # score >= 50
+    ofac_count: int
+    paris_mou: str | None   # Black / Grey / White / None (most common for this flag)
+    tokyo_mou: str | None
+
+
+class FlagRiskResponse(BaseModel):
+    as_of: str
+    rows: list[FlagRiskRow]
+
+
 class HighRiskPosition(BaseModel):
     mmsi: int
     imo: int

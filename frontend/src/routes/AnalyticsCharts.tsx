@@ -12,7 +12,7 @@ import {
   YAxis,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil } from '@/lib/api'
+import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk } from '@/lib/api'
 
 const CHOKEPOINTS = [
   'singapore_malacca', 'suez', 'hormuz', 'panama', 'gibraltar',
@@ -529,6 +529,79 @@ export function RegionUtilCard() {
               <Bar dataKey="other" stackId="a" fill="#475569" name="Other" />
             </BarChart>
           </ResponsiveContainer>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+const MOU_COLORS: Record<string, string> = {
+  Black: 'text-red-400',
+  Grey: 'text-yellow-400',
+  White: 'text-green-400',
+}
+
+export function FlagRiskCard() {
+  const { data, isLoading } = useFlagRisk(25)
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-medium">Flag State Risk</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {isLoading || !data ? (
+          <EmptyState message="Loading..." />
+        ) : data.rows.length === 0 ? (
+          <EmptyState message="No flag data yet. Registry crawl populates this." />
+        ) : (
+          <div className="space-y-1">
+            <div className="grid grid-cols-[1fr_3rem_3rem_3rem_5rem] gap-1 pb-1 text-[10px] font-medium text-muted-foreground border-b border-border">
+              <span>Flag</span>
+              <span className="text-right">Ships</span>
+              <span className="text-right">Avg</span>
+              <span className="text-right">High</span>
+              <span className="text-right">MOU (P/T)</span>
+            </div>
+            {data.rows.map((row) => (
+              <div
+                key={row.flag}
+                className="grid grid-cols-[1fr_3rem_3rem_3rem_5rem] gap-1 items-center text-xs"
+              >
+                <div className="truncate font-medium" title={row.flag}>
+                  {row.flag_code && (
+                    <span className="mr-1 text-[9px] text-muted-foreground/60 font-mono">{row.flag_code}</span>
+                  )}
+                  {row.flag}
+                  {row.ofac_count > 0 && (
+                    <span className="ml-1 rounded bg-red-500/15 px-1 py-0.5 text-[9px] font-semibold text-red-400">OFAC</span>
+                  )}
+                </div>
+                <span className="text-right text-muted-foreground">{row.vessel_count}</span>
+                <span className={`text-right font-mono font-semibold ${riskColor(row.avg_risk_score)}`}>
+                  {row.avg_risk_score.toFixed(0)}
+                </span>
+                <span className="text-right text-[10px] text-muted-foreground">
+                  {row.high_risk_count > 0 ? <span className="text-orange-400">{row.high_risk_count}</span> : '0'}
+                </span>
+                <div className="flex gap-1 justify-end text-[9px]">
+                  {row.paris_mou && (
+                    <span className={MOU_COLORS[row.paris_mou] ?? 'text-muted-foreground'}>
+                      P:{row.paris_mou[0]}
+                    </span>
+                  )}
+                  {row.tokyo_mou && (
+                    <span className={MOU_COLORS[row.tokyo_mou] ?? 'text-muted-foreground'}>
+                      T:{row.tokyo_mou[0]}
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+            <div className="pt-1 text-[10px] text-muted-foreground/50">
+              P/T: Paris/Tokyo MOU (B=Black, G=Grey, W=White). Grows as registry is crawled.
+            </div>
+          </div>
         )}
       </CardContent>
     </Card>

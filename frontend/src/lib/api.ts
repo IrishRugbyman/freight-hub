@@ -638,6 +638,32 @@ export function usePortFlow(kind?: string, topN?: number) {
   })
 }
 
+export interface FlagRiskRow {
+  flag: string
+  flag_code: string | null
+  vessel_count: number
+  avg_risk_score: number
+  max_risk_score: number
+  high_risk_count: number
+  ofac_count: number
+  paris_mou: string | null
+  tokyo_mou: string | null
+}
+
+export interface FlagRiskResponse {
+  as_of: string
+  rows: FlagRiskRow[]
+}
+
+export function useFlagRisk(topN = 30) {
+  return useQuery({
+    queryKey: ['flag-risk', topN],
+    queryFn: () => getJSON<FlagRiskResponse>(`/api/fleet/flag-risk?top_n=${topN}`),
+    staleTime: ANALYTICS_STALE,
+    refetchInterval: REFETCH_MS,
+  })
+}
+
 export interface OwnerRiskItem {
   owner: string
   vessel_count: number

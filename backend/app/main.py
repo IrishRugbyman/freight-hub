@@ -38,6 +38,8 @@ from .schemas import (
     DensityResponse,
     DispersionResponse,
     EventsResponse,
+    FlagRiskResponse,
+    FlagRiskRow,
     FleetFacets,
     FleetResponse,
     HighRiskPosition,
@@ -960,6 +962,57 @@ def fleet_owner_risk(min_vessels: int = 2, top_n: int = 30):
 
     rows.sort(key=lambda r: r.avg_risk_score, reverse=True)
     return OwnerRiskResponse(
+        as_of=_iso(datetime.now(UTC).replace(tzinfo=None)) or "",
+        rows=rows[:top_n],
+    )
+
+
+@app.get("/api/fleet/flag-risk", response_model=FlagRiskResponse)
+def fleet_flag_risk(top_n: int = 30):
+    """Flag-state risk analysis: which flags concentrate the most risk tonnage.
+
+    Groups vessel_registry by flag (fetch_ok=true, risk_score not null).
+    Sorts by avg_risk_score descending. top_n clamped 5-100.
+    """
+    top_n = max(5, min(100, top_n))
+    df = db.query(
+        "SELECT flag, flag_code, risk_score, "
+        "       COALESCE(ofac_sanctioned, false) AS ofac_sanctioned, "
+        "       paris_mou, tokyo_mou "
+        "FROM vessel_registry "
+        "WHERE fetch_ok = true AND flag IS NOT NULL AND risk_score IS NOT NULL",
+        db=db.registry_db_path(),
+    )
+    if df.empty:
+        return FlagRiskResponse(as_of=_iso(datetime.now(UTC).replace(tzinfo=None)) or "", rows=[])
+
+    rows = []
+    for flag, grp in df.groupby("flag"):
+        avg_risk = float(grp["risk_score"].mean())
+        max_risk = int(grp["risk_score"].max())
+        high_risk = int((grp["risk_score"] >= 50).sum())
+        ofac_count = int(grp["ofac_sanctioned"].fillna(False).astype(bool).sum()) if "ofac_sanctioned" in grp.columns else 0
+        flag_code_vals = grp["flag_code"].dropna().tolist()
+        flag_code = flag_code_vals[0] if flag_code_vals else None
+        # Most common paris/tokyo MOU status for this flag
+        paris_counts = grp["paris_mou"].dropna().value_counts()
+        tokyo_counts = grp["tokyo_mou"].dropna().value_counts()
+        paris_mou = paris_counts.index[0] if len(paris_counts) > 0 else None
+        tokyo_mou = tokyo_counts.index[0] if len(tokyo_counts) > 0 else None
+        rows.append(FlagRiskRow(
+            flag=str(flag),
+            flag_code=flag_code,
+            vessel_count=len(grp),
+            avg_risk_score=round(avg_risk, 1),
+            max_risk_score=max_risk,
+            high_risk_count=high_risk,
+            ofac_count=ofac_count,
+            paris_mou=paris_mou,
+            tokyo_mou=tokyo_mou,
+        ))
+
+    rows.sort(key=lambda r: r.avg_risk_score, reverse=True)
+    return FlagRiskResponse(
         as_of=_iso(datetime.now(UTC).replace(tzinfo=None)) or "",
         rows=rows[:top_n],
     )
