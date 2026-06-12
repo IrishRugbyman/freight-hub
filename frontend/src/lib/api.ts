@@ -421,6 +421,130 @@ export interface EquasisData {
   uscg_targeting?: string
 }
 
+// ---- Fleet Explorer (Phase 6) ----
+
+export interface FleetRow {
+  imo: number
+  ship_name?: string
+  flag?: string
+  flag_code?: string
+  ship_type?: string
+  year_built?: number
+  gross_tonnage?: number
+  dwt?: number
+  owner?: string
+  ism_manager?: string
+  class_society?: string
+  pi_club?: string
+  detention_rate_pct?: number
+  paris_mou?: string
+  tokyo_mou?: string
+  ship_status?: string
+  // Live fields (null when not currently tracked)
+  mmsi?: number
+  live_name?: string
+  lat?: number
+  lon?: number
+  sog?: number
+  region?: string
+  kind?: string
+  segment?: string
+}
+
+export interface FleetFacetItem { value: string; count: number }
+
+export interface FleetFacets {
+  flags: FleetFacetItem[]
+  class_societies: FleetFacetItem[]
+  pi_clubs: FleetFacetItem[]
+  paris_mou: FleetFacetItem[]
+  tokyo_mou: FleetFacetItem[]
+  owners: FleetFacetItem[]
+}
+
+export interface FleetSummary {
+  total: number
+  total_dwt?: number
+  avg_age_years?: number
+  top_flags: FleetFacetItem[]
+  top_owners: FleetFacetItem[]
+}
+
+export interface FleetResponse {
+  total: number
+  page: number
+  page_size: number
+  summary: FleetSummary
+  rows: FleetRow[]
+}
+
+export interface FleetParams {
+  q?: string
+  flag?: string
+  owner?: string
+  class_society?: string
+  pi_club?: string
+  paris_mou?: string
+  tokyo_mou?: string
+  kind?: string
+  segment?: string
+  built_min?: number
+  built_max?: number
+  dwt_min?: number
+  dwt_max?: number
+  detention_min?: number
+  live_only?: boolean
+  sort?: string
+  order?: 'asc' | 'desc'
+  page?: number
+}
+
+function fleetUrl(p: FleetParams): string {
+  const q = new URLSearchParams()
+  if (p.q) q.set('q', p.q)
+  if (p.flag) q.set('flag', p.flag)
+  if (p.owner) q.set('owner', p.owner)
+  if (p.class_society) q.set('class_society', p.class_society)
+  if (p.pi_club) q.set('pi_club', p.pi_club)
+  if (p.paris_mou) q.set('paris_mou', p.paris_mou)
+  if (p.tokyo_mou) q.set('tokyo_mou', p.tokyo_mou)
+  if (p.kind) q.set('kind', p.kind)
+  if (p.segment) q.set('segment', p.segment)
+  if (p.built_min != null) q.set('built_min', String(p.built_min))
+  if (p.built_max != null) q.set('built_max', String(p.built_max))
+  if (p.dwt_min != null) q.set('dwt_min', String(p.dwt_min))
+  if (p.dwt_max != null) q.set('dwt_max', String(p.dwt_max))
+  if (p.detention_min != null) q.set('detention_min', String(p.detention_min))
+  if (p.live_only) q.set('live_only', 'true')
+  if (p.sort) q.set('sort', p.sort)
+  if (p.order) q.set('order', p.order)
+  if (p.page && p.page > 1) q.set('page', String(p.page))
+  const s = q.toString()
+  return `/api/fleet${s ? `?${s}` : ''}`
+}
+
+export function useFleet(params: FleetParams) {
+  return useQuery({
+    queryKey: ['fleet', params],
+    queryFn: () => getJSON<FleetResponse>(fleetUrl(params)),
+    staleTime: 2 * 60 * 1000,
+    placeholderData: (prev) => prev,
+  })
+}
+
+export function useFleetFacets() {
+  return useQuery({
+    queryKey: ['fleet-facets'],
+    queryFn: () => getJSON<FleetFacets>('/api/fleet/facets'),
+    staleTime: 5 * 60 * 1000,
+  })
+}
+
+export function fleetExportUrl(params: FleetParams): string {
+  const url = fleetUrl(params).replace('/api/fleet', '/api/fleet/export')
+  return url
+}
+
 export function useEquasis(imo: number | null | undefined) {
   return useQuery({
     queryKey: ['equasis', imo],

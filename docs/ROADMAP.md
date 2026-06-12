@@ -414,7 +414,7 @@ just serves JS.*
 
 ---
 
-## Phase 5 - Vessel Registry: persistent Equasis store + enrichment crawler
+## Phase 5 - Vessel Registry: persistent Equasis store + enrichment crawler - Completed: 2026-06-12, commit 245cc02
 
 *Goal: every IMO-bearing vessel in the live fleet has its Equasis registry data (flag,
 owner, class, P&I, detention, MOU status) stored in a queryable database, refreshed
@@ -464,32 +464,32 @@ vessel_registry
 
 #### Crawler
 
-- [ ] `backend/registry/__init__.py` + `crawl.py`: open ais_positions read-only to list
+- [x] `backend/registry/__init__.py` + `crawl.py`: open ais_positions read-only to list
       candidate IMOs (`SELECT DISTINCT imo FROM live_positions WHERE imo IS NOT NULL`),
       apply the priority policy above, scrape via `equasis.get_ship_info`, cast
       gross_tonnage/dwt/year_built to int (None on failure), `INSERT OR REPLACE` into
       vessel_registry. Sleep 6-10 s (random.uniform) between requests. Log a one-line
       summary (n_new, n_refreshed, n_failed) per run.
-- [ ] Failed scrape (None or parse-empty): still write the row with `fetch_ok = false`
+- [x] Failed scrape (None or parse-empty): still write the row with `fetch_ok = false`
       and `fetched_ts = now` so it is not retried every run.
-- [ ] `backend/freight-registry.service` (Type=oneshot, `.venv/bin/python -m
+- [x] `backend/freight-registry.service` (Type=oneshot, `.venv/bin/python -m
       registry.crawl`, WorkingDirectory=backend, EnvironmentFile for the credentials) +
       `freight-registry.timer` (OnCalendar 2-hourly, Persistent=true).
       `sudo systemctl enable --now freight-registry.timer`.
-- [ ] pytest for the pure parts (priority ordering, int casting, upsert idempotence)
+- [x] pytest for the pure parts (priority ordering, int casting, upsert idempotence)
       with a seeded temp registry DB. Do NOT hit equasis.org in tests: monkeypatch
       `get_ship_info`.
 
 #### API
 
-- [ ] Add `REGISTRY_DB` path to `app/db.py` (env-overridable for tests), same lock-retry
+- [x] Add `REGISTRY_DB` path to `app/db.py` (env-overridable for tests), same lock-retry
       read pattern.
-- [ ] Rework `GET /api/vessels/{imo}/equasis`: read vessel_registry first; if the row
+- [x] Rework `GET /api/vessels/{imo}/equasis`: read vessel_registry first; if the row
       exists and `fetch_ok`, return it. On miss, fall back to the existing live scrape +
       in-process cache (do NOT write the DB from the API: single-writer rule; the
       crawler will persist it within 2 h). Existing response shape stays unchanged so
       the frontend needs no edits.
-- [ ] pytest: registry-hit path, registry-miss fallback path, fetch_ok=false treated as
+- [x] pytest: registry-hit path, registry-miss fallback path, fetch_ok=false treated as
       miss.
 
 #### Definition of Done

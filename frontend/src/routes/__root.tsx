@@ -31,6 +31,7 @@ export const Route = createRootRoute({
         </div>
         <nav className="flex items-center">
           <NavItem to="/">Tracker</NavItem>
+          <NavItem to="/fleet">Fleet</NavItem>
           <NavItem to="/routes">Routes</NavItem>
           <NavItem to="/dispersion">Dispersion</NavItem>
           <NavItem to="/analytics">Analytics</NavItem>

@@ -26,7 +26,7 @@ from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
-from . import db, equasis
+from . import db, equasis, fleet as _fleet
 from .runner_dispersion import run_dispersion_default
 from .runner_routes import run_routes_default
 from .schemas import (
@@ -38,6 +38,8 @@ from .schemas import (
     DensityResponse,
     DispersionResponse,
     EventsResponse,
+    FleetFacets,
+    FleetResponse,
     LadenResponse,
     LadenSegment,
     Meta,
@@ -523,6 +525,78 @@ def events(
         )
 
     return EventsResponse(events=result_events, total=len(result_events))
+
+
+@app.get("/api/fleet", response_model=FleetResponse)
+def fleet(
+    q: str | None = None,
+    flag: str | None = None,
+    owner: str | None = None,
+    class_society: str | None = None,
+    pi_club: str | None = None,
+    paris_mou: str | None = None,
+    tokyo_mou: str | None = None,
+    kind: str | None = None,
+    segment: str | None = None,
+    built_min: int | None = None,
+    built_max: int | None = None,
+    dwt_min: int | None = None,
+    dwt_max: int | None = None,
+    detention_min: float | None = None,
+    live_only: bool = False,
+    sort: str = "ship_name",
+    order: str = "asc",
+    page: int = 1,
+):
+    """Filterable, sortable, paginated fleet registry (registry + live AIS join)."""
+    return _fleet.query_fleet(
+        q=q, flag=flag, owner=owner, class_society=class_society,
+        pi_club=pi_club, paris_mou=paris_mou, tokyo_mou=tokyo_mou,
+        kind=kind, segment=segment,
+        built_min=built_min, built_max=built_max,
+        dwt_min=dwt_min, dwt_max=dwt_max, detention_min=detention_min,
+        live_only=live_only, sort=sort, order=order, page=page,
+    )
+
+
+@app.get("/api/fleet/facets", response_model=FleetFacets)
+def fleet_facets():
+    """Distinct filter values with counts for the Fleet Explorer dropdowns."""
+    return _fleet.query_facets()
+
+
+@app.get("/api/fleet/export")
+def fleet_export(
+    q: str | None = None,
+    flag: str | None = None,
+    owner: str | None = None,
+    class_society: str | None = None,
+    pi_club: str | None = None,
+    paris_mou: str | None = None,
+    tokyo_mou: str | None = None,
+    kind: str | None = None,
+    segment: str | None = None,
+    built_min: int | None = None,
+    built_max: int | None = None,
+    dwt_min: int | None = None,
+    dwt_max: int | None = None,
+    detention_min: float | None = None,
+    live_only: bool = False,
+):
+    """Download current filtered fleet as CSV."""
+    csv_text = _fleet.export_csv(
+        q=q, flag=flag, owner=owner, class_society=class_society,
+        pi_club=pi_club, paris_mou=paris_mou, tokyo_mou=tokyo_mou,
+        kind=kind, segment=segment,
+        built_min=built_min, built_max=built_max,
+        dwt_min=dwt_min, dwt_max=dwt_max, detention_min=detention_min,
+        live_only=live_only,
+    )
+    return StreamingResponse(
+        iter([csv_text]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=fleet.csv"},
+    )
 
 
 @app.get("/api/stream")

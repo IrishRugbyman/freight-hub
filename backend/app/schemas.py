@@ -227,3 +227,65 @@ class AisEvent(BaseModel):
 class EventsResponse(BaseModel):
     events: list[AisEvent]
     total: int
+
+
+# ---- Phase 6: Fleet Explorer ----
+
+
+class FleetRow(BaseModel):
+    # Registry fields
+    imo: int
+    ship_name: str | None = None
+    flag: str | None = None
+    flag_code: str | None = None
+    ship_type: str | None = None
+    year_built: int | None = None
+    gross_tonnage: int | None = None
+    dwt: int | None = None
+    owner: str | None = None
+    ism_manager: str | None = None
+    class_society: str | None = None
+    pi_club: str | None = None
+    detention_rate_pct: float | None = None
+    paris_mou: str | None = None
+    tokyo_mou: str | None = None
+    ship_status: str | None = None
+    # Live fields (None when vessel not currently tracked)
+    mmsi: int | None = None
+    live_name: str | None = None
+    lat: float | None = None
+    lon: float | None = None
+    sog: float | None = None
+    region: str | None = None
+    kind: str | None = None
+    segment: str | None = None
+
+
+class FleetFacetItem(BaseModel):
+    value: str
+    count: int
+
+
+class FleetFacets(BaseModel):
+    flags: list[FleetFacetItem]
+    class_societies: list[FleetFacetItem]
+    pi_clubs: list[FleetFacetItem]
+    paris_mou: list[FleetFacetItem]
+    tokyo_mou: list[FleetFacetItem]
+    owners: list[FleetFacetItem]
+
+
+class FleetSummary(BaseModel):
+    total: int
+    total_dwt: int | None = None
+    avg_age_years: float | None = None
+    top_flags: list[FleetFacetItem]
+    top_owners: list[FleetFacetItem]
+
+
+class FleetResponse(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    summary: FleetSummary
+    rows: list[FleetRow]
