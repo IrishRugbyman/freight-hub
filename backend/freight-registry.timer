@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Equasis registry crawler every 2 hours
+Requires=freight-registry.service
+
+[Timer]
+OnBootSec=5min
+OnCalendar=*-*-* 00/2:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

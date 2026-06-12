@@ -181,10 +181,44 @@ def vessel_track(mmsi: int, hours: int = 24):
 
 @app.get("/api/vessels/{imo}/equasis")
 def vessel_equasis(imo: int):
-    """Equasis registry data for a vessel by IMO number. Cached 12h."""
+    """Equasis registry data for a vessel by IMO number.
+
+    Reads vessel_registry.duckdb first (populated by the crawl job). Falls back to
+    a live Equasis scrape when the registry has no entry or the previous fetch failed.
+    The API never writes to the registry; the crawler is the sole writer.
+    """
+    from fastapi import HTTPException
+
+    # Try registry first
+    reg_df = db.query(
+        "SELECT * FROM vessel_registry WHERE imo = ? AND fetch_ok = true",
+        [imo],
+        db=db.registry_db_path(),
+    )
+    if not reg_df.empty:
+        row = reg_df.iloc[0]
+        # Build response dict matching the equasis scraper output shape.
+        # gross_tonnage / dwt / year_built stored as INT in the registry; return as str
+        # so the frontend EquasisData interface (string fields) needs no changes.
+        result: dict = {"imo": imo}
+        for col in reg_df.columns:
+            if col in ("imo", "fetched_ts", "fetch_ok"):
+                continue
+            val = row[col]
+            if val is None:
+                continue
+            import pandas as _pd
+            if _pd.isna(val):
+                continue
+            if col in ("gross_tonnage", "dwt", "year_built"):
+                result[col] = str(int(val))
+            else:
+                result[col] = val
+        return result
+
+    # Fall back to live scrape (result cached in-process 12h)
     data = equasis.get_ship_info(imo)
     if data is None:
-        from fastapi import HTTPException
         raise HTTPException(status_code=503, detail="Equasis unavailable")
     return data
 
