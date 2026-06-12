@@ -7,6 +7,7 @@ All filters use parameterized SQL - no string interpolation of user input.
 from __future__ import annotations
 
 import io
+import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -20,7 +21,7 @@ _PAGE_SIZE = 100
 _SORT_COLS = {
     "ship_name", "flag", "ship_type", "year_built", "gross_tonnage", "dwt",
     "owner", "class_society", "detention_rate_pct", "paris_mou", "tokyo_mou",
-    "sog", "region", "segment",
+    "sog", "region", "segment", "risk_score",
 }
 
 
@@ -75,6 +76,7 @@ def _load_registry(
     dwt_min: int | None,
     dwt_max: int | None,
     detention_min: float | None,
+    risk_min: int | None = None,
 ) -> pd.DataFrame:
     where = ["fetch_ok = true"]
     params: list = []
@@ -116,6 +118,9 @@ def _load_registry(
     if detention_min is not None:
         where.append("detention_rate_pct >= ?")
         params.append(detention_min)
+    if risk_min is not None:
+        where.append("risk_score >= ?")
+        params.append(risk_min)
 
     sql = f"SELECT * FROM vessel_registry WHERE {' AND '.join(where)}"  # noqa: S608
     return db.query(sql, params, db=db.registry_db_path())
@@ -136,6 +141,7 @@ def query_fleet(
     dwt_min: int | None = None,
     dwt_max: int | None = None,
     detention_min: float | None = None,
+    risk_min: int | None = None,
     live_only: bool = False,
     sort: str = "ship_name",
     order: str = "asc",
@@ -143,7 +149,7 @@ def query_fleet(
 ) -> FleetResponse:
     reg_df = _load_registry(
         q, flag, owner, class_society, pi_club, paris_mou, tokyo_mou,
-        built_min, built_max, dwt_min, dwt_max, detention_min,
+        built_min, built_max, dwt_min, dwt_max, detention_min, risk_min,
     )
 
     if reg_df.empty:
@@ -220,8 +226,14 @@ def query_fleet(
     offset = (page - 1) * _PAGE_SIZE
     page_df = merged.iloc[offset: offset + _PAGE_SIZE]
 
+    cols = set(page_df.columns)
     rows = []
     for r in page_df.itertuples(index=False):
+        ri_raw = getattr(r, "risk_indicators", None) if "risk_indicators" in cols else None
+        try:
+            ri = json.loads(ri_raw) if ri_raw else None
+        except (ValueError, TypeError):
+            ri = None
         rows.append(FleetRow(
             imo=int(r.imo),
             ship_name=_safe_str(r.ship_name),
@@ -239,6 +251,8 @@ def query_fleet(
             paris_mou=_safe_str(r.paris_mou),
             tokyo_mou=_safe_str(r.tokyo_mou),
             ship_status=_safe_str(r.ship_status),
+            risk_score=_safe_int(getattr(r, "risk_score", None)) if "risk_score" in cols else None,
+            risk_indicators=ri,
             mmsi=_safe_int(r.mmsi),
             live_name=_safe_str(r.live_name),
             lat=_safe_float(r.lat),
@@ -299,12 +313,13 @@ def export_csv(
     dwt_min: int | None = None,
     dwt_max: int | None = None,
     detention_min: float | None = None,
+    risk_min: int | None = None,
     live_only: bool = False,
 ) -> str:
     # Reuse query_fleet but fetch all pages at once
     reg_df = _load_registry(
         q, flag, owner, class_society, pi_club, paris_mou, tokyo_mou,
-        built_min, built_max, dwt_min, dwt_max, detention_min,
+        built_min, built_max, dwt_min, dwt_max, detention_min, risk_min,
     )
     if reg_df.empty:
         return "imo,ship_name,flag,owner\n"

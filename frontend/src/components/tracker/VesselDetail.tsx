@@ -55,6 +55,12 @@ function MouBadge({ label, value }: { label: string; value?: string }) {
   )
 }
 
+function riskScoreColor(score: number) {
+  if (score >= 50) return 'text-red-400'
+  if (score >= 25) return 'text-yellow-400'
+  return 'text-emerald-400'
+}
+
 /** MarineTraffic-inspired vessel detail panel. */
 export function VesselDetail({
   vessel,
@@ -182,6 +188,25 @@ export function VesselDetail({
                   <MouBadge label="Paris" value={eq.paris_mou} />
                   <MouBadge label="Tokyo" value={eq.tokyo_mou} />
                 </div>
+              )}
+              {eq.risk_score != null && (
+                <>
+                  <div className="flex items-baseline justify-between gap-3 pt-1.5 pb-0.5">
+                    <span className="text-xs text-muted-foreground">Risk score</span>
+                    <span className={`text-xs font-mono font-semibold ${riskScoreColor(eq.risk_score)}`}>
+                      {eq.risk_score}/100
+                    </span>
+                  </div>
+                  {eq.risk_indicators && eq.risk_indicators.length > 0 && (
+                    <div className="mt-0.5 space-y-0.5">
+                      {eq.risk_indicators.map((ind, i) => (
+                        <div key={i} className="text-[10px] text-muted-foreground pl-2 leading-tight">
+                          <span className="mr-1 text-muted-foreground/60">+</span>{ind}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
               )}
             </>
           )}

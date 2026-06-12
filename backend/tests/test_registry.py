@@ -132,9 +132,18 @@ CREATE TABLE IF NOT EXISTS vessel_registry (
     owner VARCHAR, ism_manager VARCHAR, ship_manager VARCHAR,
     class_society VARCHAR, pi_club VARCHAR,
     detention_rate_pct DOUBLE, paris_mou VARCHAR, tokyo_mou VARCHAR, uscg_targeting VARCHAR,
-    fetched_ts TIMESTAMP, fetch_ok BOOLEAN
+    fetched_ts TIMESTAMP, fetch_ok BOOLEAN,
+    risk_score INTEGER, risk_indicators VARCHAR
 )
 """
+
+_REG_INSERT = (
+    "INSERT INTO vessel_registry "
+    "(imo, ship_name, flag, flag_code, call_sign, gross_tonnage, dwt, ship_type, year_built,"
+    " ship_status, owner, ism_manager, ship_manager, class_society, pi_club,"
+    " detention_rate_pct, paris_mou, tokyo_mou, uscg_targeting, fetched_ts, fetch_ok)"
+    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+)
 
 _NOW = datetime.now(UTC).replace(tzinfo=None)
 
@@ -164,10 +173,7 @@ def _make_registry_client(tmp_path, monkeypatch, reg_rows: list[tuple]) -> TestC
     reg_conn = duckdb.connect(str(reg_file))
     reg_conn.execute(_REG_SCHEMA)
     for row in reg_rows:
-        reg_conn.execute(
-            "INSERT INTO vessel_registry VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            list(row),
-        )
+        reg_conn.execute(_REG_INSERT, list(row))
     reg_conn.close()
 
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))

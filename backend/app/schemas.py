@@ -250,6 +250,8 @@ class FleetRow(BaseModel):
     paris_mou: str | None = None
     tokyo_mou: str | None = None
     ship_status: str | None = None
+    risk_score: int | None = None
+    risk_indicators: list[str] | None = None
     # Live fields (None when vessel not currently tracked)
     mmsi: int | None = None
     live_name: str | None = None

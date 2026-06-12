@@ -214,6 +214,14 @@ def vessel_equasis(imo: int):
                 continue
             if col in ("gross_tonnage", "dwt", "year_built"):
                 result[col] = str(int(val))
+            elif col == "risk_indicators":
+                import json as _json_mod
+                try:
+                    result[col] = _json_mod.loads(val) if isinstance(val, str) else val
+                except (ValueError, TypeError):
+                    result[col] = []
+            elif col == "risk_score":
+                result[col] = int(val)
             else:
                 result[col] = val
         return result
@@ -543,6 +551,7 @@ def fleet(
     dwt_min: int | None = None,
     dwt_max: int | None = None,
     detention_min: float | None = None,
+    risk_min: int | None = None,
     live_only: bool = False,
     sort: str = "ship_name",
     order: str = "asc",
@@ -555,7 +564,7 @@ def fleet(
         kind=kind, segment=segment,
         built_min=built_min, built_max=built_max,
         dwt_min=dwt_min, dwt_max=dwt_max, detention_min=detention_min,
-        live_only=live_only, sort=sort, order=order, page=page,
+        risk_min=risk_min, live_only=live_only, sort=sort, order=order, page=page,
     )
 
 
@@ -581,6 +590,7 @@ def fleet_export(
     dwt_min: int | None = None,
     dwt_max: int | None = None,
     detention_min: float | None = None,
+    risk_min: int | None = None,
     live_only: bool = False,
 ):
     """Download current filtered fleet as CSV."""
@@ -590,7 +600,7 @@ def fleet_export(
         kind=kind, segment=segment,
         built_min=built_min, built_max=built_max,
         dwt_min=dwt_min, dwt_max=dwt_max, detention_min=detention_min,
-        live_only=live_only,
+        risk_min=risk_min, live_only=live_only,
     )
     return StreamingResponse(
         iter([csv_text]),

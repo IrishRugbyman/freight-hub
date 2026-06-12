@@ -22,6 +22,7 @@ export const Route = createFileRoute('/fleet')({
     kind: typeof s.kind === 'string' ? s.kind : undefined,
     segment: typeof s.segment === 'string' ? s.segment : undefined,
     detention_min: typeof s.detention_min === 'number' ? s.detention_min : undefined,
+    risk_min: typeof s.risk_min === 'number' ? s.risk_min : undefined,
     live_only: s.live_only === true || s.live_only === 'true',
     sort: typeof s.sort === 'string' ? s.sort : undefined,
     order: s.order === 'desc' ? 'desc' : s.order === 'asc' ? 'asc' : undefined,
@@ -46,6 +47,13 @@ function detentionColor(v?: number | null) {
   return 'text-emerald-400'
 }
 
+function riskColor(v?: number | null) {
+  if (v == null) return 'text-muted-foreground'
+  if (v >= 50) return 'text-red-400'
+  if (v >= 25) return 'text-yellow-400'
+  return 'text-emerald-400'
+}
+
 const COLUMNS: { key: string; label: string; sortable?: boolean }[] = [
   { key: 'imo', label: 'IMO' },
   { key: 'ship_name', label: 'Name', sortable: true },
@@ -59,6 +67,7 @@ const COLUMNS: { key: string; label: string; sortable?: boolean }[] = [
   { key: 'detention_rate_pct', label: 'Detention', sortable: true },
   { key: 'paris_mou', label: 'Paris', sortable: true },
   { key: 'tokyo_mou', label: 'Tokyo', sortable: true },
+  { key: 'risk_score', label: 'Risk', sortable: true },
   { key: 'segment', label: 'Segment', sortable: true },
   { key: 'region', label: 'Region', sortable: true },
   { key: 'live', label: 'Live' },
@@ -143,7 +152,8 @@ export default function FleetPage() {
   const hasFilters = !!(
     search.q || search.flag || search.owner || search.paris_mou ||
     search.tokyo_mou || search.class_society || search.pi_club ||
-    search.kind || search.segment || search.detention_min != null || search.live_only
+    search.kind || search.segment || search.detention_min != null ||
+    search.risk_min != null || search.live_only
   )
 
   function SortIcon({ col }: { col: string }) {
@@ -224,6 +234,18 @@ export default function FleetPage() {
             <option value="20">≥ 20%</option>
           </select>
 
+          {/* Risk >= */}
+          <select
+            className="h-7 rounded border border-border bg-muted px-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+            value={search.risk_min ?? ''}
+            onChange={(e) => set({ risk_min: e.target.value ? Number(e.target.value) : undefined, sort: e.target.value ? 'risk_score' : search.sort, order: e.target.value ? 'desc' : search.order })}
+          >
+            <option value="">Risk score</option>
+            <option value="25">≥ 25 (elevated)</option>
+            <option value="50">≥ 50 (high)</option>
+            <option value="75">≥ 75 (critical)</option>
+          </select>
+
           {/* Live only toggle */}
           <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
             <input
@@ -234,6 +256,18 @@ export default function FleetPage() {
             />
             Live only
           </label>
+
+          {/* High risk preset */}
+          <button
+            onClick={() => set({ risk_min: 50, sort: 'risk_score', order: 'desc' })}
+            className={`h-7 rounded border px-2 text-xs transition-colors ${
+              search.risk_min === 50
+                ? 'border-red-400/40 bg-red-400/10 text-red-400'
+                : 'border-border text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            High risk
+          </button>
 
           {hasFilters && (
             <button
@@ -392,6 +426,10 @@ export default function FleetPage() {
                 </td>
                 <td className={`px-2.5 py-1.5 ${mouColor(row.tokyo_mou)}`}>
                   {row.tokyo_mou ?? '—'}
+                </td>
+                <td className={`px-2.5 py-1.5 font-mono ${riskColor(row.risk_score)}`}
+                    title={row.risk_indicators?.join('\n') ?? ''}>
+                  {row.risk_score != null ? row.risk_score : '—'}
                 </td>
                 <td className="px-2.5 py-1.5 text-muted-foreground">{row.segment ?? '—'}</td>
                 <td className="px-2.5 py-1.5 text-muted-foreground">

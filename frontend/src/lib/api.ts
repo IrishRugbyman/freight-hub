@@ -419,6 +419,8 @@ export interface EquasisData {
   paris_mou?: string
   tokyo_mou?: string
   uscg_targeting?: string
+  risk_score?: number
+  risk_indicators?: string[]
 }
 
 // ---- Fleet Explorer (Phase 6) ----
@@ -440,6 +442,8 @@ export interface FleetRow {
   paris_mou?: string
   tokyo_mou?: string
   ship_status?: string
+  risk_score?: number
+  risk_indicators?: string[]
   // Live fields (null when not currently tracked)
   mmsi?: number
   live_name?: string
@@ -493,6 +497,7 @@ export interface FleetParams {
   dwt_min?: number
   dwt_max?: number
   detention_min?: number
+  risk_min?: number
   live_only?: boolean
   sort?: string
   order?: 'asc' | 'desc'
@@ -515,6 +520,7 @@ function fleetUrl(p: FleetParams): string {
   if (p.dwt_min != null) q.set('dwt_min', String(p.dwt_min))
   if (p.dwt_max != null) q.set('dwt_max', String(p.dwt_max))
   if (p.detention_min != null) q.set('detention_min', String(p.detention_min))
+  if (p.risk_min != null) q.set('risk_min', String(p.risk_min))
   if (p.live_only) q.set('live_only', 'true')
   if (p.sort) q.set('sort', p.sort)
   if (p.order) q.set('order', p.order)

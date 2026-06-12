@@ -19,9 +19,18 @@ CREATE TABLE IF NOT EXISTS vessel_registry (
     owner VARCHAR, ism_manager VARCHAR, ship_manager VARCHAR,
     class_society VARCHAR, pi_club VARCHAR,
     detention_rate_pct DOUBLE, paris_mou VARCHAR, tokyo_mou VARCHAR, uscg_targeting VARCHAR,
-    fetched_ts TIMESTAMP, fetch_ok BOOLEAN
+    fetched_ts TIMESTAMP, fetch_ok BOOLEAN,
+    risk_score INTEGER, risk_indicators VARCHAR
 )
 """
+
+_REG_INSERT = (
+    "INSERT INTO vessel_registry "
+    "(imo, ship_name, flag, flag_code, call_sign, gross_tonnage, dwt, ship_type, year_built,"
+    " ship_status, owner, ism_manager, ship_manager, class_society, pi_club,"
+    " detention_rate_pct, paris_mou, tokyo_mou, uscg_targeting, fetched_ts, fetch_ok)"
+    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+)
 
 _AIS_SCHEMA = """
 CREATE TABLE live_positions (
@@ -92,10 +101,7 @@ def _make_client(tmp_path, monkeypatch) -> TestClient:
     reg_file = tmp_path / "registry.duckdb"
     reg_conn = duckdb.connect(str(reg_file))
     reg_conn.execute(_REG_SCHEMA)
-    reg_conn.executemany(
-        "INSERT INTO vessel_registry VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        _REG_ROWS,
-    )
+    reg_conn.executemany(_REG_INSERT, _REG_ROWS)
     reg_conn.close()
 
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
@@ -257,3 +263,47 @@ def test_fleet_export_filtered(tmp_path, monkeypatch):
     lines = r.text.strip().splitlines()
     assert len(lines) == 2  # header + 1 row
     assert "BETA BULK" in r.text
+
+
+def test_fleet_risk_min(tmp_path, monkeypatch):
+    """risk_min filter returns only vessels with risk_score >= threshold."""
+    # Seed two vessels with different risk scores
+    ais_file = tmp_path / "ais.duckdb"
+    ais_conn = duckdb.connect(str(ais_file))
+    ais_conn.execute(_AIS_SCHEMA)
+    ais_conn.close()
+
+    reg_file = tmp_path / "registry.duckdb"
+    reg_conn = duckdb.connect(str(reg_file))
+    reg_conn.execute(_REG_SCHEMA)
+    reg_conn.execute(
+        "INSERT INTO vessel_registry "
+        "(imo, ship_name, flag, fetch_ok, fetched_ts, risk_score) "
+        "VALUES (1000001, 'LOW RISK', 'Norway', true, ?, 10)",
+        [_NOW],
+    )
+    reg_conn.execute(
+        "INSERT INTO vessel_registry "
+        "(imo, ship_name, flag, fetch_ok, fetched_ts, risk_score) "
+        "VALUES (1000002, 'HIGH RISK', 'Cameroon', true, ?, 65)",
+        [_NOW],
+    )
+    reg_conn.execute(
+        "INSERT INTO vessel_registry "
+        "(imo, ship_name, flag, fetch_ok, fetched_ts) "
+        "VALUES (1000003, 'NO SCORE', 'Panama', true, ?)",
+        [_NOW],
+    )
+    reg_conn.close()
+
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
+    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
+    from app.main import app
+    client = TestClient(app)
+
+    r = client.get("/api/fleet?risk_min=50")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total"] == 1
+    assert body["rows"][0]["ship_name"] == "HIGH RISK"
+    assert body["rows"][0]["risk_score"] == 65

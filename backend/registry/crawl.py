@@ -23,11 +23,15 @@ import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import json
+
 import duckdb
 import pandas as pd
 
+from app.db import analytics_db_path as _analytics_db_path
 from app.db import query as _db_query
 from app.equasis import get_ship_info
+from registry.risk import risk_score as _risk_score
 
 logger = logging.getLogger(__name__)
 
@@ -52,9 +56,15 @@ CREATE TABLE IF NOT EXISTS vessel_registry (
     owner VARCHAR, ism_manager VARCHAR, ship_manager VARCHAR,
     class_society VARCHAR, pi_club VARCHAR,
     detention_rate_pct DOUBLE, paris_mou VARCHAR, tokyo_mou VARCHAR, uscg_targeting VARCHAR,
-    fetched_ts TIMESTAMP, fetch_ok BOOLEAN
+    fetched_ts TIMESTAMP, fetch_ok BOOLEAN,
+    risk_score INTEGER, risk_indicators VARCHAR
 )
 """
+
+_MIGRATIONS = [
+    "ALTER TABLE vessel_registry ADD COLUMN IF NOT EXISTS risk_score INTEGER",
+    "ALTER TABLE vessel_registry ADD COLUMN IF NOT EXISTS risk_indicators VARCHAR",
+]
 
 
 def _to_int(val) -> int | None:
@@ -136,10 +146,15 @@ def run(
     reg_path.parent.mkdir(parents=True, exist_ok=True)
     reg_conn = duckdb.connect(str(reg_path))
     reg_conn.execute(_SCHEMA)
+    for mig in _MIGRATIONS:
+        try:
+            reg_conn.execute(mig)
+        except Exception:
+            pass  # column already exists
 
     try:
         reg_df = reg_conn.execute(
-            "SELECT imo, fetch_ok, fetched_ts FROM vessel_registry"
+            "SELECT imo, fetch_ok, fetched_ts, owner FROM vessel_registry"
         ).df()
     except Exception:
         reg_df = pd.DataFrame()
@@ -150,6 +165,41 @@ def run(
         "Crawl plan: %d candidates (limit %d), dry_run=%s",
         len(candidates), limit, dry_run,
     )
+
+    # Build single-vessel owner set from current registry state (approximation:
+    # vessels fetched in this run are not yet counted, but score is refreshed next run)
+    if not reg_df.empty and "owner" in reg_df.columns:
+        owner_vc = reg_df.dropna(subset=["owner"])["owner"].value_counts()
+        single_ship_owners: set[str] = set(owner_vc[owner_vc == 1].index.tolist())
+    else:
+        single_ship_owners = set()
+
+    # Load 90-day AIS event counts per IMO from the analytics DB (graceful fallback)
+    # Events are keyed by MMSI; we join via the MMSI->IMO map from live_positions.
+    event_counts_by_imo: dict[int, dict[str, int]] = {}
+    try:
+        mmsi_imo_df = _db_query(
+            "SELECT CAST(mmsi AS BIGINT) AS mmsi, CAST(imo AS BIGINT) AS imo "
+            "FROM live_positions WHERE imo >= 1000000 AND imo <= 9999999",
+            db=ais_path,
+        )
+        mmsi_to_imo: dict[int, int] = (
+            dict(zip(mmsi_imo_df["mmsi"].astype(int), mmsi_imo_df["imo"].astype(int)))
+            if not mmsi_imo_df.empty else {}
+        )
+        cutoff_90 = now - timedelta(days=90)
+        events_df = _db_query(
+            "SELECT mmsi, type, COUNT(*) AS n FROM ais_events "
+            "WHERE start_ts >= ? GROUP BY mmsi, type",
+            [cutoff_90],
+            db=_analytics_db_path(),
+        )
+        for ev_row in events_df.itertuples(index=False):
+            imo = mmsi_to_imo.get(int(ev_row.mmsi))
+            if imo:
+                event_counts_by_imo.setdefault(imo, {})[str(ev_row.type)] = int(ev_row.n)
+    except Exception as exc:
+        logger.debug("Could not load event counts: %s", exc)
 
     n_new = n_refreshed = n_failed = 0
     existing_imos = set(reg_df["imo"].astype(int).tolist()) if not reg_df.empty else set()
@@ -166,7 +216,20 @@ def run(
         fetch_ok = data is not None and bool(_meaningful & data.keys())
 
         if fetch_ok:
-            _upsert(reg_conn, imo, data, now)
+            score, indicators = _risk_score(
+                imo=imo,
+                ship_type=data.get("ship_type"),
+                year_built=_to_int(data.get("year_built")),
+                pi_club=data.get("pi_club"),
+                class_society=data.get("class_society"),
+                paris_mou=data.get("paris_mou"),
+                tokyo_mou=data.get("tokyo_mou"),
+                detention_rate_pct=data.get("detention_rate_pct"),
+                event_counts=event_counts_by_imo.get(imo, {}),
+                owner=data.get("owner"),
+                single_ship_owner=bool(data.get("owner") and data["owner"] in single_ship_owners),
+            )
+            _upsert(reg_conn, imo, data, now, score, json.dumps(indicators))
             if imo in existing_imos:
                 n_refreshed += 1
             else:
@@ -187,12 +250,23 @@ def run(
     reg_conn.close()
 
 
-def _upsert(conn: duckdb.DuckDBPyConnection, imo: int, data: dict, now: datetime) -> None:
+def _upsert(
+    conn: duckdb.DuckDBPyConnection,
+    imo: int,
+    data: dict,
+    now: datetime,
+    risk_score_val: int | None = None,
+    risk_indicators_json: str | None = None,
+) -> None:
     conn.execute(
         """
-        INSERT OR REPLACE INTO vessel_registry VALUES (
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-        )
+        INSERT OR REPLACE INTO vessel_registry (
+            imo, ship_name, flag, flag_code, call_sign,
+            gross_tonnage, dwt, ship_type, year_built, ship_status,
+            owner, ism_manager, ship_manager, class_society, pi_club,
+            detention_rate_pct, paris_mou, tokyo_mou, uscg_targeting,
+            fetched_ts, fetch_ok, risk_score, risk_indicators
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             imo,
@@ -216,6 +290,8 @@ def _upsert(conn: duckdb.DuckDBPyConnection, imo: int, data: dict, now: datetime
             data.get("uscg_targeting"),
             now,
             True,
+            risk_score_val,
+            risk_indicators_json,
         ],
     )
 
