@@ -706,6 +706,26 @@ class PortCongestionResponse(BaseModel):
     rows: list[PortCongestionRow]
 
 
+# ---- Phase 32: Trade Lane Risk Matrix ----
+
+
+class TradeLaneCell(BaseModel):
+    origin_region: str
+    dest_region: str
+    vessel_count: int
+    high_risk_count: int    # behavioral_score >= 50 OR registry_risk >= 50 OR ofac
+    laden_count: int
+
+
+class TradeLaneMatrixResponse(BaseModel):
+    as_of: str
+    kind: str
+    laden_only: bool
+    origin_regions: list[str]   # ordered by vessel_count desc
+    dest_regions: list[str]     # ordered by vessel_count desc
+    cells: list[TradeLaneCell]
+
+
 # ---- Phase 31: Chokepoint Traffic Heatmap ----
 
 

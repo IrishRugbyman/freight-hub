@@ -2128,3 +2128,189 @@ def test_chokepoint_heatmap_no_data_returns_empty(tmp_path, monkeypatch):
     d = r.json()
     assert d["cells"] == []
     assert d["chokepoints"] == []
+
+
+# ---------------------------------------------------------------------------
+# Phase 32: trade lane risk matrix
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def trade_lane_client(tmp_path, monkeypatch):
+    """Fixture for trade-lane-matrix endpoint.
+
+    4 vessels:
+      9101 VLCC A  region=hormuz  dest=CNSHA (Far East) laden  behavioral_score=0 registry=None
+      9102 VLCC B  region=hormuz  dest=JPYOK (Far East) laden  sts=3 -> behavioral=60
+      9103 CAPE A  region=ara     dest=NLRTM (NW Europe) laden registry_risk=70 ofac=False
+      9104 VLCC C  region=hormuz  dest=AEFJR (Middle East) ballast (excluded when laden_only=True)
+    """
+    import duckdb
+    from datetime import UTC, datetime, timedelta
+    from fastapi.testclient import TestClient
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+    recent = now - timedelta(days=1)
+
+    ais_schema = """
+    CREATE TABLE live_positions (
+        mmsi BIGINT PRIMARY KEY, name VARCHAR, lat DOUBLE, lon DOUBLE,
+        sog DOUBLE, cog DOUBLE, heading DOUBLE, destination VARCHAR,
+        ship_type INTEGER, length_m DOUBLE, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, updated_ts TIMESTAMP,
+        imo BIGINT, draught DOUBLE, nav_status INTEGER, eta VARCHAR
+    );
+    CREATE TABLE ais_snapshots (
+        snapshot_ts TIMESTAMP, mmsi BIGINT, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, lat DOUBLE, lon DOUBLE, ship_type INTEGER, length_m DOUBLE,
+        sog DOUBLE, nav_status INTEGER, draught DOUBLE, destination VARCHAR,
+        PRIMARY KEY (snapshot_ts, mmsi)
+    );
+    """
+    an_schema = """
+    CREATE TABLE meta_watermark (key VARCHAR PRIMARY KEY, ts TIMESTAMP);
+    CREATE TABLE ais_events (
+        event_id VARCHAR PRIMARY KEY, type VARCHAR,
+        mmsi BIGINT, mmsi2 BIGINT,
+        start_ts TIMESTAMP, end_ts TIMESTAMP,
+        lat DOUBLE, lon DOUBLE,
+        region VARCHAR, kind VARCHAR, segment VARCHAR, details VARCHAR
+    );
+    CREATE TABLE transit_events (
+        mmsi BIGINT, chokepoint VARCHAR, entered_ts TIMESTAMP, exited_ts TIMESTAMP,
+        direction VARCHAR, kind VARCHAR, segment VARCHAR, laden BOOLEAN,
+        PRIMARY KEY (mmsi, chokepoint, entered_ts)
+    );
+    CREATE TABLE anchored_episodes (
+        mmsi BIGINT, zone VARCHAR, start_ts TIMESTAMP, end_ts TIMESTAMP,
+        kind VARCHAR, segment VARCHAR, PRIMARY KEY (mmsi, zone, start_ts)
+    );
+    CREATE TABLE fleet_density (
+        ts TIMESTAMP, region VARCHAR, kind VARCHAR, segment VARCHAR,
+        laden_count INTEGER, ballast_count INTEGER, unknown_count INTEGER,
+        PRIMARY KEY (ts, region, kind, segment)
+    );
+    CREATE TABLE vessel_state (
+        mmsi BIGINT PRIMARY KEY, max_draught_seen DOUBLE, last_draught DOUBLE,
+        laden VARCHAR, updated_ts TIMESTAMP
+    );
+    """
+    reg_schema = """
+    CREATE TABLE vessel_registry (
+        imo BIGINT PRIMARY KEY, ship_name VARCHAR, flag VARCHAR, flag_code VARCHAR,
+        call_sign VARCHAR, gross_tonnage INTEGER, dwt INTEGER, ship_type VARCHAR,
+        year_built INTEGER, ship_status VARCHAR, owner VARCHAR, ism_manager VARCHAR,
+        ship_manager VARCHAR, class_society VARCHAR, pi_club VARCHAR,
+        detention_rate_pct DOUBLE, paris_mou VARCHAR, tokyo_mou VARCHAR,
+        uscg_targeting VARCHAR, fetched_ts TIMESTAMP, fetch_ok BOOLEAN,
+        risk_score INTEGER, risk_indicators VARCHAR, ofac_sanctioned BOOLEAN
+    );
+    """
+
+    ais_file = tmp_path / "ais.duckdb"
+    ais_conn = duckdb.connect(str(ais_file))
+    ais_conn.execute(ais_schema)
+    ais_conn.executemany(
+        "INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            (9101, "VLCC A", 25.0, 56.0, 14.0, 90.0, None, "CNSHA", 80, 330, "tanker", "VLCC", "hormuz", now, 8001, 20.0, 0, None),
+            (9102, "VLCC B", 25.5, 56.5, 13.5, 90.0, None, "JPYOK", 80, 330, "tanker", "VLCC", "hormuz", now, 8002, 19.5, 0, None),
+            (9103, "CAPE A", 3.5,  5.0,  12.0, 45.0, None, "NLRTM", 74, 300, "bulk",   "Capesize", "ara", now, 8003, 18.0, 0, None),
+            (9104, "VLCC C", 26.0, 57.0, 15.0, 270.0, None, "AEFJR", 80, 330, "tanker", "VLCC", "hormuz", now, 8004, 5.0, 0, None),
+        ],
+    )
+    ais_conn.close()
+
+    an_file = tmp_path / "analytics.duckdb"
+    an_conn = duckdb.connect(str(an_file))
+    an_conn.execute(an_schema)
+    # 9101, 9103 laden; 9104 ballast; 9102 will have STS events making it high-risk
+    an_conn.executemany("INSERT INTO vessel_state VALUES (?,?,?,?,?)", [
+        (9101, 21.0, 20.0, 'laden', now),
+        (9102, 21.0, 19.5, 'laden', now),
+        (9103, 19.0, 18.0, 'laden', now),
+        (9104, 21.0, 5.0,  'ballast', now),
+    ])
+    # 3 STS events for 9102 -> behavioral_score = min(3*20, 100) = 60 >= 50 -> high_risk
+    an_conn.executemany(
+        "INSERT INTO ais_events VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            ("sts-tl1", "sts", 9102, None, recent, None, 25.5, 56.5, "hormuz", "tanker", "VLCC", "{}"),
+            ("sts-tl2", "sts", 9102, None, recent, None, 25.6, 56.6, "hormuz", "tanker", "VLCC", "{}"),
+            ("sts-tl3", "sts", 9102, None, recent, None, 25.7, 56.7, "hormuz", "tanker", "VLCC", "{}"),
+        ],
+    )
+    an_conn.close()
+
+    reg_file = tmp_path / "registry.duckdb"
+    reg_conn = duckdb.connect(str(reg_file))
+    reg_conn.execute(reg_schema)
+    reg_conn.executemany(
+        "INSERT INTO vessel_registry (imo, ship_name, fetch_ok, risk_score, ofac_sanctioned) VALUES (?,?,?,?,?)",
+        [
+            (8003, "CAPE A", True, 70, False),   # registry_risk=70, 9103 has this
+        ],
+    )
+    reg_conn.close()
+
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
+    monkeypatch.setenv("ANALYTICS_DB", str(an_file))
+    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
+    from app.main import app
+    return TestClient(app)
+
+
+def test_trade_lane_matrix_structure(trade_lane_client):
+    r = trade_lane_client.get("/api/analytics/trade-lane-matrix?laden_only=false")
+    assert r.status_code == 200
+    d = r.json()
+    for key in ("as_of", "kind", "laden_only", "origin_regions", "dest_regions", "cells"):
+        assert key in d
+    if d["cells"]:
+        cell = d["cells"][0]
+        for field in ("origin_region", "dest_region", "vessel_count", "high_risk_count", "laden_count"):
+            assert field in cell
+
+
+def test_trade_lane_matrix_laden_filter(trade_lane_client):
+    r = trade_lane_client.get("/api/analytics/trade-lane-matrix?laden_only=true")
+    d = r.json()
+    # 9101 (hormuz->Far East), 9102 (hormuz->Far East), 9103 (ara->NW Europe) are laden
+    # 9104 (hormuz->Middle East) is ballast -> excluded
+    total_vessels = sum(c["vessel_count"] for c in d["cells"])
+    assert total_vessels == 3
+    # Middle East destination should not appear (only 9104 ballast heads there)
+    dest_regions = {c["dest_region"] for c in d["cells"]}
+    assert "Middle East" not in dest_regions
+
+
+def test_trade_lane_matrix_high_risk_count(trade_lane_client):
+    r = trade_lane_client.get("/api/analytics/trade-lane-matrix?laden_only=false")
+    d = r.json()
+    # 9102 has 3 STS events -> behavioral_score=60 >= 50 -> high_risk
+    # It's in hormuz -> Far East (JPYOK = JP = Far East)
+    hormuz_fe = next((c for c in d["cells"] if c["origin_region"] == "hormuz" and c["dest_region"] == "Far East"), None)
+    assert hormuz_fe is not None
+    # 9101 (CNSHA=Far East) + 9102 (JPYOK=Far East) = 2 in this cell
+    assert hormuz_fe["vessel_count"] == 2
+    # 9102 is high-risk (behavioral >= 50)
+    assert hormuz_fe["high_risk_count"] >= 1
+
+
+def test_trade_lane_matrix_dest_region_mapping(trade_lane_client):
+    r = trade_lane_client.get("/api/analytics/trade-lane-matrix?laden_only=false")
+    d = r.json()
+    dest_regions = {c["dest_region"] for c in d["cells"]}
+    # NLRTM (NL) -> NW Europe
+    assert "NW Europe" in dest_regions
+    # CNSHA + JPYOK (CN + JP) -> Far East
+    assert "Far East" in dest_regions
+
+
+def test_trade_lane_matrix_kind_filter(trade_lane_client):
+    r = trade_lane_client.get("/api/analytics/trade-lane-matrix?laden_only=false&kind=bulk")
+    d = r.json()
+    # Only 9103 (bulk Capesize) should appear
+    total = sum(c["vessel_count"] for c in d["cells"])
+    assert total == 1
+    assert d["cells"][0]["dest_region"] == "NW Europe"

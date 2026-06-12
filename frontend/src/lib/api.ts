@@ -1270,3 +1270,32 @@ export function useVesselRiskScores(topN = 50, days = 30, segment = '', kind = '
     refetchInterval: 2 * 60 * 1000,
   })
 }
+
+export interface TradeLaneCell {
+  origin_region: string
+  dest_region: string
+  vessel_count: number
+  high_risk_count: number
+  laden_count: number
+}
+
+export interface TradeLaneMatrixResponse {
+  as_of: string
+  kind: string
+  laden_only: boolean
+  origin_regions: string[]
+  dest_regions: string[]
+  cells: TradeLaneCell[]
+}
+
+export function useTradeLaneMatrix(kind = '', ladenOnly = true) {
+  return useQuery({
+    queryKey: ['trade-lane-matrix', kind, ladenOnly],
+    queryFn: () =>
+      getJSON<TradeLaneMatrixResponse>(
+        `/api/analytics/trade-lane-matrix?kind=${kind}&laden_only=${ladenOnly}`
+      ),
+    staleTime: REFETCH_MS,
+    refetchInterval: REFETCH_MS,
+  })
+}

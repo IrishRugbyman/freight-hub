@@ -13,7 +13,7 @@ import {
   YAxis,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion, useDestinationFlows, useMarketSummary, useVesselRiskScores, useChokepointHeatmap } from '@/lib/api'
+import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion, useDestinationFlows, useMarketSummary, useVesselRiskScores, useChokepointHeatmap, useTradeLaneMatrix } from '@/lib/api'
 import type { RiskEventItem } from '@/lib/api'
 
 const CHOKEPOINTS = [
@@ -1957,6 +1957,146 @@ export function ChokepointHeatmapCard() {
               ))}
             </LineChart>
           </ResponsiveContainer>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Phase 32: Trade Lane Risk Matrix
+// ---------------------------------------------------------------------------
+
+const REGION_SHORT: Record<string, string> = {
+  'Far East': 'Far East',
+  'SE Asia': 'SE Asia',
+  'South Asia': 'S Asia',
+  'Middle East': 'Mid East',
+  'NW Europe': 'NW Eur',
+  'Med': 'Med',
+  'Americas': 'Americas',
+  'W Africa': 'W Africa',
+  'E Africa': 'E Africa',
+  'S Africa': 'S Africa',
+  'Oceania': 'Oceania',
+  'Russia/CIS': 'Russia',
+  'Unknown': '?',
+}
+
+function cellHeatColor(count: number, maxCount: number): string {
+  if (maxCount === 0) return 'transparent'
+  const pct = count / maxCount
+  if (pct > 0.66) return 'rgba(96,165,250,0.35)'
+  if (pct > 0.33) return 'rgba(96,165,250,0.18)'
+  if (pct > 0.1)  return 'rgba(96,165,250,0.09)'
+  return 'transparent'
+}
+
+export function TradeLaneMatrixCard() {
+  const [kindFilter, setKindFilter] = useState('')
+  const [ladenOnly, setLadenOnly] = useState(true)
+  const { data, isLoading } = useTradeLaneMatrix(kindFilter, ladenOnly)
+
+  const cellMap = React.useMemo(() => {
+    if (!data?.cells.length) return new Map<string, { vessel_count: number; high_risk_count: number }>()
+    const m = new Map<string, { vessel_count: number; high_risk_count: number }>()
+    for (const c of data.cells) {
+      m.set(`${c.origin_region}|${c.dest_region}`, {
+        vessel_count: c.vessel_count,
+        high_risk_count: c.high_risk_count,
+      })
+    }
+    return m
+  }, [data])
+
+  const maxCount = React.useMemo(() => {
+    if (!data?.cells.length) return 1
+    return Math.max(...data.cells.map(c => c.vessel_count), 1)
+  }, [data])
+
+  const origins = data?.origin_regions ?? []
+  const dests = data?.dest_regions ?? []
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex flex-wrap items-center justify-between gap-2">
+          <span>Trade Lane Matrix</span>
+          <div className="flex flex-wrap gap-2 text-sm font-normal">
+            <select
+              className="rounded border border-border bg-background px-2 py-1 text-xs"
+              value={kindFilter}
+              onChange={e => setKindFilter(e.target.value)}
+            >
+              <option value="">All types</option>
+              <option value="tanker">Tankers</option>
+              <option value="bulk">Bulkers</option>
+            </select>
+            <label className="flex items-center gap-1 text-xs text-muted-foreground cursor-pointer">
+              <input
+                type="checkbox"
+                checked={ladenOnly}
+                onChange={e => setLadenOnly(e.target.checked)}
+                className="h-3 w-3"
+              />
+              Laden only
+            </label>
+          </div>
+        </CardTitle>
+        {data && (
+          <p className="text-xs text-muted-foreground">
+            Origin AIS region to destination macro-region. Cell intensity = vessel count. Red tint = high-risk vessels.
+          </p>
+        )}
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="h-48 animate-pulse rounded bg-muted/40" />
+        ) : origins.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">No data yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs border-collapse">
+              <thead>
+                <tr>
+                  <th className="py-1 pr-2 text-left text-muted-foreground font-normal">Origin</th>
+                  {dests.map(dest => (
+                    <th key={dest} className="py-1 px-1 text-center text-muted-foreground font-normal min-w-[52px]">
+                      {REGION_SHORT[dest] ?? dest}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {origins.map(origin => (
+                  <tr key={origin} className="border-t border-border/20">
+                    <td className="py-1 pr-2 text-muted-foreground whitespace-nowrap">
+                      {origin.replace(/_/g, ' ')}
+                    </td>
+                    {dests.map(dest => {
+                      const cell = cellMap.get(`${origin}|${dest}`)
+                      if (!cell) return <td key={dest} className="py-1 px-1 text-center text-muted-foreground/20">-</td>
+                      const bg = cellHeatColor(cell.vessel_count, maxCount)
+                      const hasRisk = cell.high_risk_count > 0
+                      return (
+                        <td
+                          key={dest}
+                          className="py-1 px-1 text-center tabular-nums"
+                          style={{ background: bg }}
+                          title={`${origin} → ${dest}: ${cell.vessel_count} vessels${hasRisk ? `, ${cell.high_risk_count} high-risk` : ''}`}
+                        >
+                          <span className="font-medium">{cell.vessel_count}</span>
+                          {hasRisk && (
+                            <span className="ml-0.5 text-red-400 text-[9px]">↑{cell.high_risk_count}</span>
+                          )}
+                        </td>
+                      )
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </CardContent>
     </Card>

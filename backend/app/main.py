@@ -70,6 +70,8 @@ from .schemas import (
     RiskEventsResponse,
     ChokepointHeatmapCell,
     ChokepointHeatmapResponse,
+    TradeLaneCell,
+    TradeLaneMatrixResponse,
     PortCongestionRow,
     PortCongestionResponse,
     VesselRiskRow,
@@ -2506,6 +2508,212 @@ def analytics_port_congestion(kind: str = "", days: int = 14):
         as_of=_iso(now_ts) or "",
         days_baseline=days,
         rows=rows_out,
+    )
+
+
+_DEST_REGION_MAP: dict[str, str] = {
+    # Far East
+    "CN": "Far East", "HK": "Far East", "TW": "Far East",
+    "KR": "Far East", "JP": "Far East",
+    # Southeast Asia
+    "SG": "SE Asia", "MY": "SE Asia", "TH": "SE Asia",
+    "ID": "SE Asia", "PH": "SE Asia", "VN": "SE Asia",
+    # South Asia
+    "IN": "South Asia", "PK": "South Asia", "LK": "South Asia", "BD": "South Asia",
+    # Middle East
+    "AE": "Middle East", "SA": "Middle East", "KW": "Middle East",
+    "IQ": "Middle East", "IR": "Middle East", "QA": "Middle East",
+    "OM": "Middle East", "BH": "Middle East", "YE": "Middle East",
+    # Europe (NW)
+    "NL": "NW Europe", "BE": "NW Europe", "GB": "NW Europe",
+    "FR": "NW Europe", "DE": "NW Europe", "DK": "NW Europe",
+    "NO": "NW Europe", "SE": "NW Europe", "FI": "NW Europe",
+    "PL": "NW Europe", "LV": "NW Europe", "LT": "NW Europe",
+    "EE": "NW Europe", "IE": "NW Europe",
+    # Mediterranean
+    "ES": "Med", "IT": "Med", "PT": "Med", "GR": "Med",
+    "TR": "Med", "EG": "Med", "LY": "Med", "TN": "Med",
+    "MA": "Med", "DZ": "Med", "MT": "Med", "HR": "Med",
+    # Americas
+    "US": "Americas", "MX": "Americas", "PA": "Americas",
+    "CA": "Americas", "CO": "Americas", "VE": "Americas",
+    "BR": "Americas", "AR": "Americas", "CL": "Americas",
+    "PE": "Americas", "EC": "Americas", "TT": "Americas",
+    # West Africa
+    "NG": "W Africa", "AO": "W Africa", "CI": "W Africa",
+    "GH": "W Africa", "CM": "W Africa", "SN": "W Africa",
+    "TG": "W Africa", "CD": "W Africa", "GA": "W Africa",
+    # East Africa / Indian Ocean
+    "TZ": "E Africa", "KE": "E Africa", "MZ": "E Africa",
+    "MU": "E Africa", "ZA": "S Africa",
+    # Australia / Pacific
+    "AU": "Oceania", "NZ": "Oceania",
+    # Baltic / Black Sea
+    "RU": "Russia/CIS", "UA": "Russia/CIS", "KZ": "Russia/CIS",
+    "BY": "Russia/CIS",
+}
+
+
+def _dest_to_region(dest: str | None) -> str:
+    """Map a 5-char UNLOCODE destination to a macro-region using the first 2 chars."""
+    if not dest or len(dest) < 2:
+        return "Unknown"
+    return _DEST_REGION_MAP.get(dest[:2].upper(), "Unknown")
+
+
+@app.get("/api/analytics/trade-lane-matrix", response_model=TradeLaneMatrixResponse)
+def analytics_trade_lane_matrix(
+    kind: str | None = None,
+    laden_only: bool = True,
+):
+    """Trade lane intensity matrix: origin AIS region -> destination macro-region.
+
+    Maps vessel destinations (UNLOCODE) to macro-regions (Far East, NW Europe, etc.)
+    and counts vessels per (origin_region, dest_region) pair.
+    Enriches with high-risk vessel counts (behavioral_score >= 50 OR registry_risk >= 50 OR OFAC).
+    """
+    now_ts = datetime.now(UTC).replace(tzinfo=None)
+
+    # Step 1: live positions with destination
+    lp_conds = ["segment != 'Small'", "destination IS NOT NULL", "destination != ''"]
+    lp_params: list = []
+    if kind:
+        lp_conds.append("kind = ?")
+        lp_params.append(kind)
+
+    lp_df = db.query(
+        "SELECT mmsi, imo, region, destination FROM live_positions WHERE " +
+        " AND ".join(lp_conds),
+        lp_params or None,
+    )
+    if lp_df.empty:
+        return TradeLaneMatrixResponse(
+            as_of=_iso(now_ts) or "",
+            kind=kind or "",
+            laden_only=laden_only,
+            origin_regions=[],
+            dest_regions=[],
+            cells=[],
+        )
+
+    fleet_mmsis = {int(r["mmsi"]) for _, r in lp_df.iterrows()}
+
+    # Step 2: laden filter via vessel_state
+    laden_mmsi: set[int] = set()
+    if laden_only:
+        vs_df = db.query(
+            "SELECT mmsi FROM vessel_state WHERE laden = 'laden'",
+            db=db.analytics_db_path(),
+        )
+        if not vs_df.empty:
+            laden_mmsi = {int(m) for m in vs_df["mmsi"]}
+
+    # Step 3: risk scores from analytics DB (events) + registry
+    rr_df = db.query(
+        "SELECT mmsi, COUNT(*) AS cnt FROM ais_events WHERE type = 'reroute' GROUP BY mmsi",
+        db=db.analytics_db_path(),
+    )
+    reroute_map: dict[int, int] = {}
+    if not rr_df.empty:
+        for _, r in rr_df.iterrows():
+            reroute_map[int(r["mmsi"])] = int(r["cnt"])
+
+    sts_df = db.query(
+        "SELECT mmsi, COUNT(*) AS cnt FROM ais_events WHERE type = 'sts' GROUP BY mmsi "
+        "UNION ALL "
+        "SELECT mmsi2 AS mmsi, COUNT(*) AS cnt FROM ais_events WHERE type = 'sts' AND mmsi2 IS NOT NULL GROUP BY mmsi2",
+        db=db.analytics_db_path(),
+    )
+    sts_map: dict[int, int] = {}
+    if not sts_df.empty:
+        for _, r in sts_df.iterrows():
+            m = int(r["mmsi"])
+            sts_map[m] = sts_map.get(m, 0) + int(r["cnt"])
+
+    # Registry risk
+    live_imos = [_valid_imo(r.get("imo")) for _, r in lp_df.iterrows() if _valid_imo(r.get("imo")) is not None]
+    reg_map: dict[int, dict] = {}  # imo -> {risk_score, ofac}
+    if live_imos:
+        placeholders = ",".join(["?"] * len(live_imos))
+        reg_df = db.query(
+            f"SELECT imo, risk_score, ofac_sanctioned FROM vessel_registry "
+            f"WHERE imo IN ({placeholders}) AND fetch_ok = true",
+            live_imos,
+            db=db.registry_db_path(),
+        )
+        if not reg_df.empty:
+            for _, r in reg_df.iterrows():
+                imo_v = _valid_imo(r.get("imo"))
+                if imo_v:
+                    reg_map[imo_v] = {
+                        "risk_score": int(r["risk_score"]) if r.get("risk_score") is not None and not pd.isna(r["risk_score"]) else None,
+                        "ofac": bool(r["ofac_sanctioned"]) if r.get("ofac_sanctioned") is not None and not pd.isna(r["ofac_sanctioned"]) else False,
+                    }
+
+    # Step 4: aggregate cells
+    from collections import defaultdict
+    cell_counts: dict[tuple[str, str], dict[str, int]] = defaultdict(lambda: {"total": 0, "high_risk": 0, "laden": 0})
+    origin_totals: dict[str, int] = defaultdict(int)
+    dest_totals: dict[str, int] = defaultdict(int)
+
+    for _, row in lp_df.iterrows():
+        mmsi = int(row["mmsi"])
+        origin = str(row["region"]) if row.get("region") else "Unknown"
+        dest_region = _dest_to_region(_str_or_none(row.get("destination")))
+
+        if laden_only and mmsi not in laden_mmsi:
+            continue
+
+        # Is this a high-risk vessel?
+        imo = _valid_imo(row.get("imo"))
+        reg = reg_map.get(imo) if imo else None
+        behavioral = min(sts_map.get(mmsi, 0) * 20 + reroute_map.get(mmsi, 0) * 5, 100)
+        registry_risk = reg["risk_score"] if reg else None
+        ofac = reg["ofac"] if reg else False
+        if reg and registry_risk is not None:
+            total_score = round(behavioral * 0.4 + registry_risk * 0.6) + (25 if ofac else 0)
+        else:
+            total_score = behavioral + (25 if ofac else 0)
+        is_high_risk = (total_score >= 50) or ofac
+
+        key = (origin, dest_region)
+        cell_counts[key]["total"] += 1
+        cell_counts[key]["laden"] += 1 if mmsi in laden_mmsi else 0
+        if is_high_risk:
+            cell_counts[key]["high_risk"] += 1
+        origin_totals[origin] += 1
+        dest_totals[dest_region] += 1
+
+    if not cell_counts:
+        return TradeLaneMatrixResponse(
+            as_of=_iso(now_ts) or "",
+            kind=kind or "",
+            laden_only=laden_only,
+            origin_regions=[],
+            dest_regions=[],
+            cells=[],
+        )
+
+    origin_regions = sorted(origin_totals, key=lambda r: -origin_totals[r])
+    dest_regions = sorted(dest_totals, key=lambda r: -dest_totals[r])
+
+    cells: list[TradeLaneCell] = []
+    for (orig, dest), counts in sorted(cell_counts.items(), key=lambda kv: -kv[1]["total"]):
+        cells.append(TradeLaneCell(
+            origin_region=orig,
+            dest_region=dest,
+            vessel_count=counts["total"],
+            high_risk_count=counts["high_risk"],
+            laden_count=counts["laden"],
+        ))
+
+    return TradeLaneMatrixResponse(
+        as_of=_iso(now_ts) or "",
+        kind=kind or "",
+        laden_only=laden_only,
+        origin_regions=origin_regions,
+        dest_regions=dest_regions,
+        cells=cells,
     )
 
 

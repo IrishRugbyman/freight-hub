@@ -2,7 +2,7 @@
 
 Three DBs in use:
 - ais_positions.duckdb  : owned by the AIS collector (market-data service). We open
-  read-only and retry past the rare per-write lock (the writer holds it < 1s every ~90s).
+  read-only and retry past the write lock (collector holds it several seconds per ~150s cycle).
 - freight_analytics.duckdb : owned by the analytics batch job (analytics/build.py). Also
   opened read-only here; the batch job is the sole writer.
 - vessel_registry.duckdb : owned by the Equasis crawler (registry/crawl.py). Read-only
@@ -43,7 +43,7 @@ def registry_db_path() -> Path:
     return Path(os.environ.get("REGISTRY_DB", str(_DEFAULT_REGISTRY_DB)))
 
 
-def query(sql: str, params: list | None = None, retries: int = 10, db: Path | None = None):
+def query(sql: str, params: list | None = None, retries: int = 30, db: Path | None = None):
     """Run a read-only query against the specified DB, returning a DataFrame.
 
     Empty DataFrame if the DB or table is missing. Retries past the brief lock that

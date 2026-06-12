@@ -4,6 +4,7 @@ import { createFileRoute } from '@tanstack/react-router'
 export const Route = createFileRoute('/analytics')({ component: AnalyticsPage })
 
 const ChokepointHeatmapCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.ChokepointHeatmapCard })))
+const TradeLaneMatrixCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.TradeLaneMatrixCard })))
 const TransitsCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.TransitsCard })))
 const CongestionCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.CongestionCard })))
 const LadenCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.LadenCard })))
@@ -67,6 +68,7 @@ function AnalyticsPage() {
         <Suspense fallback={<ChartSkeleton />}><PortCongestionCard /></Suspense>
 
         <h2 className="text-base font-semibold text-foreground">Cargo Flows</h2>
+        <Suspense fallback={<ChartSkeleton />}><TradeLaneMatrixCard /></Suspense>
         <Suspense fallback={<ChartSkeleton />}><DestinationFlowCard /></Suspense>
 
         <h2 className="text-base font-semibold text-foreground">Fleet Age &amp; Risk Profile</h2>
