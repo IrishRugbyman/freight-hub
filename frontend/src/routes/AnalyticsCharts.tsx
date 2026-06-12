@@ -14,7 +14,7 @@ import {
   YAxis,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion, useDestinationFlows, useMarketSummary, useVesselRiskScores, useChokepointHeatmap, useTradeLaneMatrix, useAnomalyWatchlist, useStsProximity, useRegionMomentum, useEventRateTimeline, useTransitRateTimeline, useAnchorageOccupancy, useStsOffenders, useFleetAtTime, useDestinationChanges, useOwnerIntelligence, useChokepointAnomaly, useCargoStateChanges, useSpeedAnomalies, usePortArrivals } from '@/lib/api'
+import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion, useDestinationFlows, useMarketSummary, useVesselRiskScores, useChokepointHeatmap, useTradeLaneMatrix, useAnomalyWatchlist, useStsProximity, useRegionMomentum, useEventRateTimeline, useTransitRateTimeline, useAnchorageOccupancy, useStsOffenders, useFleetAtTime, useDestinationChanges, useOwnerIntelligence, useChokepointAnomaly, useCargoStateChanges, useSpeedAnomalies, usePortArrivals, useCrudeOnWater } from '@/lib/api'
 import type { RiskEventItem } from '@/lib/api'
 
 const CHOKEPOINTS = [
@@ -3521,6 +3521,102 @@ export function PortArrivalForecastCard() {
             ))}
           </div>
         )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// Phase 48: Crude Oil on Water
+export function CrudeOnWaterCard() {
+  const { data, isLoading } = useCrudeOnWater()
+
+  if (isLoading || !data) {
+    return (
+      <Card>
+        <CardHeader><CardTitle>Crude Oil on Water</CardTitle></CardHeader>
+        <CardContent><div className="h-32 animate-pulse rounded bg-muted/40" /></CardContent>
+      </Card>
+    )
+  }
+
+  const { total_laden_tankers, total_ballast_tankers, estimated_mb_on_water, by_segment, inbound_regions } = data
+
+  const regionData = inbound_regions.slice(0, 8).map((r) => ({
+    region: r.region,
+    vessels: r.vessel_count,
+    mb: r.estimated_mb,
+  }))
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center justify-between">
+          <span>Crude Oil on Water</span>
+          <span className="text-xs font-normal text-muted-foreground">laden tankers only</span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-3 gap-3">
+          <div className="rounded-lg bg-muted/30 p-3 text-center">
+            <div className="text-2xl font-bold tabular-nums">{estimated_mb_on_water.toFixed(0)}</div>
+            <div className="text-xs text-muted-foreground mt-0.5">million barrels on water</div>
+          </div>
+          <div className="rounded-lg bg-muted/30 p-3 text-center">
+            <div className="text-2xl font-bold tabular-nums text-orange-400">{total_laden_tankers.toLocaleString()}</div>
+            <div className="text-xs text-muted-foreground mt-0.5">laden tankers</div>
+          </div>
+          <div className="rounded-lg bg-muted/30 p-3 text-center">
+            <div className="text-2xl font-bold tabular-nums text-slate-400">{total_ballast_tankers.toLocaleString()}</div>
+            <div className="text-xs text-muted-foreground mt-0.5">ballast tankers</div>
+          </div>
+        </div>
+
+        <div>
+          <div className="mb-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">By Segment</div>
+          <div className="space-y-1">
+            {by_segment.filter((s) => s.laden_count > 0).map((s) => {
+              const total = s.laden_count + s.ballast_count + s.unknown_count
+              const ladenPct = total > 0 ? Math.round((s.laden_count / total) * 100) : 0
+              return (
+                <div key={s.segment} className="flex items-center gap-2 text-xs">
+                  <span className="w-20 shrink-0 font-medium">{s.segment}</span>
+                  <div className="flex-1 h-1.5 rounded-full bg-muted/50 overflow-hidden">
+                    <div className="h-full rounded-full bg-orange-500/70" style={{ width: `${ladenPct}%` }} />
+                  </div>
+                  <span className="w-16 text-right tabular-nums text-muted-foreground">{s.laden_count}v</span>
+                  <span className="w-16 text-right tabular-nums text-orange-400">{s.estimated_mb.toFixed(1)} MB</span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+
+        {regionData.length > 0 && (
+          <div>
+            <div className="mb-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              Inbound by Destination Region (MB)
+            </div>
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={regionData} margin={{ top: 4, right: 8, left: 0, bottom: 40 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                <XAxis dataKey="region" tick={{ fontSize: 10, fill: '#888' }} angle={-35} textAnchor="end" interval={0} />
+                <YAxis tick={{ fontSize: 10, fill: '#888' }} width={40} />
+                <Tooltip
+                  contentStyle={{ background: '#1c1c1c', border: '1px solid #333', fontSize: 11 }}
+                  formatter={(val, name) => {
+                    const n = Number(val)
+                    return name === 'mb' ? [`${n.toFixed(1)} MB`, 'Est. MB'] : [n, 'Vessels']
+                  }}
+                />
+                <Bar dataKey="mb" fill="#f97316" radius={[2, 2, 0, 0]} name="mb" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+
+        <div className="text-[10px] text-muted-foreground/60">
+          Estimates: VLCC 2.0 MB, Suezmax 1.1 MB, Aframax 0.75 MB, Panamax 0.54 MB, Small 0.30 MB per laden vessel. Destination from LOCODE country code.
+        </div>
       </CardContent>
     </Card>
   )

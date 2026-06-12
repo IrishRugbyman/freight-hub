@@ -1810,3 +1810,37 @@ export function usePortArrivals(kind = 'tanker', horizonH = 48) {
     refetchInterval: 5 * 60 * 1000,
   })
 }
+
+// Phase 48: Crude Oil on Water
+export interface CrudeSegmentRow {
+  segment: string
+  laden_count: number
+  ballast_count: number
+  unknown_count: number
+  estimated_mb: number
+}
+
+export interface InboundRegionRow {
+  region: string
+  vessel_count: number
+  estimated_mb: number
+  top_segments: string[]
+}
+
+export interface CrudeOnWaterResponse {
+  as_of: string
+  total_laden_tankers: number
+  total_ballast_tankers: number
+  estimated_mb_on_water: number
+  by_segment: CrudeSegmentRow[]
+  inbound_regions: InboundRegionRow[]
+}
+
+export function useCrudeOnWater() {
+  return useQuery({
+    queryKey: ['crude-on-water'],
+    queryFn: () => getJSON<CrudeOnWaterResponse>('/api/analytics/crude-on-water'),
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+  })
+}

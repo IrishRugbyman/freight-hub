@@ -1084,3 +1084,28 @@ class PortArrivalResponse(BaseModel):
     as_of: str
     total_inbound: int
     ports: list[PortArrivalForecast]
+
+
+# Phase 48: Crude Oil on Water
+class CrudeSegmentRow(BaseModel):
+    segment: str
+    laden_count: int
+    ballast_count: int
+    unknown_count: int
+    estimated_mb: float  # million barrels, laden vessels only
+
+
+class InboundRegionRow(BaseModel):
+    region: str
+    vessel_count: int
+    estimated_mb: float
+    top_segments: list[str]
+
+
+class CrudeOnWaterResponse(BaseModel):
+    as_of: str
+    total_laden_tankers: int
+    total_ballast_tankers: int
+    estimated_mb_on_water: float  # laden only
+    by_segment: list[CrudeSegmentRow]
+    inbound_regions: list[InboundRegionRow]  # where laden tankers are heading

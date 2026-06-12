@@ -4159,3 +4159,97 @@ def test_port_arrival_kind_filter(port_arrival_client):
     d = r.json()
     all_kinds = [v["kind"] for p in d["ports"] for v in p["vessels"]]
     assert all(k == "tanker" for k in all_kinds), "non-tanker appeared in tanker-filtered response"
+
+
+# ---------------------------------------------------------------------------
+# Phase 48: Crude Oil on Water
+# ---------------------------------------------------------------------------
+
+import pytest
+
+
+@pytest.fixture
+def crude_client(tmp_path, monkeypatch):
+    """Fixture: 3 laden tankers (VLCC, Aframax, Small) + 1 ballast Suezmax."""
+    import duckdb
+    from fastapi.testclient import TestClient
+    from datetime import UTC, datetime
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+    ais_file = tmp_path / "ais_cow.duckdb"
+    conn = duckdb.connect(str(ais_file))
+    conn.execute("""
+    CREATE TABLE live_positions (
+        mmsi BIGINT PRIMARY KEY, name VARCHAR, lat DOUBLE, lon DOUBLE,
+        sog DOUBLE, cog DOUBLE, heading DOUBLE, destination VARCHAR,
+        ship_type INTEGER, length_m DOUBLE, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, updated_ts TIMESTAMP,
+        imo BIGINT, draught DOUBLE, nav_status INTEGER, eta VARCHAR
+    );
+    """)
+    conn.executemany("INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [
+        (6001, "VLCC ALPHA", 25.0, 57.0, 13.0, 270.0, 270.0, "NLRTM", 80, 330.0, "tanker", "VLCC", "indian_ocean", now, None, 21.0, 0, None),
+        (6002, "AFRA BETA", 48.0, -5.0, 12.0, 90.0, 90.0, "ESBCN", 80, 250.0, "tanker", "Aframax", "atlantic", now, None, 12.5, 0, None),
+        (6003, "SMALL GAMMA", 35.0, 15.0, 10.0, 180.0, 180.0, "ITGOA", 80, 120.0, "tanker", "Small", "med", now, None, 5.5, 0, None),
+        (6004, "SUEZ DELTA", 20.0, 60.0, 11.0, 0.0, 0.0, "AEFJR", 80, 280.0, "tanker", "Suezmax", "indian_ocean", now, None, 7.0, 0, None),
+        # Bulk carrier - should NOT count
+        (6005, "BULK ETA", 40.0, 20.0, 8.0, 90.0, 90.0, "DEHAM", 70, 200.0, "bulk", "Capesize", "med", now, None, 10.0, 0, None),
+    ])
+    conn.close()
+
+    analytics_file = tmp_path / "analytics_cow.duckdb"
+    ac = duckdb.connect(str(analytics_file))
+    ac.execute("CREATE TABLE vessel_state (mmsi BIGINT PRIMARY KEY, laden VARCHAR, last_draught DOUBLE, max_draught_seen DOUBLE, updated_ts TIMESTAMP)")
+    ac.executemany("INSERT INTO vessel_state VALUES (?,?,?,?,?)", [
+        (6001, "laden", 21.0, 22.0, now),   # VLCC laden
+        (6002, "laden", 12.5, 14.0, now),   # Aframax laden
+        (6003, "laden", 5.5, 6.0, now),     # Small laden
+        (6004, "ballast", 7.0, 20.0, now),  # Suezmax ballast
+    ])
+    ac.close()
+
+    registry_file = tmp_path / "registry_cow.duckdb"
+    rc = duckdb.connect(str(registry_file))
+    rc.execute("CREATE TABLE vessel_registry (imo BIGINT PRIMARY KEY, risk_score INTEGER, fetch_ok BOOLEAN)")
+    rc.close()
+
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
+    monkeypatch.setenv("ANALYTICS_DB", str(analytics_file))
+    monkeypatch.setenv("REGISTRY_DB", str(registry_file))
+    from app.main import app
+    return TestClient(app)
+
+
+def test_crude_on_water_structure(crude_client):
+    r = crude_client.get("/api/analytics/crude-on-water")
+    assert r.status_code == 200
+    d = r.json()
+    assert "total_laden_tankers" in d
+    assert "estimated_mb_on_water" in d
+    assert "by_segment" in d
+    assert "inbound_regions" in d
+
+
+def test_crude_on_water_counts(crude_client):
+    r = crude_client.get("/api/analytics/crude-on-water")
+    d = r.json()
+    assert d["total_laden_tankers"] == 3, "expected 3 laden tankers"
+    assert d["total_ballast_tankers"] == 1, "expected 1 ballast tanker"
+    # Bulk carrier must not be counted
+    assert d["total_laden_tankers"] + d["total_ballast_tankers"] <= 4
+
+
+def test_crude_on_water_mb_positive(crude_client):
+    r = crude_client.get("/api/analytics/crude-on-water")
+    d = r.json()
+    assert d["estimated_mb_on_water"] > 0
+    # VLCC 2.0 MB + Aframax 0.75 MB + Small 0.30 MB = ~3.05 MB
+    assert d["estimated_mb_on_water"] > 2.0
+
+
+def test_crude_on_water_inbound_regions(crude_client):
+    r = crude_client.get("/api/analytics/crude-on-water")
+    d = r.json()
+    regions = [reg["region"] for reg in d["inbound_regions"]]
+    # NL -> Europe, ES -> Europe, IT -> Europe
+    assert "Europe" in regions

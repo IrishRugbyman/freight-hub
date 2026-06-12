@@ -126,6 +126,9 @@ from .schemas import (
     ArrivalVessel,
     PortArrivalForecast,
     PortArrivalResponse,
+    CrudeSegmentRow,
+    InboundRegionRow,
+    CrudeOnWaterResponse,
 )
 
 _STATIC = Path(__file__).parent / "static"
@@ -4738,4 +4741,197 @@ def analytics_port_arrivals(horizon_h: int = 48, kind: str = "tanker"):
         as_of=now_dt.isoformat(),
         total_inbound=total_inbound,
         ports=result_ports,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase 48: Crude Oil on Water
+# ---------------------------------------------------------------------------
+
+# Average laden DWT per tanker segment (industry proxy, million barrels at 7.33 bbl/tonne)
+# MB = DWT * load_factor * 7.33 / 1_000_000
+_SEGMENT_DWT: dict[str, float] = {
+    "ULCC": 400_000,
+    "VLCC": 300_000,
+    "Suezmax": 157_000,
+    "Aframax": 105_000,
+    "Panamax": 74_000,
+    "Small": 45_000,
+}
+_LOAD_FACTOR = 0.90  # vessels are ~90% full when laden
+_BBL_PER_TONNE = 7.33
+
+# ISO 2-letter country code to broad import/export region
+_CC_TO_REGION: dict[str, str] = {
+    # Europe
+    "NL": "Europe", "BE": "Europe", "GB": "Europe", "DE": "Europe", "FR": "Europe",
+    "ES": "Europe", "IT": "Europe", "PT": "Europe", "GR": "Europe", "NO": "Europe",
+    "SE": "Europe", "DK": "Europe", "FI": "Europe", "PL": "Europe", "RO": "Europe",
+    "HR": "Europe", "SI": "Europe", "MT": "Europe", "CY": "Europe", "IE": "Europe",
+    "TR": "Europe", "LV": "Europe", "LT": "Europe", "EE": "Europe", "IS": "Europe",
+    "BG": "Europe", "AL": "Europe", "MK": "Europe", "ME": "Europe",
+    # China
+    "CN": "China",
+    # NE Asia
+    "KR": "NE Asia", "JP": "NE Asia", "TW": "NE Asia",
+    # India / S Asia
+    "IN": "India / S Asia", "PK": "India / S Asia", "BD": "India / S Asia",
+    "LK": "India / S Asia",
+    # SE Asia
+    "SG": "SE Asia", "MY": "SE Asia", "TH": "SE Asia", "ID": "SE Asia",
+    "VN": "SE Asia", "PH": "SE Asia",
+    # Americas
+    "US": "Americas", "CA": "Americas", "MX": "Americas", "BR": "Americas",
+    "AR": "Americas", "CL": "Americas", "PA": "Americas", "VE": "Americas",
+    "CO": "Americas", "PE": "Americas", "EC": "Americas", "UY": "Americas",
+    "TT": "Americas", "CU": "Americas",
+    # Middle East / Gulf
+    "SA": "Middle East", "AE": "Middle East", "IQ": "Middle East", "KW": "Middle East",
+    "OM": "Middle East", "QA": "Middle East", "BH": "Middle East", "YE": "Middle East",
+    "IR": "Middle East",
+    # Africa
+    "ZA": "Africa", "NG": "Africa", "EG": "Africa", "DZ": "Africa", "LY": "Africa",
+    "MA": "Africa", "TZ": "Africa", "MZ": "Africa", "AO": "Africa", "CI": "Africa",
+    "SN": "Africa", "GH": "Africa", "GA": "Africa", "CM": "Africa", "KE": "Africa",
+    # Oceania
+    "AU": "Oceania", "NZ": "Oceania",
+}
+
+
+def _crude_import_region(destination: str | None) -> str:
+    """Map an AIS destination string to a broad import region (crude-on-water card)."""
+    if not destination:
+        return "Unknown"
+    d = destination.strip().upper()
+    if len(d) >= 2 and d[:2].isalpha():
+        cc = d[:2]
+        region = _CC_TO_REGION.get(cc)
+        if region:
+            return region
+    return "Unknown"
+
+
+def _segment_mb(segment: str | None) -> float:
+    """Return estimated million barrels for one laden vessel of given segment."""
+    dwt = _SEGMENT_DWT.get(segment or "", _SEGMENT_DWT["Small"])
+    return round(dwt * _LOAD_FACTOR * _BBL_PER_TONNE / 1_000_000, 3)
+
+
+@app.get("/api/analytics/crude-on-water", response_model=CrudeOnWaterResponse)
+def analytics_crude_on_water():
+    """
+    Live laden tanker count and estimated million barrels on water.
+    Breaks down by segment and destination import region.
+    """
+    now_dt = datetime.utcnow()
+
+    # 1. Get laden state from analytics DB (vessel_state)
+    vs_df = db.query(
+        "SELECT mmsi, laden FROM vessel_state",
+        db=db.analytics_db_path(),
+    )
+    laden_map: dict[int, str] = {}
+    if not vs_df.empty:
+        for _, r in vs_df.iterrows():
+            m = r.get("mmsi")
+            l = r.get("laden")
+            if m is not None and l is not None:
+                laden_map[int(m)] = str(l)
+
+    # 2. Get live tankers
+    live_df = _live("kind = ?", ["tanker"])
+    if live_df.empty:
+        return CrudeOnWaterResponse(
+            as_of=now_dt.isoformat(),
+            total_laden_tankers=0,
+            total_ballast_tankers=0,
+            estimated_mb_on_water=0.0,
+            by_segment=[],
+            inbound_regions=[],
+        )
+
+    # 3. Merge laden state onto live_positions
+    live_df = live_df.copy()
+    live_df["mmsi_int"] = live_df["mmsi"].apply(lambda x: int(x) if x is not None else None)
+    live_df["laden_state"] = live_df["mmsi_int"].apply(lambda m: laden_map.get(m, "unknown"))
+
+    # 4. Aggregate by segment
+    segment_buckets: dict[str, dict] = {}
+    for _, r in live_df.iterrows():
+        raw_seg = r.get("segment")
+        seg = str(raw_seg) if raw_seg and not (isinstance(raw_seg, float) and pd.isna(raw_seg)) else "Small"
+        if seg not in segment_buckets:
+            segment_buckets[seg] = {"laden": 0, "ballast": 0, "unknown": 0}
+        state = r.get("laden_state", "unknown")
+        if state == "laden":
+            segment_buckets[seg]["laden"] += 1
+        elif state == "ballast":
+            segment_buckets[seg]["ballast"] += 1
+        else:
+            segment_buckets[seg]["unknown"] += 1
+
+    # Sort segments by DWT descending
+    seg_order = list(_SEGMENT_DWT.keys())
+    by_segment_rows: list[CrudeSegmentRow] = []
+    for seg in seg_order:
+        if seg not in segment_buckets:
+            continue
+        b = segment_buckets[seg]
+        est_mb = round(b["laden"] * _segment_mb(seg), 2)
+        by_segment_rows.append(CrudeSegmentRow(
+            segment=seg,
+            laden_count=b["laden"],
+            ballast_count=b["ballast"],
+            unknown_count=b["unknown"],
+            estimated_mb=est_mb,
+        ))
+    # Append any segments not in _SEGMENT_DWT (shouldn't happen, but be safe)
+    for seg, b in segment_buckets.items():
+        if seg not in seg_order:
+            by_segment_rows.append(CrudeSegmentRow(
+                segment=seg,
+                laden_count=b["laden"],
+                ballast_count=b["ballast"],
+                unknown_count=b["unknown"],
+                estimated_mb=round(b["laden"] * _segment_mb(seg), 2),
+            ))
+
+    # 5. Destination region breakdown for laden vessels only
+    laden_df = live_df[live_df["laden_state"] == "laden"]
+    region_buckets: dict[str, dict] = {}
+    for _, r in laden_df.iterrows():
+        dest = r.get("destination")
+        region = _crude_import_region(str(dest) if dest is not None else None)
+        raw_seg = r.get("segment")
+        seg = str(raw_seg) if raw_seg and not (isinstance(raw_seg, float) and pd.isna(raw_seg)) else "Small"
+        if region not in region_buckets:
+            region_buckets[region] = {"count": 0, "mb": 0.0, "segments": {}}
+        region_buckets[region]["count"] += 1
+        region_buckets[region]["mb"] += _segment_mb(seg)
+        region_buckets[region]["segments"][seg] = region_buckets[region]["segments"].get(seg, 0) + 1
+
+    inbound_rows: list[InboundRegionRow] = []
+    for region, b in region_buckets.items():
+        if region == "Unknown":
+            continue
+        top_segs = sorted(b["segments"], key=lambda s: b["segments"][s], reverse=True)[:3]
+        inbound_rows.append(InboundRegionRow(
+            region=region,
+            vessel_count=b["count"],
+            estimated_mb=round(b["mb"], 2),
+            top_segments=top_segs,
+        ))
+    inbound_rows.sort(key=lambda r: r.estimated_mb, reverse=True)
+
+    total_laden = int(live_df[live_df["laden_state"] == "laden"].shape[0])
+    total_ballast = int(live_df[live_df["laden_state"] == "ballast"].shape[0])
+    total_mb = round(sum(row.estimated_mb for row in by_segment_rows), 2)
+
+    return CrudeOnWaterResponse(
+        as_of=now_dt.isoformat(),
+        total_laden_tankers=total_laden,
+        total_ballast_tankers=total_ballast,
+        estimated_mb_on_water=total_mb,
+        by_segment=by_segment_rows,
+        inbound_regions=inbound_rows,
     )

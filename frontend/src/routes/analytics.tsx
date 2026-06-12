@@ -42,6 +42,7 @@ const ChokepointAnomalyCard = lazy(() => import('./AnalyticsCharts').then((m) =>
 const CargoStateChangesCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.CargoStateChangesCard })))
 const SpeedAnomaliesCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.SpeedAnomaliesCard })))
 const PortArrivalForecastCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.PortArrivalForecastCard })))
+const CrudeOnWaterCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.CrudeOnWaterCard })))
 
 function ChartSkeleton() {
   return <div className="h-[300px] animate-pulse rounded-lg bg-muted/40" />
@@ -80,6 +81,7 @@ function AnalyticsPage() {
         </div>
 
         <h2 className="text-base font-semibold text-foreground">Port Flow</h2>
+        <Suspense fallback={<ChartSkeleton />}><CrudeOnWaterCard /></Suspense>
         <Suspense fallback={<ChartSkeleton />}><PortArrivalForecastCard /></Suspense>
         <Suspense fallback={<ChartSkeleton />}><PortFlowCard /></Suspense>
 
