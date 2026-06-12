@@ -3386,3 +3386,293 @@ def test_fleet_history_segment_breakdown(fleet_history_client):
     vlcc = next((s for s in d["segments"] if s["segment"] == "VLCC"), None)
     assert vlcc is not None
     assert vlcc["count"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Phase 42: Destination Change Intelligence
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def dest_changes_client(tmp_path, monkeypatch):
+    """Fixture: 3 vessels with destination changes in ais_snapshots."""
+    import duckdb
+    from fastapi.testclient import TestClient
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+    t1 = now - timedelta(hours=10)
+    t2 = now - timedelta(hours=5)
+
+    ais_file = tmp_path / "ais_dc.duckdb"
+    conn = duckdb.connect(str(ais_file))
+    conn.execute("""
+    CREATE TABLE live_positions (
+        mmsi BIGINT PRIMARY KEY, name VARCHAR, lat DOUBLE, lon DOUBLE,
+        sog DOUBLE, cog DOUBLE, heading DOUBLE, destination VARCHAR,
+        ship_type INTEGER, length_m DOUBLE, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, updated_ts TIMESTAMP,
+        imo BIGINT, draught DOUBLE, nav_status INTEGER, eta VARCHAR
+    );
+    CREATE TABLE ais_snapshots (
+        snapshot_ts TIMESTAMP, mmsi BIGINT, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, lat DOUBLE, lon DOUBLE, ship_type INTEGER, length_m DOUBLE,
+        sog DOUBLE, nav_status INTEGER, draught DOUBLE, destination VARCHAR,
+        PRIMARY KEY (snapshot_ts, mmsi)
+    );
+    CREATE TABLE vessels (
+        mmsi BIGINT PRIMARY KEY, imo BIGINT, name VARCHAR, flag VARCHAR,
+        flag_iso2 VARCHAR, mid INTEGER, call_sign VARCHAR, vessel_type VARCHAR,
+        dwt INTEGER, grt INTEGER, build_year INTEGER, length_m DOUBLE, beam_m DOUBLE,
+        owner VARCHAR, manager VARCHAR, class_society VARCHAR, enriched_at TIMESTAMP, equasis_ok BOOLEAN
+    );
+    """)
+    # Vessel 1: changed from NLROT -> CNSHA (genuine reroute)
+    conn.executemany(
+        "INSERT INTO ais_snapshots VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            (t1, 9701, "tanker", "VLCC", "ara", 52.0, 4.0, 80, 330, 12.0, 0, 18.0, "NLROT"),
+            (t2, 9701, "tanker", "VLCC", "ara", 52.1, 4.1, 80, 330, 13.0, 0, 17.5, "CNSHA"),
+            # Vessel 2: same destination both snapshots (no change)
+            (t1, 9702, "bulk",   "Capesize", "hormuz", 25.0, 56.0, 74, 300, 8.0, 0, 7.0, "JPUKB"),
+            (t2, 9702, "bulk",   "Capesize", "hormuz", 25.1, 56.1, 74, 300, 8.0, 0, 7.0, "JPUKB"),
+            # Vessel 3: changed from GBSOU -> NLROT
+            (t1, 9703, "bulk",   "Handysize", "dover_channel", 50.9, -1.4, 74, 100, 6.0, 0, 4.0, "GBSOU"),
+            (t2, 9703, "bulk",   "Handysize", "dover_channel", 50.8, -1.3, 74, 100, 6.0, 0, 4.0, "NLROT"),
+        ],
+    )
+    conn.executemany("INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [
+        (9701, "VESSEL A", 52.1, 4.1, 13.0, 90.0, 90.0, "CNSHA", 80, 330.0, "tanker", "VLCC", "ara", t2, 9000001, 17.5, 0, None),
+        (9703, "VESSEL C", 50.8, -1.3, 6.0, 180.0, 180.0, "NLROT", 74, 100.0, "bulk", "Handysize", "dover_channel", t2, 9000003, 4.0, 0, None),
+    ])
+    conn.close()
+
+    an_file = tmp_path / "analytics_dc.duckdb"
+    an_conn = duckdb.connect(str(an_file))
+    an_conn.execute("""
+    CREATE TABLE meta_watermark (key VARCHAR PRIMARY KEY, ts TIMESTAMP);
+    CREATE TABLE ais_events (
+        event_id VARCHAR PRIMARY KEY, type VARCHAR, mmsi BIGINT, mmsi2 BIGINT,
+        start_ts TIMESTAMP, end_ts TIMESTAMP, lat DOUBLE, lon DOUBLE,
+        region VARCHAR, kind VARCHAR, segment VARCHAR, details VARCHAR
+    );
+    CREATE TABLE transit_events (
+        mmsi BIGINT, chokepoint VARCHAR, entered_ts TIMESTAMP, exited_ts TIMESTAMP,
+        direction VARCHAR, kind VARCHAR, segment VARCHAR, laden BOOLEAN,
+        PRIMARY KEY (mmsi, chokepoint, entered_ts)
+    );
+    CREATE TABLE anchored_episodes (
+        mmsi BIGINT, zone VARCHAR, start_ts TIMESTAMP, end_ts TIMESTAMP,
+        kind VARCHAR, segment VARCHAR, PRIMARY KEY (mmsi, zone, start_ts)
+    );
+    CREATE TABLE fleet_density (
+        ts TIMESTAMP, region VARCHAR, kind VARCHAR, segment VARCHAR,
+        laden_count INTEGER, ballast_count INTEGER, unknown_count INTEGER,
+        PRIMARY KEY (ts, region, kind, segment)
+    );
+    CREATE TABLE vessel_state (
+        mmsi BIGINT PRIMARY KEY, max_draught_seen DOUBLE, last_draught DOUBLE,
+        laden VARCHAR, updated_ts TIMESTAMP
+    );
+    """)
+    an_conn.close()
+
+    reg_file = tmp_path / "reg_dc.duckdb"
+    duckdb.connect(str(reg_file)).execute("""
+    CREATE TABLE vessel_registry (
+        imo BIGINT PRIMARY KEY, ship_name VARCHAR, flag VARCHAR, flag_code VARCHAR,
+        call_sign VARCHAR, gross_tonnage INTEGER, dwt INTEGER, ship_type VARCHAR,
+        year_built INTEGER, ship_status VARCHAR, owner VARCHAR, ism_manager VARCHAR,
+        ship_manager VARCHAR, class_society VARCHAR, pi_club VARCHAR,
+        detention_rate_pct DOUBLE, paris_mou VARCHAR, tokyo_mou VARCHAR,
+        uscg_targeting VARCHAR, fetched_ts TIMESTAMP, fetch_ok BOOLEAN,
+        risk_score INTEGER, risk_indicators VARCHAR, ofac_sanctioned BOOLEAN
+    );
+    """).close()
+
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
+    monkeypatch.setenv("ANALYTICS_DB", str(an_file))
+    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
+
+    from app.main import app as freight_app
+    return TestClient(freight_app)
+
+
+def test_dest_changes_structure(dest_changes_client):
+    r = dest_changes_client.get("/api/analytics/destination-changes")
+    assert r.status_code == 200
+    d = r.json()
+    assert "total_changes" in d and "rows" in d and "hours" in d
+
+
+def test_dest_changes_finds_reroutes(dest_changes_client):
+    r = dest_changes_client.get("/api/analytics/destination-changes?hours=72")
+    d = r.json()
+    assert d["total_changes"] == 2
+    mmsis = {row["mmsi"] for row in d["rows"]}
+    assert 9701 in mmsis and 9703 in mmsis
+    assert 9702 not in mmsis
+
+
+def test_dest_changes_normalized_destinations(dest_changes_client):
+    r = dest_changes_client.get("/api/analytics/destination-changes?hours=72")
+    d = r.json()
+    vessel_a = next(row for row in d["rows"] if row["mmsi"] == 9701)
+    assert vessel_a["from_dest"] == "NLROT"
+    assert vessel_a["to_dest"] == "CNSHA"
+
+
+def test_dest_changes_enriched_with_position(dest_changes_client):
+    r = dest_changes_client.get("/api/analytics/destination-changes?hours=72")
+    d = r.json()
+    vessel_a = next(row for row in d["rows"] if row["mmsi"] == 9701)
+    assert vessel_a["name"] == "VESSEL A"
+    assert vessel_a["lat"] is not None
+
+
+def test_dest_changes_kind_filter(dest_changes_client):
+    r = dest_changes_client.get("/api/analytics/destination-changes?hours=72&kind=tanker")
+    d = r.json()
+    assert d["total_changes"] == 1
+    assert d["rows"][0]["mmsi"] == 9701
+
+
+# ---------------------------------------------------------------------------
+# Phase 43: Owner Intelligence
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def owner_intel_client(tmp_path, monkeypatch):
+    """Fixture: vessel_registry with 3 owners; live_positions with kind data."""
+    import duckdb
+    from fastapi.testclient import TestClient
+    from datetime import UTC, datetime
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+
+    ais_file = tmp_path / "ais_oi.duckdb"
+    conn = duckdb.connect(str(ais_file))
+    conn.execute("""
+    CREATE TABLE live_positions (
+        mmsi BIGINT PRIMARY KEY, name VARCHAR, lat DOUBLE, lon DOUBLE,
+        sog DOUBLE, cog DOUBLE, heading DOUBLE, destination VARCHAR,
+        ship_type INTEGER, length_m DOUBLE, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, updated_ts TIMESTAMP,
+        imo BIGINT, draught DOUBLE, nav_status INTEGER, eta VARCHAR
+    );
+    CREATE TABLE ais_snapshots (
+        snapshot_ts TIMESTAMP, mmsi BIGINT, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, lat DOUBLE, lon DOUBLE, ship_type INTEGER, length_m DOUBLE,
+        sog DOUBLE, nav_status INTEGER, draught DOUBLE, destination VARCHAR,
+        PRIMARY KEY (snapshot_ts, mmsi)
+    );
+    CREATE TABLE vessels (
+        mmsi BIGINT PRIMARY KEY, imo BIGINT, name VARCHAR, flag VARCHAR,
+        flag_iso2 VARCHAR, mid INTEGER, call_sign VARCHAR, vessel_type VARCHAR,
+        dwt INTEGER, grt INTEGER, build_year INTEGER, length_m DOUBLE, beam_m DOUBLE,
+        owner VARCHAR, manager VARCHAR, class_society VARCHAR, enriched_at TIMESTAMP, equasis_ok BOOLEAN
+    );
+    """)
+    conn.executemany("INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [
+        (9801, "V1", 25.0, 56.0, 12.0, 90.0, 90.0, "NLROT", 80, 330.0, "tanker", "VLCC", "hormuz", now, 1000001, 18.0, 0, None),
+        (9802, "V2", 25.1, 56.1, 13.0, 91.0, 91.0, "CNSHA", 80, 330.0, "tanker", "VLCC", "hormuz", now, 1000002, 17.0, 0, None),
+        (9803, "V3", 3.5, 5.0, 8.0, 180.0, 180.0, "NLRTM", 74, 300.0, "bulk", "Capesize", "ara", now, 1000003, 7.0, 0, None),
+    ])
+    conn.close()
+
+    an_file = tmp_path / "analytics_oi.duckdb"
+    an_conn = duckdb.connect(str(an_file))
+    an_conn.execute("""
+    CREATE TABLE meta_watermark (key VARCHAR PRIMARY KEY, ts TIMESTAMP);
+    CREATE TABLE ais_events (
+        event_id VARCHAR PRIMARY KEY, type VARCHAR, mmsi BIGINT, mmsi2 BIGINT,
+        start_ts TIMESTAMP, end_ts TIMESTAMP, lat DOUBLE, lon DOUBLE,
+        region VARCHAR, kind VARCHAR, segment VARCHAR, details VARCHAR
+    );
+    CREATE TABLE transit_events (
+        mmsi BIGINT, chokepoint VARCHAR, entered_ts TIMESTAMP, exited_ts TIMESTAMP,
+        direction VARCHAR, kind VARCHAR, segment VARCHAR, laden BOOLEAN,
+        PRIMARY KEY (mmsi, chokepoint, entered_ts)
+    );
+    CREATE TABLE anchored_episodes (
+        mmsi BIGINT, zone VARCHAR, start_ts TIMESTAMP, end_ts TIMESTAMP,
+        kind VARCHAR, segment VARCHAR, PRIMARY KEY (mmsi, zone, start_ts)
+    );
+    CREATE TABLE fleet_density (
+        ts TIMESTAMP, region VARCHAR, kind VARCHAR, segment VARCHAR,
+        laden_count INTEGER, ballast_count INTEGER, unknown_count INTEGER,
+        PRIMARY KEY (ts, region, kind, segment)
+    );
+    CREATE TABLE vessel_state (
+        mmsi BIGINT PRIMARY KEY, max_draught_seen DOUBLE, last_draught DOUBLE,
+        laden VARCHAR, updated_ts TIMESTAMP
+    );
+    """)
+    an_conn.close()
+
+    reg_file = tmp_path / "reg_oi.duckdb"
+    reg_conn = duckdb.connect(str(reg_file))
+    reg_conn.execute("""
+    CREATE TABLE vessel_registry (
+        imo BIGINT PRIMARY KEY, ship_name VARCHAR, flag VARCHAR, flag_code VARCHAR,
+        call_sign VARCHAR, gross_tonnage INTEGER, dwt INTEGER, ship_type VARCHAR,
+        year_built INTEGER, ship_status VARCHAR, owner VARCHAR, ism_manager VARCHAR,
+        ship_manager VARCHAR, class_society VARCHAR, pi_club VARCHAR,
+        detention_rate_pct DOUBLE, paris_mou VARCHAR, tokyo_mou VARCHAR,
+        uscg_targeting VARCHAR, fetched_ts TIMESTAMP, fetch_ok BOOLEAN,
+        risk_score INTEGER, risk_indicators VARCHAR, ofac_sanctioned BOOLEAN
+    );
+    """)
+    reg_conn.executemany(
+        "INSERT INTO vessel_registry VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            (1000001, "V1", "Russia", "RU", None, 200000, 300000, "Tanker", 2005, "In Service", "SHADOW FLEET LLC", None, None, "RMRS", None, None, "Black", "Black", None, None, True, 72, None, True),
+            (1000002, "V2", "Nauru", "NR", None, 200000, 300000, "Tanker", 2004, "In Service", "SHADOW FLEET LLC", None, None, "RMRS", None, None, "Black", "Black", None, None, True, 75, None, False),
+            (1000003, "V3", "Marshall Islands", "MH", None, 150000, 200000, "Bulk Carrier", 2018, "In Service", "CLEAN OWNER PTE", None, None, "ABS (IACS)", None, None, "White", "White", None, None, True, 10, None, False),
+        ],
+    )
+    reg_conn.close()
+
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
+    monkeypatch.setenv("ANALYTICS_DB", str(an_file))
+    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
+
+    from app.main import app as freight_app
+    return TestClient(freight_app)
+
+
+def test_owner_intel_structure(owner_intel_client):
+    r = owner_intel_client.get("/api/analytics/owner-intelligence")
+    assert r.status_code == 200
+    d = r.json()
+    assert "total_owners" in d and "rows" in d
+
+
+def test_owner_intel_finds_owners(owner_intel_client):
+    r = owner_intel_client.get("/api/analytics/owner-intelligence?min_vessels=1")
+    d = r.json()
+    owner_names = {row["owner"] for row in d["rows"]}
+    assert "SHADOW FLEET LLC" in owner_names
+    assert "CLEAN OWNER PTE" in owner_names
+
+
+def test_owner_intel_high_risk_count(owner_intel_client):
+    r = owner_intel_client.get("/api/analytics/owner-intelligence?min_vessels=1")
+    d = r.json()
+    shadow = next(row for row in d["rows"] if row["owner"] == "SHADOW FLEET LLC")
+    assert shadow["vessel_count"] == 2
+    assert shadow["high_risk_count"] == 2
+    assert shadow["tanker_count"] == 2
+
+
+def test_owner_intel_sorted_by_risk_weighted(owner_intel_client):
+    r = owner_intel_client.get("/api/analytics/owner-intelligence?min_vessels=1")
+    d = r.json()
+    weights = [row["risk_weighted"] for row in d["rows"]]
+    assert weights == sorted(weights, reverse=True)
+
+
+def test_owner_intel_min_vessels_filter(owner_intel_client):
+    r = owner_intel_client.get("/api/analytics/owner-intelligence?min_vessels=2")
+    d = r.json()
+    for row in d["rows"]:
+        assert row["vessel_count"] >= 2

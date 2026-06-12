@@ -36,6 +36,8 @@ const TransitRateTimelineCard = lazy(() => import('./AnalyticsCharts').then((m) 
 const AnchorageOccupancyCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.AnchorageOccupancyCard })))
 const StsOffendersCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.StsOffendersCard })))
 const FleetAtTimeCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.FleetAtTimeCard })))
+const DestinationChangesCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.DestinationChangesCard })))
+const OwnerIntelligenceCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.OwnerIntelligenceCard })))
 
 function ChartSkeleton() {
   return <div className="h-[300px] animate-pulse rounded-lg bg-muted/40" />
@@ -87,6 +89,7 @@ function AnalyticsPage() {
         <Suspense fallback={<ChartSkeleton />}><FleetAgeCard /></Suspense>
 
         <h2 className="text-base font-semibold text-foreground">Owner &amp; Flag Risk</h2>
+        <Suspense fallback={<ChartSkeleton />}><OwnerIntelligenceCard /></Suspense>
         <div className="grid gap-4 lg:grid-cols-2">
           <Suspense fallback={<ChartSkeleton />}><OwnerRiskCard /></Suspense>
           <Suspense fallback={<ChartSkeleton />}><FlagRiskCard /></Suspense>
@@ -97,6 +100,7 @@ function AnalyticsPage() {
 
         <h2 className="text-base font-semibold text-foreground">Intelligence Alerts</h2>
         <Suspense fallback={<ChartSkeleton />}><AnomalyWatchlistCard /></Suspense>
+        <Suspense fallback={<ChartSkeleton />}><DestinationChangesCard /></Suspense>
         <Suspense fallback={<ChartSkeleton />}><StsProximityCard /></Suspense>
         <Suspense fallback={<ChartSkeleton />}><EventRateTimelineCard /></Suspense>
         <Suspense fallback={<ChartSkeleton />}><RiskEventsCard /></Suspense>

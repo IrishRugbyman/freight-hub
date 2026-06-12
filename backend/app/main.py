@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json as _json
 import os
+import re as _re
 import tempfile
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -112,6 +113,10 @@ from .schemas import (
     VesselStateData,
     VoyageEvent,
     VoyagesResponse,
+    DestinationChangeRow,
+    DestinationChangesResponse,
+    OwnerIntelRow,
+    OwnerIntelResponse,
 )
 
 _STATIC = Path(__file__).parent / "static"
@@ -182,6 +187,11 @@ def _str_or_none(v) -> str | None:
         return None
     s = str(v)
     return None if s in ("nan", "None", "NA", "<NA>", "") else s
+
+
+def _norm_dest(s: str) -> str:
+    """Normalize an AIS destination string: strip garbage chars, collapse whitespace, uppercase."""
+    return _re.sub(r'\s+', ' ', _re.sub(r'[^A-Z0-9 ]', '', s.strip().upper())).strip()
 
 
 def _live(where: str = "", params: list | None = None):
@@ -3797,4 +3807,230 @@ async def stream_vessels(request: Request):
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
         },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase 42: Destination Change Intelligence
+# ---------------------------------------------------------------------------
+
+@app.get("/api/analytics/destination-changes", response_model=DestinationChangesResponse)
+def analytics_destination_changes(hours: int = 72, kind: str = "", min_confidence: int = 0):
+    """Detect vessel destination changes by diffing consecutive ais_snapshots.
+
+    Returns vessels whose reported destination changed within the window.
+    Filters out trivially noisy changes (empty<->non-empty).
+    hours: lookback window, clamped to [1, 336].
+    kind: optional filter by vessel kind (tanker/bulk).
+    """
+    hours = max(1, min(hours, 336))
+    now_dt = datetime.now(UTC).replace(tzinfo=None)
+    cutoff = now_dt - timedelta(hours=hours)
+
+    kind_clause = ""
+    params: list = [cutoff]
+    if kind:
+        kind_clause = "AND kind = ? "
+        params.append(kind)
+
+    df = db.query(
+        f"WITH ranked AS ("
+        f"  SELECT mmsi, kind, segment, region, snapshot_ts, destination, "
+        f"    LAG(destination) OVER (PARTITION BY mmsi ORDER BY snapshot_ts) AS prev_dest, "
+        f"    LAG(snapshot_ts) OVER (PARTITION BY mmsi ORDER BY snapshot_ts) AS prev_ts "
+        f"  FROM ais_snapshots "
+        f"  WHERE snapshot_ts >= ? {kind_clause}"
+        f") "
+        f"SELECT mmsi, kind, segment, region, snapshot_ts AS changed_ts, "
+        f"  prev_dest AS from_dest, destination AS to_dest "
+        f"FROM ranked "
+        f"WHERE prev_dest IS NOT NULL "
+        f"  AND destination IS NOT NULL "
+        f"  AND prev_dest != '' "
+        f"  AND destination != '' "
+        f"  AND prev_dest != destination "
+        f"ORDER BY changed_ts DESC "
+        f"LIMIT 500",
+        params,
+    )
+
+    if df.empty:
+        return DestinationChangesResponse(
+            as_of=now_dt.isoformat(),
+            hours=hours,
+            total_changes=0,
+            rows=[],
+        )
+
+    # Filter to meaningful destination changes: normalize and require first 5 chars differ
+    # (LOCODE is 5 chars: country-code + location-code; same prefix = same port)
+    def _dest_prefix(s: str) -> str:
+        n = _norm_dest(s)
+        return n[:5] if len(n) >= 4 else ""
+
+    df = df[
+        df.apply(
+            lambda r: (
+                bool(_dest_prefix(str(r["from_dest"])))
+                and bool(_dest_prefix(str(r["to_dest"])))
+                and _dest_prefix(str(r["from_dest"])) != _dest_prefix(str(r["to_dest"]))
+            ),
+            axis=1,
+        )
+    ].copy()
+
+    # Dedupe to most-recent change per vessel
+    df = df.drop_duplicates(subset=["mmsi"], keep="first").copy()
+    df["changed_ts"] = pd.to_datetime(df["changed_ts"])
+
+    # Enrich with current position from live_positions (separate DB query, no cross-file JOIN)
+    mmsi_list = df["mmsi"].tolist()
+    if mmsi_list:
+        pos_df = db.query(
+            "SELECT mmsi, name, lat, lon FROM live_positions WHERE mmsi IN ("
+            + ",".join("?" * len(mmsi_list))
+            + ")",
+            mmsi_list,
+        )
+    else:
+        pos_df = pd.DataFrame(columns=["mmsi", "name", "lat", "lon"])
+
+    pos_map: dict[int, dict] = {
+        int(r["mmsi"]): r.to_dict()
+        for _, r in pos_df.iterrows()
+    }
+
+    rows = []
+    for _, r in df.iterrows():
+        mmsi_int = int(r["mmsi"])
+        pos = pos_map.get(mmsi_int)
+        changed_ts = r["changed_ts"]
+        hours_ago = round((now_dt - changed_ts.replace(tzinfo=None)).total_seconds() / 3600, 1)
+        rows.append(
+            DestinationChangeRow(
+                mmsi=mmsi_int,
+                name=_str_or_none(pos.get("name")) if pos is not None else None,
+                kind=_str_or_none(r["kind"]),
+                segment=_str_or_none(r["segment"]),
+                region=_str_or_none(r["region"]),
+                lat=float(pos["lat"]) if pos is not None and pos.get("lat") is not None else None,
+                lon=float(pos["lon"]) if pos is not None and pos.get("lon") is not None else None,
+                changed_ts=changed_ts.isoformat(),
+                from_dest=_norm_dest(str(r["from_dest"])),
+                to_dest=_norm_dest(str(r["to_dest"])),
+                hours_ago=hours_ago,
+            )
+        )
+
+    return DestinationChangesResponse(
+        as_of=now_dt.isoformat(),
+        hours=hours,
+        total_changes=len(rows),
+        rows=rows,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase 43: Owner Intelligence
+# ---------------------------------------------------------------------------
+
+@app.get("/api/analytics/owner-intelligence", response_model=OwnerIntelResponse)
+def analytics_owner_intelligence(min_vessels: int = 2, min_risk: int = 0, limit: int = 50):
+    """Aggregate fleet risk by beneficial owner from vessel_registry.
+
+    min_vessels: minimum fleet size to include an owner.
+    min_risk: minimum average risk score.
+    limit: max rows, clamped to [1, 200].
+    """
+    limit = max(1, min(limit, 200))
+    now_dt = datetime.now(UTC).replace(tzinfo=None)
+
+    reg_df = db.query(
+        "SELECT imo, owner, flag, risk_score, ship_type "
+        "FROM vessel_registry "
+        "WHERE fetch_ok = true AND owner IS NOT NULL AND owner != '' ",
+        [],
+        db=db.registry_db_path(),
+    )
+    if reg_df.empty:
+        return OwnerIntelResponse(as_of=now_dt.isoformat(), total_owners=0, rows=[])
+
+    # Enrich with live fleet kind/segment via MMSI->IMO join on live_positions
+    live_df = db.query(
+        "SELECT imo, kind, segment FROM live_positions WHERE imo IS NOT NULL",
+        [],
+    )
+    live_map: dict = {}
+    if not live_df.empty:
+        for _, r in live_df.iterrows():
+            imo_val = r.get("imo")
+            if imo_val and not pd.isna(imo_val):
+                live_map[int(imo_val)] = {"kind": r.get("kind"), "segment": r.get("segment")}
+
+    owners: dict[str, dict] = {}
+    for _, r in reg_df.iterrows():
+        owner = str(r["owner"]).strip()
+        imo_val = r.get("imo")
+        live_info = live_map.get(int(imo_val)) if imo_val and not pd.isna(imo_val) else {}
+        kind_val = live_info.get("kind") or ""
+        risk_val = r.get("risk_score")
+        risk_int = int(risk_val) if risk_val is not None and not pd.isna(risk_val) else 0
+        flag_val = _str_or_none(r.get("flag")) or ""
+
+        if owner not in owners:
+            owners[owner] = {
+                "vessel_count": 0,
+                "risks": [],
+                "flags": set(),
+                "tanker_count": 0,
+                "bulk_count": 0,
+                "segments": [],
+            }
+        o = owners[owner]
+        o["vessel_count"] += 1
+        o["risks"].append(risk_int)
+        if flag_val:
+            o["flags"].add(flag_val)
+        if kind_val == "tanker":
+            o["tanker_count"] += 1
+        elif kind_val == "bulk":
+            o["bulk_count"] += 1
+        if live_info.get("segment"):
+            o["segments"].append(live_info["segment"])
+
+    rows = []
+    for owner, o in owners.items():
+        if o["vessel_count"] < min_vessels:
+            continue
+        risks = o["risks"]
+        avg_risk = round(sum(risks) / len(risks), 1) if risks else None
+        if avg_risk is not None and avg_risk < min_risk:
+            continue
+        max_risk = max(risks) if risks else None
+        high_risk = sum(1 for s in risks if s >= 50)
+        risk_weighted = sum(risks)
+        segs = o["segments"]
+        top_seg = max(set(segs), key=segs.count) if segs else None
+        rows.append(
+            OwnerIntelRow(
+                owner=owner,
+                vessel_count=o["vessel_count"],
+                risk_weighted=risk_weighted,
+                avg_risk=avg_risk,
+                max_risk=max_risk,
+                high_risk_count=high_risk,
+                tanker_count=o["tanker_count"],
+                bulk_count=o["bulk_count"],
+                flags=sorted(o["flags"])[:5],
+                top_segment=top_seg,
+            )
+        )
+
+    rows.sort(key=lambda r: r.risk_weighted, reverse=True)
+    rows = rows[:limit]
+
+    return OwnerIntelResponse(
+        as_of=now_dt.isoformat(),
+        total_owners=len(owners),
+        rows=rows,
     )

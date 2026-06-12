@@ -14,7 +14,7 @@ import {
   YAxis,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion, useDestinationFlows, useMarketSummary, useVesselRiskScores, useChokepointHeatmap, useTradeLaneMatrix, useAnomalyWatchlist, useStsProximity, useRegionMomentum, useEventRateTimeline, useTransitRateTimeline, useAnchorageOccupancy, useStsOffenders, useFleetAtTime } from '@/lib/api'
+import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion, useDestinationFlows, useMarketSummary, useVesselRiskScores, useChokepointHeatmap, useTradeLaneMatrix, useAnomalyWatchlist, useStsProximity, useRegionMomentum, useEventRateTimeline, useTransitRateTimeline, useAnchorageOccupancy, useStsOffenders, useFleetAtTime, useDestinationChanges, useOwnerIntelligence } from '@/lib/api'
 import type { RiskEventItem } from '@/lib/api'
 
 const CHOKEPOINTS = [
@@ -2937,6 +2937,170 @@ export function FleetAtTimeCard() {
                   </div>
                 </div>
               ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Phase 42: Destination Change Intelligence
+// ---------------------------------------------------------------------------
+
+export function DestinationChangesCard() {
+  const [hours, setHours] = useState(72)
+  const [kind, setKind] = useState('')
+  const { data, isLoading } = useDestinationChanges(hours, kind)
+  const rows = data?.rows ?? []
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex flex-wrap items-center justify-between gap-2">
+          <span>Destination Changes (Rerouting)</span>
+          <div className="flex flex-wrap gap-2 text-sm font-normal">
+            <select
+              className="rounded border border-border bg-background px-2 py-1 text-xs"
+              value={hours}
+              onChange={e => setHours(Number(e.target.value))}
+            >
+              <option value={24}>Last 24h</option>
+              <option value={72}>Last 72h</option>
+              <option value={168}>Last 7d</option>
+            </select>
+            <select
+              className="rounded border border-border bg-background px-2 py-1 text-xs"
+              value={kind}
+              onChange={e => setKind(e.target.value)}
+            >
+              <option value="">All types</option>
+              <option value="tanker">Tankers</option>
+              <option value="bulk">Bulkers</option>
+            </select>
+          </div>
+        </CardTitle>
+        {data && (
+          <p className="text-xs text-muted-foreground">
+            {data.total_changes} vessels changed destination in the last {data.hours}h.
+            Derived from AIS snapshot history - requires LOCODEs to differ.
+          </p>
+        )}
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="h-40 animate-pulse rounded bg-muted/40" />
+        ) : rows.length === 0 ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">No destination changes in window.</p>
+        ) : (
+          <div className="space-y-0.5 max-h-72 overflow-y-auto pr-1">
+            {rows.map(row => (
+              <div
+                key={row.mmsi}
+                className="flex items-center gap-2 rounded bg-muted/15 px-2 py-1 text-xs hover:bg-muted/30"
+              >
+                <div className="min-w-0 flex-1">
+                  <span className="font-medium">{row.name ?? `MMSI ${row.mmsi}`}</span>
+                  {row.segment && <span className="ml-1 text-muted-foreground">{row.segment}</span>}
+                  {row.region && <span className="ml-1 text-muted-foreground/60">{row.region.replace(/_/g, ' ')}</span>}
+                </div>
+                <div className="shrink-0 text-right">
+                  <span className="text-muted-foreground line-through">{row.from_dest}</span>
+                  <span className="mx-1 text-muted-foreground">{'→'}</span>
+                  <span className="font-semibold text-amber-400">{row.to_dest}</span>
+                  <span className="ml-2 text-muted-foreground/60 tabular-nums">{row.hours_ago}h</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Phase 43: Owner Intelligence
+// ---------------------------------------------------------------------------
+
+function _ownerRiskColor(score: number | null): string {
+  if (score == null) return 'text-muted-foreground'
+  if (score >= 50) return 'text-red-400'
+  if (score >= 25) return 'text-yellow-400'
+  return 'text-green-400'
+}
+
+export function OwnerIntelligenceCard() {
+  const [minVessels, setMinVessels] = useState(2)
+  const [limit, setLimit] = useState(30)
+  const { data, isLoading } = useOwnerIntelligence(minVessels, limit)
+  const rows = data?.rows ?? []
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex flex-wrap items-center justify-between gap-2">
+          <span>Owner Fleet Intelligence</span>
+          <div className="flex flex-wrap gap-2 text-sm font-normal">
+            <select
+              className="rounded border border-border bg-background px-2 py-1 text-xs"
+              value={minVessels}
+              onChange={e => setMinVessels(Number(e.target.value))}
+            >
+              <option value={1}>All owners</option>
+              <option value={2}>2+ vessels</option>
+              <option value={3}>3+ vessels</option>
+            </select>
+            <select
+              className="rounded border border-border bg-background px-2 py-1 text-xs"
+              value={limit}
+              onChange={e => setLimit(Number(e.target.value))}
+            >
+              <option value={20}>Top 20</option>
+              <option value={30}>Top 30</option>
+              <option value={50}>Top 50</option>
+            </select>
+          </div>
+        </CardTitle>
+        {data && (
+          <p className="text-xs text-muted-foreground">
+            {data.total_owners} owners in registry. Sorted by risk-weighted fleet size (sum of risk scores).
+            Only Equasis-enriched vessels included.
+          </p>
+        )}
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="h-40 animate-pulse rounded bg-muted/40" />
+        ) : rows.length === 0 ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">No owner data in registry.</p>
+        ) : (
+          <div className="space-y-0.5 max-h-80 overflow-y-auto pr-1">
+            {rows.map((row, i) => (
+              <div key={row.owner} className="flex items-center gap-2 rounded bg-muted/15 px-2 py-1 text-xs hover:bg-muted/30">
+                <span className="w-5 shrink-0 text-muted-foreground/60 tabular-nums">{i + 1}</span>
+                <div className="min-w-0 flex-1">
+                  <span className="font-medium">{row.owner}</span>
+                  {row.top_segment && <span className="ml-1 text-muted-foreground">{row.top_segment}</span>}
+                  {row.flags.length > 0 && (
+                    <span className="ml-1 text-muted-foreground/60">{row.flags.slice(0, 2).join(', ')}</span>
+                  )}
+                </div>
+                <div className="shrink-0 text-right tabular-nums">
+                  <span className="font-medium">{row.vessel_count}v</span>
+                  {row.high_risk_count > 0 && (
+                    <span className="ml-1 rounded bg-red-500/20 px-1 text-[9px] font-bold text-red-400">
+                      {row.high_risk_count} hi-risk
+                    </span>
+                  )}
+                  {row.avg_risk != null && (
+                    <span className={`ml-2 font-semibold ${_ownerRiskColor(row.avg_risk)}`}>
+                      avg {row.avg_risk}
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </CardContent>

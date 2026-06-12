@@ -946,3 +946,43 @@ class FleetHistoryResponse(BaseModel):
     region: str | None
     total_vessels: int
     segments: list[FleetHistorySegmentRow]
+
+
+class DestinationChangeRow(BaseModel):
+    mmsi: int
+    name: str | None
+    kind: str | None
+    segment: str | None
+    region: str | None
+    lat: float | None
+    lon: float | None
+    changed_ts: str
+    from_dest: str
+    to_dest: str
+    hours_ago: float
+
+
+class DestinationChangesResponse(BaseModel):
+    as_of: str
+    hours: int
+    total_changes: int
+    rows: list[DestinationChangeRow]
+
+
+class OwnerIntelRow(BaseModel):
+    owner: str
+    vessel_count: int
+    risk_weighted: int
+    avg_risk: float | None
+    max_risk: int | None
+    high_risk_count: int
+    tanker_count: int
+    bulk_count: int
+    flags: list[str]
+    top_segment: str | None
+
+
+class OwnerIntelResponse(BaseModel):
+    as_of: str
+    total_owners: int
+    rows: list[OwnerIntelRow]

@@ -1577,3 +1577,67 @@ export function useFleetAtTime(ts = '', region = '') {
     refetchInterval: false,
   })
 }
+
+export interface DestinationChangeRow {
+  mmsi: number
+  name: string | null
+  kind: string | null
+  segment: string | null
+  region: string | null
+  lat: number | null
+  lon: number | null
+  changed_ts: string
+  from_dest: string
+  to_dest: string
+  hours_ago: number
+}
+
+export interface DestinationChangesResponse {
+  as_of: string
+  hours: number
+  total_changes: number
+  rows: DestinationChangeRow[]
+}
+
+export function useDestinationChanges(hours = 72, kind = '') {
+  return useQuery({
+    queryKey: ['destination-changes', hours, kind],
+    queryFn: () =>
+      getJSON<DestinationChangesResponse>(
+        `/api/analytics/destination-changes?hours=${hours}&kind=${encodeURIComponent(kind)}`,
+      ),
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+  })
+}
+
+export interface OwnerIntelRow {
+  owner: string
+  vessel_count: number
+  risk_weighted: number
+  avg_risk: number | null
+  max_risk: number | null
+  high_risk_count: number
+  tanker_count: number
+  bulk_count: number
+  flags: string[]
+  top_segment: string | null
+}
+
+export interface OwnerIntelResponse {
+  as_of: string
+  total_owners: number
+  rows: OwnerIntelRow[]
+}
+
+export function useOwnerIntelligence(minVessels = 2, limit = 50) {
+  return useQuery({
+    queryKey: ['owner-intelligence', minVessels, limit],
+    queryFn: () =>
+      getJSON<OwnerIntelResponse>(
+        `/api/analytics/owner-intelligence?min_vessels=${minVessels}&limit=${limit}`,
+      ),
+    staleTime: 10 * 60 * 1000,
+    refetchInterval: 10 * 60 * 1000,
+  })
+}
