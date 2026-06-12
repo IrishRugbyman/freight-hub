@@ -375,7 +375,7 @@ export function useAnalyticsZones() {
 
 export interface AisEvent {
   event_id: string
-  type: 'gap' | 'loiter' | 'sts'
+  type: 'gap' | 'loiter' | 'sts' | 'reroute'
   mmsi: number
   mmsi2: number | null
   start_ts: string
@@ -558,6 +558,81 @@ export function useEquasis(imo: number | null | undefined) {
     enabled: imo != null,
     staleTime: 12 * 60 * 60 * 1000, // 12h - Equasis data is static
     retry: 1,
+  })
+}
+
+// ---- Vessel voyages + state (new features) ----
+
+export interface VoyageEvent {
+  type: 'port_call' | 'transit' | 'reroute'
+  ts: string
+  end_ts: string | null
+  zone: string | null
+  direction: string | null
+  laden: boolean | null
+  dwell_hours: number | null
+  old_destination: string | null
+  new_destination: string | null
+  lat: number | null
+  lon: number | null
+  kind: string | null
+  segment: string | null
+}
+
+export interface VoyagesResponse {
+  mmsi: number
+  events: VoyageEvent[]
+}
+
+export interface VesselStateData {
+  mmsi: number
+  laden: string | null
+  last_draught: number | null
+  max_draught_seen: number | null
+  updated_ts: string | null
+}
+
+export interface PortDestItem {
+  destination: string
+  count: number
+  tankers: number
+  bulkers: number
+}
+
+export interface PortFlowResponse {
+  as_of: string
+  total_with_dest: number
+  ports: PortDestItem[]
+}
+
+export function useVoyages(mmsi: number | null | undefined, days = 14) {
+  return useQuery({
+    queryKey: ['voyages', mmsi, days],
+    queryFn: () => getJSON<VoyagesResponse>(`/api/vessels/${mmsi}/voyages?days=${days}`),
+    enabled: mmsi != null,
+    staleTime: ANALYTICS_STALE,
+  })
+}
+
+export function useVesselState(mmsi: number | null | undefined) {
+  return useQuery({
+    queryKey: ['vessel-state', mmsi],
+    queryFn: () => getJSON<VesselStateData | null>(`/api/vessels/${mmsi}/state`),
+    enabled: mmsi != null,
+    staleTime: ANALYTICS_STALE,
+  })
+}
+
+export function usePortFlow(kind?: string, topN?: number) {
+  const q = new URLSearchParams()
+  if (kind) q.set('kind', kind)
+  if (topN != null) q.set('top_n', String(topN))
+  const qs = q.toString()
+  return useQuery({
+    queryKey: ['port-flow', kind, topN],
+    queryFn: () => getJSON<PortFlowResponse>(`/api/analytics/ports${qs ? '?' + qs : ''}`),
+    staleTime: ANALYTICS_STALE,
+    refetchInterval: REFETCH_MS,
   })
 }
 

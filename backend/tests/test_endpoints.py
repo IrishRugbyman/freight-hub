@@ -270,3 +270,112 @@ def test_events_empty_outside_days(analytics_client):
     # days=0 should be clamped to 1; seeded events are within last 1 day so still return
     r = analytics_client.get("/api/events", params={"type": "gap", "days": 1})
     assert r.status_code == 200
+
+
+# ---- /api/vessels/{mmsi}/state ----
+
+def test_vessel_state_known(analytics_client):
+    r = analytics_client.get("/api/vessels/1003/state")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["mmsi"] == 1003
+    assert d["laden"] == "laden"
+    assert d["last_draught"] == 20.5
+    assert d["max_draught_seen"] == 22.0
+    assert d["updated_ts"] is not None
+
+
+def test_vessel_state_unknown_returns_null(analytics_client):
+    r = analytics_client.get("/api/vessels/9999/state")
+    assert r.status_code == 200
+    assert r.json() is None
+
+
+# ---- /api/vessels/{mmsi}/voyages ----
+
+def test_vessel_voyages_returns_structure(analytics_client):
+    r = analytics_client.get("/api/vessels/1003/voyages", params={"days": 30})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["mmsi"] == 1003
+    assert isinstance(d["events"], list)
+
+
+def test_vessel_voyages_includes_transit(analytics_client):
+    r = analytics_client.get("/api/vessels/1003/voyages", params={"days": 30})
+    assert r.status_code == 200
+    events = r.json()["events"]
+    transit_events = [e for e in events if e["type"] == "transit"]
+    assert len(transit_events) >= 1
+    te = transit_events[0]
+    assert te["zone"] == "hormuz"
+    assert te["direction"] == "outbound"
+    assert te["laden"] is True
+
+
+def test_vessel_voyages_includes_port_call(analytics_client):
+    r = analytics_client.get("/api/vessels/1002/voyages", params={"days": 30})
+    assert r.status_code == 200
+    events = r.json()["events"]
+    port_calls = [e for e in events if e["type"] == "port_call"]
+    assert len(port_calls) >= 1
+    pc = port_calls[0]
+    assert pc["zone"] == "singapore_east"
+    assert pc["dwell_hours"] is not None and pc["dwell_hours"] > 0
+
+
+def test_vessel_voyages_sorted_by_ts(analytics_client):
+    r = analytics_client.get("/api/vessels/1003/voyages", params={"days": 30})
+    events = r.json()["events"]
+    ts_list = [e["ts"] for e in events]
+    assert ts_list == sorted(ts_list)
+
+
+def test_vessel_voyages_days_clamped(analytics_client):
+    r = analytics_client.get("/api/vessels/1003/voyages", params={"days": 200})
+    assert r.status_code == 200  # clamped to 90
+
+
+def test_vessel_voyages_unknown_mmsi(analytics_client):
+    r = analytics_client.get("/api/vessels/9999/voyages")
+    assert r.status_code == 200
+    assert r.json()["events"] == []
+
+
+# ---- /api/analytics/ports ----
+
+def test_analytics_ports_structure(analytics_client):
+    r = analytics_client.get("/api/analytics/ports")
+    assert r.status_code == 200
+    d = r.json()
+    assert "as_of" in d
+    assert "total_with_dest" in d
+    assert isinstance(d["ports"], list)
+
+
+def test_analytics_ports_counts_destinations(analytics_client):
+    r = analytics_client.get("/api/analytics/ports")
+    assert r.status_code == 200
+    d = r.json()
+    # Seed has vessels with destinations: CNSHA (bulk), AEFJR (tanker), SGSIN (bulk)
+    # STALE vessel (EGPSD) should be excluded
+    dests = {p["destination"] for p in d["ports"]}
+    assert "CNSHA" in dests
+    assert "AEFJR" in dests
+    # Stale vessel excluded
+    assert "EGPSD" not in dests
+
+
+def test_analytics_ports_kind_filter(analytics_client):
+    r = analytics_client.get("/api/analytics/ports", params={"kind": "tanker"})
+    assert r.status_code == 200
+    d = r.json()
+    for port in d["ports"]:
+        assert port["bulkers"] == 0
+
+
+def test_analytics_ports_top_n_clamped(analytics_client):
+    r = analytics_client.get("/api/analytics/ports", params={"top_n": 1})
+    assert r.status_code == 200
+    # top_n=1 is clamped to 5, so <=5 ports returned
+    assert len(r.json()["ports"]) <= 5

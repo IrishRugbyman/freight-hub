@@ -7,6 +7,7 @@ const TransitsCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ defau
 const CongestionCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.CongestionCard })))
 const LadenCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.LadenCard })))
 const DensityCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.DensityCard })))
+const PortFlowCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.PortFlowCard })))
 
 function ChartSkeleton() {
   return <div className="h-[300px] animate-pulse rounded-lg bg-muted/40" />
@@ -35,6 +36,9 @@ function AnalyticsPage() {
           <Suspense fallback={<ChartSkeleton />}><LadenCard /></Suspense>
           <Suspense fallback={<ChartSkeleton />}><DensityCard /></Suspense>
         </div>
+
+        <h2 className="text-base font-semibold text-foreground">Port Flow</h2>
+        <Suspense fallback={<ChartSkeleton />}><PortFlowCard /></Suspense>
       </div>
     </div>
   )

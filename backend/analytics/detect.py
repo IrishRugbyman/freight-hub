@@ -489,6 +489,92 @@ def loitering_events(df: pd.DataFrame) -> list[dict]:
     return results
 
 
+# --- Destination change detection -------------------------------------------
+
+# Minimum consecutive fixes at the old destination before a change is counted
+_DEST_MIN_CONSEC_FIXES = 3
+# Old destination must have been held for this many minutes (noise filter)
+_DEST_MIN_STABLE_MIN = 20.0
+
+
+def destination_change_events(df: pd.DataFrame) -> list[dict]:
+    """Detect vessels that changed their reported destination.
+
+    Noise-filtered: the old destination must have been reported for at least
+    _DEST_MIN_CONSEC_FIXES consecutive fixes AND _DEST_MIN_STABLE_MIN minutes.
+    Excludes transitions to or from blank/null strings.
+
+    Returns dicts compatible with the ais_events table (type='reroute'):
+      event_id, type, mmsi, mmsi2, start_ts, end_ts, lat, lon,
+      region, kind, segment, details (JSON with old/new destination + fix count).
+    """
+    if df.empty or "destination" not in df.columns:
+        return []
+
+    results: list[dict] = []
+
+    for mmsi, grp in df.groupby("mmsi", sort=False):
+        grp = grp.sort_values("snapshot_ts").reset_index(drop=True)
+        # Normalize: strip whitespace, uppercase, collapse multiple spaces
+        dest = grp["destination"].fillna("").str.strip().str.upper()
+        # Replace empty strings with a sentinel so groupby runs work
+        dest_clean = dest.replace("", None)
+
+        prev_dest: str | None = None
+        run_start_idx: int = 0
+        run_len: int = 0
+
+        for i, row in grp.iterrows():
+            cur_dest = dest_clean.iloc[i]
+            if cur_dest == prev_dest:
+                run_len += 1
+            else:
+                # Destination changed (or first fix)
+                if (
+                    prev_dest is not None
+                    and cur_dest is not None
+                    and run_len >= _DEST_MIN_CONSEC_FIXES
+                ):
+                    old_duration_min = (
+                        grp["snapshot_ts"].iloc[i - 1] - grp["snapshot_ts"].iloc[run_start_idx]
+                    ).total_seconds() / 60
+                    if old_duration_min >= _DEST_MIN_STABLE_MIN:
+                        change_fix = grp.iloc[i]
+                        change_ts_raw = change_fix["snapshot_ts"]
+                        change_ts = (
+                            change_ts_raw.to_pydatetime()
+                            if hasattr(change_ts_raw, "to_pydatetime")
+                            else change_ts_raw
+                        )
+                        results.append(
+                            {
+                                "event_id": _event_id("reroute", int(mmsi), change_ts),
+                                "type": "reroute",
+                                "mmsi": int(mmsi),
+                                "mmsi2": None,
+                                "start_ts": change_ts,
+                                "end_ts": change_ts,
+                                "lat": float(change_fix["lat"]),
+                                "lon": float(change_fix["lon"]),
+                                "region": str(change_fix.get("region") or "") or None,
+                                "kind": change_fix.get("kind"),
+                                "segment": change_fix.get("segment"),
+                                "details": json.dumps(
+                                    {
+                                        "old_destination": prev_dest,
+                                        "new_destination": cur_dest,
+                                        "fixes_at_old": run_len,
+                                    }
+                                ),
+                            }
+                        )
+                run_start_idx = i
+                run_len = 1
+                prev_dest = cur_dest
+
+    return results
+
+
 # --- STS candidate detection -------------------------------------------------
 
 

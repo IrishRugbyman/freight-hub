@@ -26,6 +26,7 @@ import pandas as pd
 from .detect import (
     ais_gap_events,
     anchored_episodes,
+    destination_change_events,
     fleet_density_rows,
     loitering_events,
     sts_candidates,
@@ -48,7 +49,7 @@ ANALYTICS_DB = Path(os.environ.get("ANALYTICS_DB", str(_DEFAULT_ANALYTICS_DB)))
 _OVERLAP_HOURS = 6
 
 # Retry budget when the collector holds the AIS DB lock (usually < 1s per write)
-_LOCK_RETRIES = 15
+_LOCK_RETRIES = 200  # 200 * 0.3s = 60s; collector holds write lock between upserts
 
 # Window within max_ts where a vessel is considered "recently active" for gap closure
 _GAP_RECHECK_H = 6
@@ -315,7 +316,25 @@ def run(reset: bool = False) -> None:
             )
 
     # ------------------------------------------------------------------
-    # 5. Intelligence events (gaps, loitering, STS) - 48h lookback
+    # 5. Destination changes - detect reroutes in the incremental window
+    # ------------------------------------------------------------------
+    reroutes = destination_change_events(df)
+    log.info("detected %d destination-change (reroute) events", len(reroutes))
+    for e in reroutes:
+        conn.execute(
+            "INSERT OR REPLACE INTO ais_events "
+            "(event_id, type, mmsi, mmsi2, start_ts, end_ts, lat, lon, "
+            " region, kind, segment, details) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                e["event_id"], e["type"], e["mmsi"], e["mmsi2"],
+                e["start_ts"], e["end_ts"], e["lat"], e["lon"],
+                e["region"], e["kind"], e["segment"], e["details"],
+            ],
+        )
+
+    # ------------------------------------------------------------------
+    # 6. Intelligence events (gaps, loitering, STS) - 48h lookback
     # ------------------------------------------------------------------
     max_ts_dt = max_ts.to_pydatetime() if hasattr(max_ts, "to_pydatetime") else max_ts
     lookback_since = max_ts_dt - timedelta(hours=48)
@@ -418,8 +437,10 @@ def run(reset: bool = False) -> None:
     log.info("watermark advanced to %s", new_watermark)
 
     conn.close()
-    log.info("analytics.build complete: transits=%d anchored=%d density=%d",
-             len(transits), len(anchored), len(density_rows))
+    log.info(
+        "analytics.build complete: transits=%d anchored=%d density=%d reroutes=%d",
+        len(transits), len(anchored), len(density_rows), len(reroutes),
+    )
 
 
 # ---------------------------------------------------------------------------

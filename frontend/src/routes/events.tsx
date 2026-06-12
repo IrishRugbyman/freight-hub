@@ -9,12 +9,14 @@ const TYPE_LABELS: Record<string, string> = {
   gap: 'Signal Lost',
   loiter: 'Loitering',
   sts: 'STS Candidate',
+  reroute: 'Reroute',
 }
 
 const TYPE_COLORS: Record<string, string> = {
   gap: 'bg-red-500/20 text-red-400 border-red-500/30',
   loiter: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
   sts: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+  reroute: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
 }
 
 function timeAgo(ts: string): string {
@@ -43,7 +45,7 @@ export default function EventsPage() {
     navigate({ to: '/', search: { mmsi: ev.mmsi, lat: ev.lat, lon: ev.lon } as never })
   }
 
-  const types = ['gap', 'loiter', 'sts'] as const
+  const types = ['gap', 'loiter', 'sts', 'reroute'] as const
 
   return (
     <div className="mx-auto max-w-5xl space-y-4 p-4">
@@ -125,7 +127,14 @@ function EventRow({ ev, onSelect }: { ev: AisEvent; onSelect: (ev: AisEvent) => 
         </div>
         <div className="text-xs text-muted-foreground">
           {ev.region && <span className="mr-2">{ev.region.replace(/_/g, ' ')}</span>}
-          {durationLabel(ev) && <span>{durationLabel(ev)}</span>}
+          {ev.type === 'reroute' && typeof ev.details.old_destination === 'string' && (
+            <span>
+              <span className="line-through">{ev.details.old_destination}</span>
+              <span className="mx-1">-&gt;</span>
+              <span>{ev.details.new_destination as string ?? '?'}</span>
+            </span>
+          )}
+          {ev.type !== 'reroute' && durationLabel(ev) && <span>{durationLabel(ev)}</span>}
         </div>
       </div>
 

@@ -12,7 +12,7 @@ import {
   YAxis,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useCongestion, useDensity, useLaden, useTransits } from '@/lib/api'
+import { useCongestion, useDensity, useLaden, useTransits, usePortFlow } from '@/lib/api'
 
 const CHOKEPOINTS = [
   'singapore_malacca', 'suez', 'hormuz', 'panama', 'gibraltar',
@@ -242,6 +242,65 @@ export function DensityCard() {
               <Bar dataKey="unknown" stackId="a" fill="#94a3b8" name="Unknown" />
             </BarChart>
           </ResponsiveContainer>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+export function PortFlowCard() {
+  const [kind, setKind] = useState<string | undefined>()
+  const { data, isLoading } = usePortFlow(kind, 20)
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className="text-sm font-medium">Live Destination Distribution</CardTitle>
+        <div className="flex gap-1">
+          {([undefined, 'tanker', 'bulk'] as const).map((k) => (
+            <button
+              key={k ?? 'all'}
+              onClick={() => setKind(k)}
+              className={`rounded px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                kind === k ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {k ?? 'All'}
+            </button>
+          ))}
+        </div>
+      </CardHeader>
+      <CardContent>
+        {isLoading || !data ? (
+          <EmptyState message="Loading..." />
+        ) : data.ports.length === 0 ? (
+          <EmptyState message="No destination data yet." />
+        ) : (
+          <>
+            <div className="mb-2 text-[10px] text-muted-foreground">
+              {data.total_with_dest} vessels with recorded destination
+            </div>
+            <div className="space-y-1">
+              {data.ports.map((p) => {
+                const pct = data.total_with_dest > 0 ? (p.count / data.total_with_dest) * 100 : 0
+                return (
+                  <div key={p.destination} className="flex items-center gap-2 text-xs">
+                    <div className="w-28 shrink-0 truncate font-mono text-[10px]">{p.destination}</div>
+                    <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-primary/60"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    <div className="w-8 shrink-0 text-right text-muted-foreground">{p.count}</div>
+                    <div className="w-14 shrink-0 text-right text-[10px] text-muted-foreground/60">
+                      {p.tankers > 0 && `${p.tankers}T`}{p.tankers > 0 && p.bulkers > 0 && ' '}{p.bulkers > 0 && `${p.bulkers}B`}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </>
         )}
       </CardContent>
     </Card>

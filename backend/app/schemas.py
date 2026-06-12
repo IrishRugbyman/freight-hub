@@ -232,6 +232,48 @@ class EventsResponse(BaseModel):
 # ---- Phase 6: Fleet Explorer ----
 
 
+class VoyageEvent(BaseModel):
+    type: str  # port_call | transit | reroute
+    ts: str
+    end_ts: str | None = None
+    zone: str | None = None
+    direction: str | None = None
+    laden: bool | None = None
+    dwell_hours: float | None = None
+    old_destination: str | None = None
+    new_destination: str | None = None
+    lat: float | None = None
+    lon: float | None = None
+    kind: str | None = None
+    segment: str | None = None
+
+
+class VoyagesResponse(BaseModel):
+    mmsi: int
+    events: list[VoyageEvent]
+
+
+class VesselStateData(BaseModel):
+    mmsi: int
+    laden: str | None = None
+    last_draught: float | None = None
+    max_draught_seen: float | None = None
+    updated_ts: str | None = None
+
+
+class PortDestItem(BaseModel):
+    destination: str
+    count: int
+    tankers: int
+    bulkers: int
+
+
+class PortFlowResponse(BaseModel):
+    as_of: str
+    total_with_dest: int
+    ports: list[PortDestItem]
+
+
 class FleetRow(BaseModel):
     # Registry fields
     imo: int

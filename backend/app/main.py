@@ -43,10 +43,15 @@ from .schemas import (
     LadenResponse,
     LadenSegment,
     Meta,
+    PortFlowResponse,
+    PortDestItem,
     RoutesResponse,
     TrackPoint,
     TransitsResponse,
     Vessel,
+    VesselStateData,
+    VoyageEvent,
+    VoyagesResponse,
 )
 
 _STATIC = Path(__file__).parent / "static"
@@ -179,6 +184,179 @@ def vessel_track(mmsi: int, hours: int = 24):
         TrackPoint(ts=_iso(r.snapshot_ts), lat=r.lat, lon=r.lon, sog=r.sog)
         for r in df.itertuples()
     ]
+
+
+@app.get("/api/vessels/{mmsi}/state", response_model=VesselStateData | None)
+def vessel_state_endpoint(mmsi: int):
+    """Laden/ballast state for a vessel inferred from accumulated draught history."""
+    df = db.query(
+        "SELECT laden, last_draught, max_draught_seen, updated_ts "
+        "FROM vessel_state WHERE mmsi = ?",
+        [mmsi],
+        db=db.analytics_db_path(),
+    )
+    if df.empty:
+        return None
+    r = df.iloc[0]
+
+    def _fv(v):
+        return None if (v is None or (isinstance(v, float) and pd.isna(v))) else float(v)
+
+    return VesselStateData(
+        mmsi=mmsi,
+        laden=str(r["laden"]) if r["laden"] else None,
+        last_draught=_fv(r["last_draught"]),
+        max_draught_seen=_fv(r["max_draught_seen"]),
+        updated_ts=_iso(r["updated_ts"]),
+    )
+
+
+@app.get("/api/vessels/{mmsi}/voyages", response_model=VoyagesResponse)
+def vessel_voyages(mmsi: int, days: int = 14):
+    """Voyage timeline for a vessel: port-call history, chokepoint transits, destination changes.
+
+    Events are sorted chronologically and cover the last `days` days (clamped 1-90).
+    """
+    days = max(1, min(90, days))
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
+    _db = db.analytics_db_path()
+
+    events: list[VoyageEvent] = []
+
+    # Port calls (anchored episodes)
+    anch_df = db.query(
+        "SELECT zone, start_ts, end_ts, kind, segment "
+        "FROM anchored_episodes WHERE mmsi = ? AND end_ts >= ? ORDER BY start_ts",
+        [mmsi, cutoff],
+        db=_db,
+    )
+    for _, r in anch_df.iterrows():
+        try:
+            dwell_h = round(
+                (pd.Timestamp(r["end_ts"]) - pd.Timestamp(r["start_ts"])).total_seconds() / 3600,
+                1,
+            )
+        except Exception:
+            dwell_h = None
+        events.append(
+            VoyageEvent(
+                type="port_call",
+                ts=_iso(r["start_ts"]) or "",
+                end_ts=_iso(r["end_ts"]),
+                zone=str(r["zone"]) if r["zone"] else None,
+                dwell_hours=dwell_h,
+                kind=str(r["kind"]) if r["kind"] else None,
+                segment=str(r["segment"]) if r["segment"] else None,
+            )
+        )
+
+    # Chokepoint transits
+    transit_df = db.query(
+        "SELECT chokepoint, entered_ts, exited_ts, direction, kind, segment, laden "
+        "FROM transit_events WHERE mmsi = ? AND entered_ts >= ? ORDER BY entered_ts",
+        [mmsi, cutoff],
+        db=_db,
+    )
+    for _, r in transit_df.iterrows():
+        laden_val = r["laden"]
+        laden_bool = None if (laden_val is None or (isinstance(laden_val, float) and pd.isna(laden_val))) else bool(laden_val)
+        events.append(
+            VoyageEvent(
+                type="transit",
+                ts=_iso(r["entered_ts"]) or "",
+                end_ts=_iso(r["exited_ts"]),
+                zone=str(r["chokepoint"]) if r["chokepoint"] else None,
+                direction=str(r["direction"]) if r["direction"] else None,
+                laden=laden_bool,
+                kind=str(r["kind"]) if r["kind"] else None,
+                segment=str(r["segment"]) if r["segment"] else None,
+            )
+        )
+
+    # Destination changes (reroute events)
+    reroute_df = db.query(
+        "SELECT start_ts, lat, lon, kind, segment, details "
+        "FROM ais_events WHERE mmsi = ? AND type = 'reroute' AND start_ts >= ? ORDER BY start_ts",
+        [mmsi, cutoff],
+        db=_db,
+    )
+    for _, r in reroute_df.iterrows():
+        try:
+            d = _json.loads(r["details"]) if r["details"] else {}
+        except (ValueError, TypeError):
+            d = {}
+        events.append(
+            VoyageEvent(
+                type="reroute",
+                ts=_iso(r["start_ts"]) or "",
+                end_ts=_iso(r["start_ts"]),
+                lat=float(r["lat"]) if r["lat"] is not None else None,
+                lon=float(r["lon"]) if r["lon"] is not None else None,
+                old_destination=d.get("old_destination"),
+                new_destination=d.get("new_destination"),
+                kind=str(r["kind"]) if r["kind"] else None,
+                segment=str(r["segment"]) if r["segment"] else None,
+            )
+        )
+
+    # Sort all events chronologically
+    events.sort(key=lambda e: e.ts)
+    return VoyagesResponse(mmsi=mmsi, events=events)
+
+
+@app.get("/api/analytics/ports", response_model=PortFlowResponse)
+def analytics_ports(kind: str | None = None, top_n: int = 20):
+    """Current destination distribution across the live fleet.
+
+    Groups live_positions by normalized destination and returns counts by vessel kind.
+    top_n clamped 5-50.
+    """
+    top_n = max(5, min(50, top_n))
+    cutoff = _fresh_cutoff()
+    params: list = [cutoff]
+    kind_clause = ""
+    if kind:
+        kind_clause = "AND kind = ?"
+        params.append(kind)
+
+    df = db.query(
+        f"SELECT "
+        f"  UPPER(TRIM(destination)) AS dest, "
+        f"  COUNT(*) AS cnt, "
+        f"  COUNT(CASE WHEN kind='tanker' THEN 1 END) AS tankers, "
+        f"  COUNT(CASE WHEN kind='bulk' THEN 1 END) AS bulkers "
+        f"FROM live_positions "
+        f"WHERE updated_ts > ? {kind_clause} "
+        f"  AND destination IS NOT NULL AND TRIM(destination) != '' "
+        f"GROUP BY dest ORDER BY cnt DESC LIMIT ?",
+        params + [top_n],
+    )
+
+    total_df = db.query(
+        f"SELECT COUNT(*) AS n FROM live_positions "
+        f"WHERE updated_ts > ? {kind_clause} "
+        f"  AND destination IS NOT NULL AND TRIM(destination) != ''",
+        params,
+    )
+    total_with_dest = int(total_df.iloc[0]["n"]) if not total_df.empty else 0
+
+    ports = []
+    if not df.empty:
+        for _, r in df.iterrows():
+            ports.append(
+                PortDestItem(
+                    destination=str(r["dest"]),
+                    count=int(r["cnt"]),
+                    tankers=int(r["tankers"]),
+                    bulkers=int(r["bulkers"]),
+                )
+            )
+
+    return PortFlowResponse(
+        as_of=_iso(datetime.now(UTC).replace(tzinfo=None)) or "",
+        total_with_dest=total_with_dest,
+        ports=ports,
+    )
 
 
 @app.get("/api/vessels/{imo}/equasis")

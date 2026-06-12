@@ -1,6 +1,6 @@
-import { X, Anchor, Navigation } from 'lucide-react'
-import { useEquasis } from '@/lib/api'
-import type { Vessel } from '@/lib/api'
+import { X, Anchor, Navigation, ArrowLeftRight } from 'lucide-react'
+import { useEquasis, useVesselState, useVoyages } from '@/lib/api'
+import type { Vessel, VoyageEvent } from '@/lib/api'
 import { colorFor } from '@/lib/segments'
 
 const NAV_LABELS: Record<number, string> = {
@@ -61,6 +61,61 @@ function riskScoreColor(score: number) {
   return 'text-emerald-400'
 }
 
+function VoyageEventRow({ ev }: { ev: VoyageEvent }) {
+  const d = new Date(ev.ts + 'Z')
+  const time = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' +
+    d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+
+  if (ev.type === 'port_call') {
+    return (
+      <div className="flex items-start gap-2 text-[10px]">
+        <Anchor size={9} className="mt-0.5 shrink-0 text-muted-foreground/70" />
+        <div className="min-w-0">
+          <span className="font-medium">{ev.zone ?? 'Anchorage'}</span>
+          {ev.dwell_hours != null && (
+            <span className="text-muted-foreground ml-1">{ev.dwell_hours.toFixed(0)}h</span>
+          )}
+          <div className="text-muted-foreground/60">{time}</div>
+        </div>
+      </div>
+    )
+  }
+
+  if (ev.type === 'transit') {
+    return (
+      <div className="flex items-start gap-2 text-[10px]">
+        <Navigation size={9} className="mt-0.5 shrink-0 text-primary/70" />
+        <div className="min-w-0">
+          <span className="font-medium">{ev.zone ?? 'Transit'}</span>
+          {ev.direction && <span className="text-muted-foreground ml-1">{ev.direction}</span>}
+          {ev.laden != null && (
+            <span className={`ml-1.5 rounded px-1 py-px text-[9px] ${ev.laden ? 'bg-blue-500/20 text-blue-300' : 'bg-muted text-muted-foreground'}`}>
+              {ev.laden ? 'laden' : 'ballast'}
+            </span>
+          )}
+          <div className="text-muted-foreground/60">{time}</div>
+        </div>
+      </div>
+    )
+  }
+
+  if (ev.type === 'reroute') {
+    return (
+      <div className="flex items-start gap-2 text-[10px]">
+        <ArrowLeftRight size={9} className="mt-0.5 shrink-0 text-yellow-400/80" />
+        <div className="min-w-0 truncate">
+          <span className="text-muted-foreground line-through truncate">{ev.old_destination ?? '?'}</span>
+          <span className="mx-1 text-muted-foreground/60">-&gt;</span>
+          <span className="font-medium">{ev.new_destination ?? '?'}</span>
+          <div className="text-muted-foreground/60">{time}</div>
+        </div>
+      </div>
+    )
+  }
+
+  return null
+}
+
 /** MarineTraffic-inspired vessel detail panel. */
 export function VesselDetail({
   vessel,
@@ -76,6 +131,8 @@ export function VesselDetail({
   const color = colorFor(vessel.kind, vessel.segment)
   const anchored = isAnchored(vessel)
   const { data: eq, isLoading: eqLoading } = useEquasis(vessel.imo)
+  const { data: vesselState } = useVesselState(vessel.mmsi)
+  const { data: voyages } = useVoyages(vessel.mmsi, 14)
 
   return (
     <div className="w-64">
@@ -115,7 +172,18 @@ export function VesselDetail({
 
       {/* Motion */}
       <Section>
-        <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Motion</div>
+        <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1 flex items-center gap-2">
+          <span>Motion</span>
+          {vesselState?.laden && (
+            <span className={`rounded px-1.5 py-px text-[9px] font-medium uppercase tracking-wide ${
+              vesselState.laden === 'laden' ? 'bg-blue-500/20 text-blue-300' :
+              vesselState.laden === 'ballast' ? 'bg-muted text-muted-foreground' :
+              'bg-muted text-muted-foreground'
+            }`}>
+              {vesselState.laden}
+            </span>
+          )}
+        </div>
         <Row label="Speed" value={vessel.sog != null ? `${vessel.sog.toFixed(1)} kn` : null} />
         <Row label="Course" value={vessel.cog != null ? `${Math.round(vessel.cog)}°` : null} />
         <Row label="Heading" value={vessel.heading != null ? `${Math.round(vessel.heading)}°` : null} />
@@ -136,6 +204,18 @@ export function VesselDetail({
         <Row label="ETA" value={vessel.eta} />
         <Row label="Draught" value={vessel.draught != null ? `${vessel.draught.toFixed(1)} m` : null} />
       </Section>
+
+      {/* Voyage history (port calls, transits, reroutes) */}
+      {voyages && voyages.events.length > 0 && (
+        <Section>
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1.5">History (14d)</div>
+          <div className="space-y-1">
+            {voyages.events.slice(-8).map((ev, i) => (
+              <VoyageEventRow key={i} ev={ev} />
+            ))}
+          </div>
+        </Section>
+      )}
 
       {/* Identity */}
       <Section>
