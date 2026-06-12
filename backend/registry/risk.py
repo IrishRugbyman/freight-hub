@@ -50,8 +50,9 @@ _W_DETENTION_10 = 16        # detention_rate_pct >= 10% (overrides above)
 _W_GAP_PER = 12             # per AIS gap event (90d)
 _W_STS_PER = 10             # per STS event (90d)
 _W_LOITER_PER = 5           # per loitering event (90d)
+_W_DARK_VOYAGE = 25         # dark voyage composite (gap -> STS/loiter -> gap within 72h)
 _W_SINGLE_SHIP = 8          # single-vessel owner
-_MAX_BEHAVIOURAL = 40       # cap on behavioural contribution
+_MAX_BEHAVIOURAL = 50       # cap on behavioural contribution (raised for dark voyage)
 
 
 def _is_ig_member(pi_club: str | None) -> bool:
@@ -141,6 +142,10 @@ def risk_score(
     gap_n = event_counts.get("gap", 0)
     sts_n = event_counts.get("sts", 0)
     loiter_n = event_counts.get("loiter", 0)
+    dark_n = event_counts.get("dark_voyage", 0)
+    if dark_n:
+        behavioural += dark_n * _W_DARK_VOYAGE
+        fired.append(f"{dark_n} dark voyage pattern{'s' if dark_n > 1 else ''} in last 90 days")
     if gap_n:
         behavioural += gap_n * _W_GAP_PER
         fired.append(f"{gap_n} AIS gap event{'s' if gap_n > 1 else ''} in last 90 days")

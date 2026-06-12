@@ -690,3 +690,117 @@ def sts_candidates(df: pd.DataFrame) -> list[dict]:
         )
 
     return results
+
+
+# --- Dark voyage composite detection -----------------------------------------
+
+# A dark voyage is gap -> (STS or loiter) -> gap for the same vessel within a time window.
+# The gap must precede the STS/loiter (started before or shortly after) and the second gap
+# must follow the STS/loiter end.
+
+_DARK_VOYAGE_WINDOW_H = 72.0  # max hours from first gap start to last gap end
+_DARK_VOYAGE_PRE_GAP_MAX_H = 24.0  # max hours between gap-start and STS/loiter-start
+
+
+def dark_voyage_events(events_df: pd.DataFrame) -> list[dict]:
+    """Detect dark voyage composites from existing ais_events rows.
+
+    A dark voyage requires (per vessel, within _DARK_VOYAGE_WINDOW_H):
+      - At least one gap event
+      - At least one STS or loiter event that starts within _DARK_VOYAGE_PRE_GAP_MAX_H after the gap
+      - At least one gap event that ends after the STS/loiter event starts (second gap)
+        OR the STS/loiter event itself ends (vessel went dark again)
+
+    Returns dicts for ais_events with type='dark_voyage'.
+    event_id is stable: hash of (mmsi, earliest_gap_start).
+    details JSON: {gap_ids, sts_loiter_id, gap_count, sts_count, loiter_count, window_hours}
+    """
+    if events_df.empty:
+        return []
+
+    required_cols = {"event_id", "type", "mmsi", "start_ts", "end_ts", "lat", "lon", "region", "kind", "segment"}
+    if not required_cols.issubset(events_df.columns):
+        return []
+
+    events_df = events_df.copy()
+    events_df["start_ts"] = pd.to_datetime(events_df["start_ts"])
+    events_df["end_ts"] = pd.to_datetime(events_df["end_ts"])
+
+    results: list[dict] = []
+    seen: set[str] = set()
+
+    for mmsi, grp in events_df.groupby("mmsi"):
+        mmsi_int = int(mmsi)
+        gaps = grp[grp["type"] == "gap"].sort_values("start_ts")
+        covert = grp[grp["type"].isin(["sts", "loiter"])].sort_values("start_ts")
+
+        if gaps.empty or covert.empty:
+            continue
+
+        for _, gap in gaps.iterrows():
+            gap_start = gap["start_ts"]
+            window_end = gap_start + timedelta(hours=_DARK_VOYAGE_WINDOW_H)
+
+            # Find STS/loiter events that start within PRE_GAP_MAX_H after the gap starts
+            nearby_covert = covert[
+                (covert["start_ts"] >= gap_start)
+                & (covert["start_ts"] <= gap_start + timedelta(hours=_DARK_VOYAGE_PRE_GAP_MAX_H))
+            ]
+            if nearby_covert.empty:
+                continue
+
+            # Find a second gap that starts after the earliest covert event start
+            first_covert_ts = nearby_covert["start_ts"].min()
+            trailing_gaps = gaps[
+                (gaps["start_ts"] > first_covert_ts)
+                & (gaps["start_ts"] <= window_end)
+            ]
+            if trailing_gaps.empty:
+                continue
+
+            # We have: gap -> covert event -> trailing gap. Fire composite.
+            event_key = f"dark_{mmsi_int}_{gap_start.isoformat()}"
+            if event_key in seen:
+                continue
+            seen.add(event_key)
+
+            last_gap_end = trailing_gaps["end_ts"].max()
+            window_hours = round(
+                (last_gap_end - gap_start).total_seconds() / 3600, 1
+            )
+
+            # Position: use covert event location (most incriminating point)
+            ref = nearby_covert.iloc[0]
+            lat = float(ref["lat"]) if ref["lat"] is not None else 0.0
+            lon = float(ref["lon"]) if ref["lon"] is not None else 0.0
+            region = str(ref.get("region") or "") or None
+            kind = str(ref.get("kind") or "") or None
+            segment = str(ref.get("segment") or "") or None
+
+            eid = _event_id("dark", mmsi_int, gap["start_ts"].to_pydatetime() if hasattr(gap["start_ts"], "to_pydatetime") else gap["start_ts"], 0)
+
+            results.append(
+                {
+                    "event_id": eid,
+                    "type": "dark_voyage",
+                    "mmsi": mmsi_int,
+                    "mmsi2": None,
+                    "start_ts": gap_start.to_pydatetime() if hasattr(gap_start, "to_pydatetime") else gap_start,
+                    "end_ts": last_gap_end.to_pydatetime() if hasattr(last_gap_end, "to_pydatetime") else last_gap_end,
+                    "lat": lat,
+                    "lon": lon,
+                    "region": region,
+                    "kind": kind,
+                    "segment": segment,
+                    "details": json.dumps(
+                        {
+                            "gap_ids": gaps["event_id"].tolist(),
+                            "sts_count": int((grp["type"] == "sts").sum()),
+                            "loiter_count": int((grp["type"] == "loiter").sum()),
+                            "window_hours": window_hours,
+                        }
+                    ),
+                }
+            )
+
+    return results

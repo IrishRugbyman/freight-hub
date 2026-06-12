@@ -475,3 +475,106 @@ def test_sts_not_fired_short_duration():
     df = _sts_df(rows)
     result = sts_candidates(df)
     assert len(result) == 0
+
+
+# ---------------------------------------------------------------------------
+# dark_voyage_events
+# ---------------------------------------------------------------------------
+
+from analytics.detect import dark_voyage_events
+
+
+def _dark_df(rows: list[dict]) -> pd.DataFrame:
+    df = pd.DataFrame(rows)
+    df["start_ts"] = pd.to_datetime(df["start_ts"])
+    df["end_ts"] = pd.to_datetime(df["end_ts"])
+    for col in ("mmsi2", "lat", "lon", "region", "kind", "segment", "details"):
+        if col not in df.columns:
+            df[col] = None
+    return df
+
+
+def test_dark_voyage_fires_gap_sts_gap():
+    """Gap -> STS -> trailing gap within 72h should fire a dark_voyage event."""
+    rows = [
+        {"event_id": "gap0001", "type": "gap",     "mmsi": 1111,
+         "start_ts": _NOW - timedelta(hours=50), "end_ts": _NOW - timedelta(hours=40),
+         "lat": 26.0, "lon": 56.0},
+        {"event_id": "sts0001", "type": "sts",     "mmsi": 1111,
+         "start_ts": _NOW - timedelta(hours=38), "end_ts": _NOW - timedelta(hours=30),
+         "lat": 26.0, "lon": 56.0},
+        {"event_id": "gap0002", "type": "gap",     "mmsi": 1111,
+         "start_ts": _NOW - timedelta(hours=28), "end_ts": _NOW - timedelta(hours=20),
+         "lat": 26.0, "lon": 56.0},
+    ]
+    result = dark_voyage_events(_dark_df(rows))
+    assert len(result) == 1
+    d = result[0]
+    assert d["type"] == "dark_voyage"
+    assert d["mmsi"] == 1111
+    import json
+    det = json.loads(d["details"])
+    assert det["sts_count"] == 1
+
+
+def test_dark_voyage_fires_gap_loiter_gap():
+    """Gap -> loiter -> trailing gap should also fire."""
+    rows = [
+        {"event_id": "gap0003", "type": "gap",    "mmsi": 2222,
+         "start_ts": _NOW - timedelta(hours=60), "end_ts": _NOW - timedelta(hours=50)},
+        {"event_id": "loi0001", "type": "loiter", "mmsi": 2222,
+         "start_ts": _NOW - timedelta(hours=48), "end_ts": _NOW - timedelta(hours=36)},
+        {"event_id": "gap0004", "type": "gap",    "mmsi": 2222,
+         "start_ts": _NOW - timedelta(hours=30), "end_ts": _NOW - timedelta(hours=20)},
+    ]
+    result = dark_voyage_events(_dark_df(rows))
+    assert len(result) == 1
+    assert result[0]["type"] == "dark_voyage"
+
+
+def test_dark_voyage_no_trailing_gap():
+    """Gap -> STS with no trailing gap should NOT fire."""
+    rows = [
+        {"event_id": "gap0005", "type": "gap", "mmsi": 3333,
+         "start_ts": _NOW - timedelta(hours=40), "end_ts": _NOW - timedelta(hours=30)},
+        {"event_id": "sts0002", "type": "sts", "mmsi": 3333,
+         "start_ts": _NOW - timedelta(hours=28), "end_ts": _NOW - timedelta(hours=20)},
+    ]
+    result = dark_voyage_events(_dark_df(rows))
+    assert len(result) == 0
+
+
+def test_dark_voyage_covert_too_late():
+    """STS starting > 24h after gap start should not trigger (too large a gap)."""
+    rows = [
+        {"event_id": "gap0006", "type": "gap", "mmsi": 4444,
+         "start_ts": _NOW - timedelta(hours=60), "end_ts": _NOW - timedelta(hours=50)},
+        {"event_id": "sts0003", "type": "sts", "mmsi": 4444,
+         "start_ts": _NOW - timedelta(hours=30), "end_ts": _NOW - timedelta(hours=20)},  # 30h after gap start
+        {"event_id": "gap0007", "type": "gap", "mmsi": 4444,
+         "start_ts": _NOW - timedelta(hours=10), "end_ts": _NOW - timedelta(hours=5)},
+    ]
+    result = dark_voyage_events(_dark_df(rows))
+    assert len(result) == 0
+
+
+def test_dark_voyage_empty_input():
+    result = dark_voyage_events(pd.DataFrame())
+    assert result == []
+
+
+def test_dark_voyage_no_duplicates():
+    """Same vessel with multiple qualifying windows should deduplicate by gap start."""
+    rows = [
+        {"event_id": "gap0008", "type": "gap",    "mmsi": 5555,
+         "start_ts": _NOW - timedelta(hours=50), "end_ts": _NOW - timedelta(hours=40)},
+        {"event_id": "sts0004", "type": "sts",    "mmsi": 5555,
+         "start_ts": _NOW - timedelta(hours=38), "end_ts": _NOW - timedelta(hours=30)},
+        {"event_id": "gap0009", "type": "gap",    "mmsi": 5555,
+         "start_ts": _NOW - timedelta(hours=28), "end_ts": _NOW - timedelta(hours=20)},
+        {"event_id": "sts0005", "type": "sts",    "mmsi": 5555,
+         "start_ts": _NOW - timedelta(hours=18), "end_ts": _NOW - timedelta(hours=10)},
+    ]
+    result = dark_voyage_events(_dark_df(rows))
+    event_ids = [r["event_id"] for r in result]
+    assert len(event_ids) == len(set(event_ids))

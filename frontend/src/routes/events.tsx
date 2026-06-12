@@ -10,6 +10,7 @@ const TYPE_LABELS: Record<string, string> = {
   loiter: 'Loitering',
   sts: 'STS Candidate',
   reroute: 'Reroute',
+  dark_voyage: 'Dark Voyage',
 }
 
 const TYPE_COLORS: Record<string, string> = {
@@ -17,6 +18,7 @@ const TYPE_COLORS: Record<string, string> = {
   loiter: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
   sts: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
   reroute: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
+  dark_voyage: 'bg-purple-500/20 text-purple-300 border-purple-500/30',
 }
 
 function timeAgo(ts: string): string {
@@ -45,7 +47,7 @@ export default function EventsPage() {
     navigate({ to: '/', search: { mmsi: ev.mmsi, lat: ev.lat, lon: ev.lon } as never })
   }
 
-  const types = ['gap', 'loiter', 'sts', 'reroute'] as const
+  const types = ['dark_voyage', 'gap', 'loiter', 'sts', 'reroute'] as const
 
   return (
     <div className="mx-auto max-w-5xl space-y-4 p-4">

@@ -26,6 +26,7 @@ import pandas as pd
 from .detect import (
     ais_gap_events,
     anchored_episodes,
+    dark_voyage_events,
     destination_change_events,
     fleet_density_rows,
     loitering_events,
@@ -430,7 +431,29 @@ def run(reset: bool = False) -> None:
             )
 
     # ------------------------------------------------------------------
-    # 6. Advance watermark
+    # 7. Dark voyage composite detection (operates on ais_events, not raw snapshots)
+    # ------------------------------------------------------------------
+    all_events_df = conn.execute(
+        "SELECT event_id, type, mmsi, mmsi2, start_ts, end_ts, lat, lon, region, kind, segment, details "
+        "FROM ais_events"
+    ).df()
+    dark_voyages = dark_voyage_events(all_events_df)
+    log.info("detected %d dark voyage composites", len(dark_voyages))
+    for e in dark_voyages:
+        conn.execute(
+            "INSERT OR REPLACE INTO ais_events "
+            "(event_id, type, mmsi, mmsi2, start_ts, end_ts, lat, lon, "
+            " region, kind, segment, details) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                e["event_id"], e["type"], e["mmsi"], e["mmsi2"],
+                e["start_ts"], e["end_ts"], e["lat"], e["lon"],
+                e["region"], e["kind"], e["segment"], e["details"],
+            ],
+        )
+
+    # ------------------------------------------------------------------
+    # 8. Advance watermark
     # ------------------------------------------------------------------
     new_watermark = max_ts_dt
     _set_watermark(conn, new_watermark)
@@ -438,8 +461,8 @@ def run(reset: bool = False) -> None:
 
     conn.close()
     log.info(
-        "analytics.build complete: transits=%d anchored=%d density=%d reroutes=%d",
-        len(transits), len(anchored), len(density_rows), len(reroutes),
+        "analytics.build complete: transits=%d anchored=%d density=%d reroutes=%d dark_voyages=%d",
+        len(transits), len(anchored), len(density_rows), len(reroutes), len(dark_voyages),
     )
 
 
