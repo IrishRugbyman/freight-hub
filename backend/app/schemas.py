@@ -820,3 +820,31 @@ class VesselRiskResponse(BaseModel):
     top_n: int
     total_candidates: int
     rows: list[VesselRiskRow]
+
+
+class StsProximityPair(BaseModel):
+    mmsi_a: int
+    name_a: str | None
+    imo_a: int | None
+    kind_a: str | None
+    segment_a: str | None
+    sog_a: float | None
+    mmsi_b: int
+    name_b: str | None
+    imo_b: int | None
+    kind_b: str | None
+    segment_b: str | None
+    sog_b: float | None
+    dist_m: float
+    lat: float
+    lon: float
+    region: str | None
+    risk_region: bool
+
+
+class StsProximityResponse(BaseModel):
+    as_of: str
+    max_dist_m: float
+    max_sog: float
+    total_pairs: int
+    pairs: list[StsProximityPair]

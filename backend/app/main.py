@@ -87,6 +87,8 @@ from .schemas import (
     TransitRiskEvent,
     TransitRiskResponse,
     SpeedAnalyticsResponse,
+    StsProximityPair,
+    StsProximityResponse,
     StsRiskEvent,
     StsRiskResponse,
     SpeedSegmentRow,
@@ -2676,6 +2678,84 @@ _HIGH_RISK_REGIONS = frozenset({
     "hormuz", "persian_gulf", "west_africa", "somalia",
     "red_sea", "bab_el_mandeb", "gulf_of_aden",
 })
+
+
+@app.get("/api/analytics/sts-proximity", response_model=StsProximityResponse)
+def analytics_sts_proximity(max_dist_m: float = 2000, max_sog: float = 3.0):
+    """Live pairs of vessels within max_dist_m metres of each other at sog <= max_sog.
+
+    Excludes anchored (nav_status=1) and moored (nav_status=5) vessels. Uses
+    vectorized haversine over live_positions; returns up to 100 closest pairs.
+    Pairs in high-risk regions (Hormuz, Red Sea, W Africa, etc.) are flagged.
+    """
+    import numpy as np
+
+    d_m = max(200.0, min(max_dist_m, 10000.0))
+    sog_cap = max(0.5, min(max_sog, 8.0))
+
+    df = db.query(
+        "SELECT mmsi, name, imo, lat, lon, sog, kind, segment, region, nav_status "
+        "FROM live_positions "
+        "WHERE sog IS NOT NULL AND sog <= ? "
+        "  AND (nav_status IS NULL OR nav_status NOT IN (1, 5)) "
+        "  AND lat IS NOT NULL AND lon IS NOT NULL",
+        [sog_cap],
+    )
+    now = datetime.now(UTC)
+    if df.empty or len(df) < 2:
+        return StsProximityResponse(
+            as_of=_iso(now) or "",
+            max_dist_m=d_m,
+            max_sog=sog_cap,
+            total_pairs=0,
+            pairs=[],
+        )
+
+    df = df.reset_index(drop=True)
+    R = 6_371_000.0
+    lats = np.radians(df["lat"].values.astype(float))
+    lons = np.radians(df["lon"].values.astype(float))
+    dlat = lats[:, None] - lats[None, :]
+    dlon = lons[:, None] - lons[None, :]
+    a = np.sin(dlat / 2) ** 2 + np.cos(lats[:, None]) * np.cos(lats[None, :]) * np.sin(dlon / 2) ** 2
+    dists = 2 * R * np.arcsin(np.sqrt(np.clip(a, 0, 1)))
+    mask = np.triu(dists < d_m, k=1)
+    ii, jj = np.where(mask)
+
+    pairs: list[StsProximityPair] = []
+    for i_idx, j_idx in zip(ii.tolist(), jj.tolist()):
+        a_row = df.iloc[i_idx]
+        b_row = df.iloc[j_idx]
+        region = _str_or_none(a_row["region"]) or _str_or_none(b_row["region"])
+        pairs.append(
+            StsProximityPair(
+                mmsi_a=int(a_row["mmsi"]),
+                name_a=_str_or_none(a_row["name"]),
+                imo_a=_valid_imo(a_row["imo"]),
+                kind_a=_str_or_none(a_row["kind"]),
+                segment_a=_str_or_none(a_row["segment"]),
+                sog_a=round(float(a_row["sog"]), 1),
+                mmsi_b=int(b_row["mmsi"]),
+                name_b=_str_or_none(b_row["name"]),
+                imo_b=_valid_imo(b_row["imo"]),
+                kind_b=_str_or_none(b_row["kind"]),
+                segment_b=_str_or_none(b_row["segment"]),
+                sog_b=round(float(b_row["sog"]), 1),
+                dist_m=round(float(dists[i_idx, j_idx]), 0),
+                lat=round((float(a_row["lat"]) + float(b_row["lat"])) / 2, 4),
+                lon=round((float(a_row["lon"]) + float(b_row["lon"])) / 2, 4),
+                region=region,
+                risk_region=region in _HIGH_RISK_REGIONS if region else False,
+            )
+        )
+    pairs.sort(key=lambda p: (not p.risk_region, p.dist_m))
+    return StsProximityResponse(
+        as_of=_iso(now) or "",
+        max_dist_m=d_m,
+        max_sog=sog_cap,
+        total_pairs=len(pairs),
+        pairs=pairs[:100],
+    )
 
 
 @app.get("/api/analytics/anomaly-watchlist", response_model=AnomalyWatchlistResponse)

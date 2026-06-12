@@ -2450,3 +2450,166 @@ def test_anomaly_watchlist_limit_param(risk_leaderboard_client):
     assert len(d["rows"]) <= 2
     # total_flagged is the full count before limit is applied
     assert d["total_flagged"] >= len(d["rows"])
+
+
+# ---------------------------------------------------------------------------
+# Phase 35: STS Proximity
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def sts_proximity_client(tmp_path, monkeypatch):
+    """Fixture for STS proximity endpoint.
+
+    Vessels (all sog <= 3, nav_status=0 unless noted):
+      9201  near Hormuz (25.0, 56.0)     sog=0.8  tanker/VLCC
+      9202  near Hormuz (25.001, 56.001) sog=1.2  tanker/VLCC   ~149m from 9201
+      9203  near Hormuz (25.005, 56.005) sog=2.0  tanker/Suezmax ~746m from 9201
+      9204  north_sea   (51.0, 3.0)      sog=1.5  bulk/Capesize
+      9205  north_sea   (51.001, 3.001)  sog=0.9  bulk/Capesize  ~131m from 9204
+      9206  hormuz      (25.0, 56.1)     sog=0.5  tanker/VLCC   nav_status=1 ANCHORED
+    """
+    import duckdb
+    from fastapi.testclient import TestClient
+    from datetime import UTC, datetime
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+    ais_schema = """
+    CREATE TABLE live_positions (
+        mmsi BIGINT PRIMARY KEY, name VARCHAR, lat DOUBLE, lon DOUBLE,
+        sog DOUBLE, cog DOUBLE, heading DOUBLE, destination VARCHAR,
+        ship_type INTEGER, length_m DOUBLE, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, updated_ts TIMESTAMP,
+        imo BIGINT, draught DOUBLE, nav_status INTEGER, eta VARCHAR
+    );
+    CREATE TABLE ais_snapshots (
+        snapshot_ts TIMESTAMP, mmsi BIGINT, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, lat DOUBLE, lon DOUBLE, ship_type INTEGER, length_m DOUBLE,
+        sog DOUBLE, nav_status INTEGER, draught DOUBLE, destination VARCHAR,
+        PRIMARY KEY (snapshot_ts, mmsi)
+    );
+    CREATE TABLE vessels (
+        mmsi BIGINT PRIMARY KEY, imo BIGINT, name VARCHAR, flag VARCHAR,
+        flag_iso2 VARCHAR, mid INTEGER, call_sign VARCHAR, vessel_type VARCHAR,
+        dwt INTEGER, grt INTEGER, build_year INTEGER, length_m DOUBLE, beam_m DOUBLE,
+        owner VARCHAR, manager VARCHAR, class_society VARCHAR, enriched_at TIMESTAMP, equasis_ok BOOLEAN
+    );
+    """
+    ais_file = tmp_path / "ais_prox.duckdb"
+    ais_conn = duckdb.connect(str(ais_file))
+    ais_conn.execute(ais_schema)
+    ais_conn.executemany(
+        "INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            (9201, "VLCC ALPHA",  25.000, 56.000, 0.8, None, None, None, 80, 330, "tanker", "VLCC",     "hormuz",    now, 7201, 20.0, 0,    None),
+            (9202, "VLCC BETA",   25.001, 56.001, 1.2, None, None, None, 80, 330, "tanker", "VLCC",     "hormuz",    now, 7202, 19.5, 0,    None),
+            (9203, "SUEZMAX G",   25.005, 56.005, 2.0, None, None, None, 80, 300, "tanker", "Suezmax",  "hormuz",    now, 7203, 18.0, 0,    None),
+            (9204, "CAPE NORTH",  51.000,  3.000, 1.5, None, None, None, 74, 290, "bulk",   "Capesize", "north_sea", now, 7204, 15.0, 0,    None),
+            (9205, "CAPE SOUTH",  51.001,  3.001, 0.9, None, None, None, 74, 290, "bulk",   "Capesize", "north_sea", now, 7205, 14.5, 0,    None),
+            (9206, "ANCH VLCC",   25.000, 56.100, 0.5, None, None, None, 80, 330, "tanker", "VLCC",     "hormuz",    now, 7206, 20.0, 1,    None),
+        ],
+    )
+    ais_conn.close()
+
+    # minimal analytics DB (endpoint only reads live_positions, but db.py needs a valid analytics path)
+    an_schema = """
+    CREATE TABLE meta_watermark (key VARCHAR PRIMARY KEY, ts TIMESTAMP);
+    CREATE TABLE ais_events (
+        event_id VARCHAR PRIMARY KEY, type VARCHAR, mmsi BIGINT, mmsi2 BIGINT,
+        start_ts TIMESTAMP, end_ts TIMESTAMP, lat DOUBLE, lon DOUBLE,
+        region VARCHAR, kind VARCHAR, segment VARCHAR, details VARCHAR
+    );
+    CREATE TABLE transit_events (
+        mmsi BIGINT, chokepoint VARCHAR, entered_ts TIMESTAMP, exited_ts TIMESTAMP,
+        direction VARCHAR, kind VARCHAR, segment VARCHAR, laden BOOLEAN,
+        PRIMARY KEY (mmsi, chokepoint, entered_ts)
+    );
+    CREATE TABLE anchored_episodes (
+        mmsi BIGINT, zone VARCHAR, start_ts TIMESTAMP, end_ts TIMESTAMP,
+        kind VARCHAR, segment VARCHAR, PRIMARY KEY (mmsi, zone, start_ts)
+    );
+    CREATE TABLE fleet_density (
+        ts TIMESTAMP, region VARCHAR, kind VARCHAR, segment VARCHAR,
+        laden_count INTEGER, ballast_count INTEGER, unknown_count INTEGER,
+        PRIMARY KEY (ts, region, kind, segment)
+    );
+    CREATE TABLE vessel_state (
+        mmsi BIGINT PRIMARY KEY, max_draught_seen DOUBLE, last_draught DOUBLE,
+        laden VARCHAR, updated_ts TIMESTAMP
+    );
+    """
+    an_file = tmp_path / "analytics_prox.duckdb"
+    an_conn = duckdb.connect(str(an_file))
+    an_conn.execute(an_schema)
+    an_conn.close()
+
+    reg_file = tmp_path / "reg_prox.duckdb"
+    reg_conn = duckdb.connect(str(reg_file))
+    reg_conn.execute("""
+    CREATE TABLE vessel_registry (
+        imo BIGINT PRIMARY KEY, ship_name VARCHAR, flag VARCHAR, flag_code VARCHAR,
+        call_sign VARCHAR, gross_tonnage INTEGER, dwt INTEGER, ship_type VARCHAR,
+        year_built INTEGER, ship_status VARCHAR, owner VARCHAR, ism_manager VARCHAR,
+        ship_manager VARCHAR, class_society VARCHAR, pi_club VARCHAR,
+        detention_rate_pct DOUBLE, paris_mou VARCHAR, tokyo_mou VARCHAR,
+        uscg_targeting VARCHAR, fetched_ts TIMESTAMP, fetch_ok BOOLEAN,
+        risk_score INTEGER, risk_indicators VARCHAR, ofac_sanctioned BOOLEAN
+    );
+    """)
+    reg_conn.close()
+
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
+    monkeypatch.setenv("ANALYTICS_DB", str(an_file))
+    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
+
+    from app.main import app as freight_app
+    return TestClient(freight_app)
+
+
+def test_sts_proximity_structure(sts_proximity_client):
+    r = sts_proximity_client.get("/api/analytics/sts-proximity")
+    assert r.status_code == 200
+    d = r.json()
+    assert "as_of" in d and "max_dist_m" in d and "max_sog" in d
+    assert "total_pairs" in d and "pairs" in d
+    assert isinstance(d["pairs"], list)
+
+
+def test_sts_proximity_finds_close_vessels(sts_proximity_client):
+    r = sts_proximity_client.get("/api/analytics/sts-proximity?max_dist_m=2000&max_sog=3.0")
+    d = r.json()
+    # 9201-9202 (~149m), 9201-9203 (~746m), 9202-9203 (~599m), 9204-9205 (~131m)
+    assert d["total_pairs"] >= 4
+    mmsi_sets = [{p["mmsi_a"], p["mmsi_b"]} for p in d["pairs"]]
+    assert {9201, 9202} in mmsi_sets
+    assert {9204, 9205} in mmsi_sets
+
+
+def test_sts_proximity_excludes_anchored(sts_proximity_client):
+    r = sts_proximity_client.get("/api/analytics/sts-proximity?max_dist_m=20000&max_sog=3.0")
+    d = r.json()
+    all_mmsis = {p["mmsi_a"] for p in d["pairs"]} | {p["mmsi_b"] for p in d["pairs"]}
+    assert 9206 not in all_mmsis
+
+
+def test_sts_proximity_dist_below_threshold(sts_proximity_client):
+    r = sts_proximity_client.get("/api/analytics/sts-proximity?max_dist_m=200&max_sog=3.0")
+    d = r.json()
+    for p in d["pairs"]:
+        assert p["dist_m"] <= 200
+
+
+def test_sts_proximity_risk_region_flagged(sts_proximity_client):
+    r = sts_proximity_client.get("/api/analytics/sts-proximity?max_dist_m=2000&max_sog=3.0")
+    d = r.json()
+    hormuz_pairs = [p for p in d["pairs"] if {p["mmsi_a"], p["mmsi_b"]} <= {9201, 9202, 9203}]
+    assert all(p["risk_region"] for p in hormuz_pairs)
+    ns_pairs = [p for p in d["pairs"] if {p["mmsi_a"], p["mmsi_b"]} == {9204, 9205}]
+    assert ns_pairs
+    assert not ns_pairs[0]["risk_region"]
+
+
+def test_sts_proximity_sog_filter(sts_proximity_client):
+    # sog cap at 0.3 - only vessels with sog <= 0.3 qualify; none in fixture
+    r = sts_proximity_client.get("/api/analytics/sts-proximity?max_dist_m=2000&max_sog=0.3")
+    d = r.json()
+    assert d["total_pairs"] == 0

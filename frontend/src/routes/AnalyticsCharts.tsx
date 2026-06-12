@@ -13,7 +13,7 @@ import {
   YAxis,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion, useDestinationFlows, useMarketSummary, useVesselRiskScores, useChokepointHeatmap, useTradeLaneMatrix, useAnomalyWatchlist } from '@/lib/api'
+import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion, useDestinationFlows, useMarketSummary, useVesselRiskScores, useChokepointHeatmap, useTradeLaneMatrix, useAnomalyWatchlist, useStsProximity } from '@/lib/api'
 import type { RiskEventItem } from '@/lib/api'
 
 const CHOKEPOINTS = [
@@ -2196,6 +2196,108 @@ export function AnomalyWatchlistCard() {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Phase 35: Live STS Proximity Watch
+// ---------------------------------------------------------------------------
+
+export function StsProximityCard() {
+  const [maxDistM, setMaxDistM] = useState(2000)
+  const [maxSog, setMaxSog] = useState(3.0)
+  const { data, isLoading } = useStsProximity(maxDistM, maxSog)
+  const pairs = data?.pairs ?? []
+  const riskPairs = pairs.filter(p => p.risk_region)
+  const normalPairs = pairs.filter(p => !p.risk_region)
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex flex-wrap items-center justify-between gap-2">
+          <span>Live STS Proximity Watch</span>
+          <div className="flex flex-wrap gap-2 text-sm font-normal">
+            <select
+              className="rounded border border-border bg-background px-2 py-1 text-xs"
+              value={maxDistM}
+              onChange={e => setMaxDistM(Number(e.target.value))}
+            >
+              <option value={500}>500 m</option>
+              <option value={1000}>1 km</option>
+              <option value={2000}>2 km</option>
+              <option value={5000}>5 km</option>
+            </select>
+            <select
+              className="rounded border border-border bg-background px-2 py-1 text-xs"
+              value={maxSog}
+              onChange={e => setMaxSog(Number(e.target.value))}
+            >
+              <option value={1.5}>SOG 1.5 kn</option>
+              <option value={3.0}>SOG 3.0 kn</option>
+              <option value={5.0}>SOG 5.0 kn</option>
+            </select>
+          </div>
+        </CardTitle>
+        {data && (
+          <p className="text-xs text-muted-foreground">
+            {data.total_pairs} vessel pair{data.total_pairs !== 1 ? 's' : ''} within{' '}
+            {(data.max_dist_m / 1000).toFixed(1)} km at SOG {'<='} {data.max_sog} kn
+            {riskPairs.length > 0 && (
+              <span className="ml-1 font-medium text-orange-400">
+                ({riskPairs.length} in high-risk regions)
+              </span>
+            )}
+          </p>
+        )}
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="h-64 animate-pulse rounded bg-muted/40" />
+        ) : pairs.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">
+            No vessel pairs within threshold.
+          </p>
+        ) : (
+          <div className="space-y-1">
+            {[...riskPairs, ...normalPairs].slice(0, 30).map((pair, i) => (
+              <div
+                key={i}
+                className={`rounded px-2 py-1.5 ${pair.risk_region ? 'border-l-2 border-orange-500/60 bg-orange-500/8' : 'bg-muted/20'}`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0 flex-1 text-sm">
+                    <span className="font-medium">{pair.name_a ?? `MMSI ${pair.mmsi_a}`}</span>
+                    <span className="mx-1 text-muted-foreground text-xs">
+                      {pair.segment_a ?? pair.kind_a} {pair.sog_a != null ? `${pair.sog_a} kn` : ''}
+                    </span>
+                    <span className="text-muted-foreground/50">+</span>
+                    <span className="ml-1 font-medium">{pair.name_b ?? `MMSI ${pair.mmsi_b}`}</span>
+                    <span className="mx-1 text-muted-foreground text-xs">
+                      {pair.segment_b ?? pair.kind_b} {pair.sog_b != null ? `${pair.sog_b} kn` : ''}
+                    </span>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <span className={`text-xs tabular-nums ${pair.risk_region ? 'text-orange-400' : 'text-muted-foreground'}`}>
+                      {pair.dist_m < 1000 ? `${Math.round(pair.dist_m)} m` : `${(pair.dist_m / 1000).toFixed(1)} km`}
+                    </span>
+                    {pair.region && (
+                      <span className="ml-1 text-[10px] text-muted-foreground/60">
+                        {pair.region.replace(/_/g, ' ')}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+            {pairs.length > 30 && (
+              <p className="text-center text-xs text-muted-foreground pt-1">
+                +{pairs.length - 30} more pairs
+              </p>
+            )}
           </div>
         )}
       </CardContent>

@@ -1373,3 +1373,43 @@ export function useAnomalyWatchlist(minScore = 50, limit = 30) {
     refetchInterval: 2 * 60 * 1000,
   })
 }
+
+export interface StsProximityPair {
+  mmsi_a: number
+  name_a: string | null
+  imo_a: number | null
+  kind_a: string | null
+  segment_a: string | null
+  sog_a: number | null
+  mmsi_b: number
+  name_b: string | null
+  imo_b: number | null
+  kind_b: string | null
+  segment_b: string | null
+  sog_b: number | null
+  dist_m: number
+  lat: number
+  lon: number
+  region: string | null
+  risk_region: boolean
+}
+
+export interface StsProximityResponse {
+  as_of: string
+  max_dist_m: number
+  max_sog: number
+  total_pairs: number
+  pairs: StsProximityPair[]
+}
+
+export function useStsProximity(maxDistM = 2000, maxSog = 3.0) {
+  return useQuery({
+    queryKey: ['sts-proximity', maxDistM, maxSog],
+    queryFn: () =>
+      getJSON<StsProximityResponse>(
+        `/api/analytics/sts-proximity?max_dist_m=${maxDistM}&max_sog=${maxSog}`,
+      ),
+    staleTime: 60 * 1000,
+    refetchInterval: 60 * 1000,
+  })
+}
