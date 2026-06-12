@@ -848,3 +848,19 @@ class StsProximityResponse(BaseModel):
     max_sog: float
     total_pairs: int
     pairs: list[StsProximityPair]
+
+
+class RegionMomentumRow(BaseModel):
+    region: str
+    current_total: int
+    prev_total: int
+    delta: int
+    laden_count: int
+    ballast_count: int
+    laden_ratio_pct: float
+
+
+class RegionMomentumResponse(BaseModel):
+    as_of: str
+    hours_back: int
+    rows: list[RegionMomentumRow]

@@ -87,6 +87,8 @@ from .schemas import (
     TransitRiskEvent,
     TransitRiskResponse,
     SpeedAnalyticsResponse,
+    RegionMomentumRow,
+    RegionMomentumResponse,
     StsProximityPair,
     StsProximityResponse,
     StsRiskEvent,
@@ -1620,6 +1622,62 @@ def analytics_density(region: str = "singapore_malacca", days: int = 30):
             )
         series.sort(key=lambda r: r.date)
     return DensityResponse(region=region, days=d, series=series)
+
+
+@app.get("/api/analytics/region-momentum", response_model=RegionMomentumResponse)
+def analytics_region_momentum(hours_back: int = 24):
+    """Net change in vessel count per region vs hours_back hours ago.
+
+    Reads fleet_density for the latest snapshot and the closest snapshot to
+    hours_back hours prior. Returns per-region deltas sorted by absolute delta.
+    """
+    h = max(1, min(hours_back, 168))
+    now_dt = datetime.now(UTC).replace(tzinfo=None)
+    cutoff = now_dt - timedelta(hours=h + 1)
+
+    df = db.query(
+        "SELECT ts, region, laden_count, ballast_count, unknown_count "
+        "FROM fleet_density WHERE ts >= ? ORDER BY ts DESC",
+        [cutoff],
+        db=db.analytics_db_path(),
+    )
+    as_of = _iso(now_dt) or ""
+    if df.empty:
+        return RegionMomentumResponse(as_of=as_of, hours_back=h, rows=[])
+
+    df["ts"] = pd.to_datetime(df["ts"])
+    df["total"] = df["laden_count"] + df["ballast_count"] + df["unknown_count"]
+
+    latest_ts = df["ts"].max()
+    target_prev_ts = latest_ts - timedelta(hours=h)
+    # Pick closest snapshot to target_prev_ts
+    unique_ts = df["ts"].unique()
+    prev_ts = unique_ts[abs(unique_ts - target_prev_ts).argmin()]
+
+    curr = df[df["ts"] == latest_ts].groupby("region")[["laden_count", "ballast_count", "unknown_count", "total"]].sum()
+    prev = df[df["ts"] == prev_ts].groupby("region")["total"].sum().rename("prev_total")
+
+    merged = curr.join(prev, how="outer").fillna(0)
+    merged.columns = ["laden_count", "ballast_count", "unknown_count", "current_total", "prev_total"]
+    merged["delta"] = (merged["current_total"] - merged["prev_total"]).astype(int)
+    merged["laden_ratio_pct"] = merged.apply(
+        lambda r: round(100.0 * r["laden_count"] / max(r["current_total"], 1), 1), axis=1
+    )
+    merged = merged.sort_values("delta", key=abs, ascending=False)
+
+    rows = [
+        RegionMomentumRow(
+            region=str(region),
+            current_total=int(r["current_total"]),
+            prev_total=int(r["prev_total"]),
+            delta=int(r["delta"]),
+            laden_count=int(r["laden_count"]),
+            ballast_count=int(r["ballast_count"]),
+            laden_ratio_pct=float(r["laden_ratio_pct"]),
+        )
+        for region, r in merged.iterrows()
+    ]
+    return RegionMomentumResponse(as_of=as_of, hours_back=h, rows=rows)
 
 
 @app.get("/api/analytics/laden", response_model=LadenResponse)

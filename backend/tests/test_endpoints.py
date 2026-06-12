@@ -2613,3 +2613,165 @@ def test_sts_proximity_sog_filter(sts_proximity_client):
     r = sts_proximity_client.get("/api/analytics/sts-proximity?max_dist_m=2000&max_sog=0.3")
     d = r.json()
     assert d["total_pairs"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Phase 36: Region Momentum
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def region_momentum_client(tmp_path, monkeypatch):
+    """Fixture for region-momentum endpoint.
+
+    fleet_density has two timestamps 24h apart for three regions.
+      ara:         latest=500, prev=400  -> delta=+100
+      suez:        latest=200, prev=250  -> delta=-50
+      dover_channel: only in latest=150  -> delta=+150
+    """
+    import duckdb
+    from fastapi.testclient import TestClient
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+    t_latest = now.replace(minute=0, second=0, microsecond=0)
+    t_prev = t_latest - timedelta(hours=24)
+
+    ais_schema = """
+    CREATE TABLE live_positions (
+        mmsi BIGINT PRIMARY KEY, name VARCHAR, lat DOUBLE, lon DOUBLE,
+        sog DOUBLE, cog DOUBLE, heading DOUBLE, destination VARCHAR,
+        ship_type INTEGER, length_m DOUBLE, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, updated_ts TIMESTAMP,
+        imo BIGINT, draught DOUBLE, nav_status INTEGER, eta VARCHAR
+    );
+    CREATE TABLE ais_snapshots (
+        snapshot_ts TIMESTAMP, mmsi BIGINT, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, lat DOUBLE, lon DOUBLE, ship_type INTEGER, length_m DOUBLE,
+        sog DOUBLE, nav_status INTEGER, draught DOUBLE, destination VARCHAR,
+        PRIMARY KEY (snapshot_ts, mmsi)
+    );
+    CREATE TABLE vessels (
+        mmsi BIGINT PRIMARY KEY, imo BIGINT, name VARCHAR, flag VARCHAR,
+        flag_iso2 VARCHAR, mid INTEGER, call_sign VARCHAR, vessel_type VARCHAR,
+        dwt INTEGER, grt INTEGER, build_year INTEGER, length_m DOUBLE, beam_m DOUBLE,
+        owner VARCHAR, manager VARCHAR, class_society VARCHAR, enriched_at TIMESTAMP, equasis_ok BOOLEAN
+    );
+    """
+    ais_file = tmp_path / "ais_mom.duckdb"
+    ais_conn = duckdb.connect(str(ais_file))
+    ais_conn.execute(ais_schema)
+    ais_conn.close()
+
+    an_schema = """
+    CREATE TABLE meta_watermark (key VARCHAR PRIMARY KEY, ts TIMESTAMP);
+    CREATE TABLE ais_events (
+        event_id VARCHAR PRIMARY KEY, type VARCHAR, mmsi BIGINT, mmsi2 BIGINT,
+        start_ts TIMESTAMP, end_ts TIMESTAMP, lat DOUBLE, lon DOUBLE,
+        region VARCHAR, kind VARCHAR, segment VARCHAR, details VARCHAR
+    );
+    CREATE TABLE transit_events (
+        mmsi BIGINT, chokepoint VARCHAR, entered_ts TIMESTAMP, exited_ts TIMESTAMP,
+        direction VARCHAR, kind VARCHAR, segment VARCHAR, laden BOOLEAN,
+        PRIMARY KEY (mmsi, chokepoint, entered_ts)
+    );
+    CREATE TABLE anchored_episodes (
+        mmsi BIGINT, zone VARCHAR, start_ts TIMESTAMP, end_ts TIMESTAMP,
+        kind VARCHAR, segment VARCHAR, PRIMARY KEY (mmsi, zone, start_ts)
+    );
+    CREATE TABLE fleet_density (
+        ts TIMESTAMP, region VARCHAR, kind VARCHAR, segment VARCHAR,
+        laden_count INTEGER, ballast_count INTEGER, unknown_count INTEGER,
+        PRIMARY KEY (ts, region, kind, segment)
+    );
+    CREATE TABLE vessel_state (
+        mmsi BIGINT PRIMARY KEY, max_draught_seen DOUBLE, last_draught DOUBLE,
+        laden VARCHAR, updated_ts TIMESTAMP
+    );
+    """
+    an_file = tmp_path / "analytics_mom.duckdb"
+    an_conn = duckdb.connect(str(an_file))
+    an_conn.execute(an_schema)
+    # latest snapshot
+    an_conn.executemany(
+        "INSERT INTO fleet_density VALUES (?,?,?,?,?,?,?)",
+        [
+            (t_latest, "ara",           "tanker", "VLCC",     300, 150, 50),
+            (t_latest, "suez",          "tanker", "VLCC",     120,  60, 20),
+            (t_latest, "dover_channel", "bulk",   "Capesize",  90,  45, 15),
+        ],
+    )
+    # prev snapshot
+    an_conn.executemany(
+        "INSERT INTO fleet_density VALUES (?,?,?,?,?,?,?)",
+        [
+            (t_prev, "ara",  "tanker", "VLCC", 240, 120, 40),
+            (t_prev, "suez", "tanker", "VLCC",  140,  80, 30),
+        ],
+    )
+    an_conn.close()
+
+    reg_file = tmp_path / "reg_mom.duckdb"
+    reg_conn = duckdb.connect(str(reg_file))
+    reg_conn.execute("""
+    CREATE TABLE vessel_registry (
+        imo BIGINT PRIMARY KEY, ship_name VARCHAR, flag VARCHAR, flag_code VARCHAR,
+        call_sign VARCHAR, gross_tonnage INTEGER, dwt INTEGER, ship_type VARCHAR,
+        year_built INTEGER, ship_status VARCHAR, owner VARCHAR, ism_manager VARCHAR,
+        ship_manager VARCHAR, class_society VARCHAR, pi_club VARCHAR,
+        detention_rate_pct DOUBLE, paris_mou VARCHAR, tokyo_mou VARCHAR,
+        uscg_targeting VARCHAR, fetched_ts TIMESTAMP, fetch_ok BOOLEAN,
+        risk_score INTEGER, risk_indicators VARCHAR, ofac_sanctioned BOOLEAN
+    );
+    """)
+    reg_conn.close()
+
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
+    monkeypatch.setenv("ANALYTICS_DB", str(an_file))
+    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
+
+    from app.main import app as freight_app
+    return TestClient(freight_app)
+
+
+def test_region_momentum_structure(region_momentum_client):
+    r = region_momentum_client.get("/api/analytics/region-momentum")
+    assert r.status_code == 200
+    d = r.json()
+    assert "as_of" in d and "hours_back" in d and "rows" in d
+    assert d["hours_back"] == 24
+    for row in d["rows"]:
+        assert "region" in row and "current_total" in row and "delta" in row
+        assert "laden_ratio_pct" in row
+
+
+def test_region_momentum_delta_correct(region_momentum_client):
+    r = region_momentum_client.get("/api/analytics/region-momentum?hours_back=24")
+    d = r.json()
+    ara = next(row for row in d["rows"] if row["region"] == "ara")
+    # latest=300+150+50=500, prev=240+120+40=400, delta=+100
+    assert ara["current_total"] == 500
+    assert ara["delta"] == 100
+
+
+def test_region_momentum_negative_delta(region_momentum_client):
+    r = region_momentum_client.get("/api/analytics/region-momentum?hours_back=24")
+    d = r.json()
+    suez = next(row for row in d["rows"] if row["region"] == "suez")
+    # latest=200, prev=250, delta=-50
+    assert suez["delta"] == -50
+
+
+def test_region_momentum_new_region(region_momentum_client):
+    r = region_momentum_client.get("/api/analytics/region-momentum?hours_back=24")
+    d = r.json()
+    dc = next(row for row in d["rows"] if row["region"] == "dover_channel")
+    assert dc["delta"] == 150  # no prev data -> delta = current_total
+    assert dc["prev_total"] == 0
+
+
+def test_region_momentum_laden_ratio(region_momentum_client):
+    r = region_momentum_client.get("/api/analytics/region-momentum?hours_back=24")
+    d = r.json()
+    ara = next(row for row in d["rows"] if row["region"] == "ara")
+    # laden=300 out of 500 total -> 60%
+    assert ara["laden_ratio_pct"] == 60.0

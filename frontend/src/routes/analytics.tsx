@@ -30,6 +30,7 @@ const MarketSummaryCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ 
 const VesselRiskLeaderboardCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.VesselRiskLeaderboardCard })))
 const AnomalyWatchlistCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.AnomalyWatchlistCard })))
 const StsProximityCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.StsProximityCard })))
+const RegionMomentumCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.RegionMomentumCard })))
 
 function ChartSkeleton() {
   return <div className="h-[300px] animate-pulse rounded-lg bg-muted/40" />
@@ -49,6 +50,7 @@ function AnalyticsPage() {
 
         <h2 className="text-base font-semibold text-foreground">Market State</h2>
         <Suspense fallback={<ChartSkeleton />}><MarketSummaryCard /></Suspense>
+        <Suspense fallback={<ChartSkeleton />}><RegionMomentumCard /></Suspense>
 
         <h2 className="text-base font-semibold text-foreground">Chokepoint Traffic</h2>
         <Suspense fallback={<ChartSkeleton />}><ChokepointHeatmapCard /></Suspense>

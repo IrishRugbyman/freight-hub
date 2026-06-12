@@ -3,6 +3,7 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
   ComposedChart,
   Legend,
   Line,
@@ -13,7 +14,7 @@ import {
   YAxis,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion, useDestinationFlows, useMarketSummary, useVesselRiskScores, useChokepointHeatmap, useTradeLaneMatrix, useAnomalyWatchlist, useStsProximity } from '@/lib/api'
+import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion, useDestinationFlows, useMarketSummary, useVesselRiskScores, useChokepointHeatmap, useTradeLaneMatrix, useAnomalyWatchlist, useStsProximity, useRegionMomentum } from '@/lib/api'
 import type { RiskEventItem } from '@/lib/api'
 
 const CHOKEPOINTS = [
@@ -2299,6 +2300,110 @@ export function StsProximityCard() {
               </p>
             )}
           </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Phase 36: Region Fleet Momentum
+// ---------------------------------------------------------------------------
+
+const _MOMENTUM_EXTRA_LABELS: Record<string, string> = {
+  panama: 'Panama',
+  dover_channel: 'Dover',
+  cape_good_hope: 'C. Good Hope',
+  bab_el_mandeb: 'Bab el-Mandeb',
+  primorsk_baltic: 'Baltic',
+  bosphorus_dardanelles: 'Bosphorus',
+  us_pacific_nw: 'US Pacific',
+  gibson: 'Gibson',
+}
+
+function regionLabel(r: string) {
+  return { ...REGION_LABELS, ..._MOMENTUM_EXTRA_LABELS }[r] ?? r.replace(/_/g, ' ')
+}
+
+export function RegionMomentumCard() {
+  const [hoursBack, setHoursBack] = useState(24)
+  const { data, isLoading } = useRegionMomentum(hoursBack)
+  const rows = data?.rows ?? []
+
+  const chartData = React.useMemo(
+    () =>
+      rows.slice(0, 12).map(r => ({
+        region: regionLabel(r.region),
+        delta: r.delta,
+        current: r.current_total,
+        laden_pct: r.laden_ratio_pct,
+        fill: r.delta >= 0 ? '#22c55e' : '#ef4444',
+      })),
+    [rows],
+  )
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex flex-wrap items-center justify-between gap-2">
+          <span>Region Fleet Momentum</span>
+          <select
+            className="rounded border border-border bg-background px-2 py-1 text-xs font-normal"
+            value={hoursBack}
+            onChange={e => setHoursBack(Number(e.target.value))}
+          >
+            <option value={12}>vs 12h ago</option>
+            <option value={24}>vs 24h ago</option>
+            <option value={48}>vs 48h ago</option>
+            <option value={72}>vs 72h ago</option>
+          </select>
+        </CardTitle>
+        {data && (
+          <p className="text-xs text-muted-foreground">
+            Net vessel count change per region. Green = fleet building, red = fleet clearing.
+          </p>
+        )}
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="h-64 animate-pulse rounded bg-muted/40" />
+        ) : chartData.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">No density data available.</p>
+        ) : (
+          <>
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart data={chartData} layout="vertical" margin={{ left: 80, right: 30 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" horizontal={false} />
+                <XAxis
+                  type="number"
+                  tick={{ fontSize: 10 }}
+                  tickFormatter={v => (v >= 0 ? `+${v}` : String(v))}
+                  domain={['auto', 'auto']}
+                />
+                <YAxis type="category" dataKey="region" tick={{ fontSize: 10 }} width={78} />
+                <Tooltip
+                  formatter={(v, _name) => {
+                    const n = Number(v)
+                    return [n >= 0 ? `+${n}` : n, `vs ${hoursBack}h ago`]
+                  }}
+                  labelFormatter={label => String(label)}
+                />
+                <Bar dataKey="delta" radius={[0, 3, 3, 0]}>
+                  {chartData.map((entry, i) => (
+                    <Cell key={i} fill={entry.fill} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+            <div className="mt-2 grid grid-cols-2 gap-1 text-xs text-muted-foreground sm:grid-cols-3">
+              {rows.slice(0, 6).map(r => (
+                <div key={r.region} className="flex items-center justify-between rounded bg-muted/20 px-2 py-0.5">
+                  <span>{regionLabel(r.region)}</span>
+                  <span className="tabular-nums">{r.laden_ratio_pct}% laden</span>
+                </div>
+              ))}
+            </div>
+          </>
         )}
       </CardContent>
     </Card>

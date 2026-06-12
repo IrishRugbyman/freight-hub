@@ -1413,3 +1413,29 @@ export function useStsProximity(maxDistM = 2000, maxSog = 3.0) {
     refetchInterval: 60 * 1000,
   })
 }
+
+export interface RegionMomentumRow {
+  region: string
+  current_total: number
+  prev_total: number
+  delta: number
+  laden_count: number
+  ballast_count: number
+  laden_ratio_pct: number
+}
+
+export interface RegionMomentumResponse {
+  as_of: string
+  hours_back: number
+  rows: RegionMomentumRow[]
+}
+
+export function useRegionMomentum(hoursBack = 24) {
+  return useQuery({
+    queryKey: ['region-momentum', hoursBack],
+    queryFn: () =>
+      getJSON<RegionMomentumResponse>(`/api/analytics/region-momentum?hours_back=${hoursBack}`),
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+  })
+}
