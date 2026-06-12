@@ -1,145 +1,145 @@
 import { Suspense, lazy } from 'react'
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, useNavigate } from '@tanstack/react-router'
+import { useMarketSummary, useCrudeOnWater } from '@/lib/api'
+import { Tabs } from '@/components/ui/tabs'
 
-export const Route = createFileRoute('/analytics')({ component: AnalyticsPage })
+// ---------------------------------------------------------------------------
+// Route: typed search param (deep-linkable tab)
+// ---------------------------------------------------------------------------
+const VALID_TABS = ['overview', 'chokepoints', 'ports', 'risk', 'intelligence', 'fleet'] as const
+type TabId = (typeof VALID_TABS)[number]
 
-const ChokepointHeatmapCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.ChokepointHeatmapCard })))
-const TradeLaneMatrixCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.TradeLaneMatrixCard })))
-const TransitsCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.TransitsCard })))
-const CongestionCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.CongestionCard })))
-const LadenCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.LadenCard })))
-const DensityCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.DensityCard })))
-const PortFlowCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.PortFlowCard })))
-const OwnerRiskCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.OwnerRiskCard })))
-const FleetSpeedCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.FleetSpeedCard })))
-const RegionUtilCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.RegionUtilCard })))
-const FlagRiskCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.FlagRiskCard })))
-const SpeedTrendCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.SpeedTrendCard })))
-const StsRiskCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.StsRiskCard })))
-const ReroutesCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.ReroutesCard })))
-const TransitRiskCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.TransitRiskCard })))
-const FleetAgeCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.FleetAgeCard })))
-const AnchorageDwellCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.AnchorageDwellCard })))
-const CargoTransitionsCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.CargoTransitionsCard })))
-const SlowSteamersCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.SlowSteamersCard })))
-const FleetUtilizationCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.FleetUtilizationCard })))
-const RiskEventsCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.RiskEventsCard })))
-const PortCongestionCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.PortCongestionCard })))
-const DestinationFlowCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.DestinationFlowCard })))
-const MarketSummaryCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.MarketSummaryCard })))
-const VesselRiskLeaderboardCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.VesselRiskLeaderboardCard })))
-const AnomalyWatchlistCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.AnomalyWatchlistCard })))
-const StsProximityCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.StsProximityCard })))
-const RegionMomentumCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.RegionMomentumCard })))
-const EventRateTimelineCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.EventRateTimelineCard })))
-const TransitRateTimelineCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.TransitRateTimelineCard })))
-const AnchorageOccupancyCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.AnchorageOccupancyCard })))
-const StsOffendersCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.StsOffendersCard })))
-const FleetAtTimeCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.FleetAtTimeCard })))
-const DestinationChangesCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.DestinationChangesCard })))
-const OwnerIntelligenceCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.OwnerIntelligenceCard })))
-const ChokepointAnomalyCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.ChokepointAnomalyCard })))
-const CargoStateChangesCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.CargoStateChangesCard })))
-const SpeedAnomaliesCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.SpeedAnomaliesCard })))
-const PortArrivalForecastCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.PortArrivalForecastCard })))
-const CrudeOnWaterCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.CrudeOnWaterCard })))
+export const Route = createFileRoute('/analytics')({
+  component: AnalyticsPage,
+  validateSearch: (s: Record<string, unknown>): { tab: TabId } => ({
+    tab: VALID_TABS.includes(s.tab as TabId) ? (s.tab as TabId) : 'overview',
+  }),
+})
 
-function ChartSkeleton() {
-  return <div className="h-[300px] animate-pulse rounded-lg bg-muted/40" />
+// ---------------------------------------------------------------------------
+// Per-tab lazy chunks (6 distinct specifiers = 6 distinct rollup chunks)
+// ---------------------------------------------------------------------------
+const OverviewTab    = lazy(() => import('./analytics/-OverviewCards'))
+const ChokepointsTab = lazy(() => import('./analytics/-ChokepointCards'))
+const PortsCargoTab  = lazy(() => import('./analytics/-PortsCargoCards'))
+const RiskTab        = lazy(() => import('./analytics/-RiskCards'))
+const IntelligenceTab = lazy(() => import('./analytics/-IntelligenceCards'))
+const FleetTab       = lazy(() => import('./analytics/-FleetCards'))
+
+// ---------------------------------------------------------------------------
+// Tab definitions (with card counts as badges)
+// ---------------------------------------------------------------------------
+const TABS = [
+  { id: 'overview'      as const, label: 'Overview',       count: 4  },
+  { id: 'chokepoints'   as const, label: 'Chokepoints',    count: 6  },
+  { id: 'ports'         as const, label: 'Ports & Cargo',  count: 10 },
+  { id: 'risk'          as const, label: 'Risk',           count: 8  },
+  { id: 'intelligence'  as const, label: 'Intelligence',   count: 7  },
+  { id: 'fleet'         as const, label: 'Fleet',          count: 6  },
+]
+
+// ---------------------------------------------------------------------------
+// KPI command-bar (always visible, never unmounts on tab switch)
+// ---------------------------------------------------------------------------
+function KpiBar() {
+  const { data: summary } = useMarketSummary()
+  const { data: crude }   = useCrudeOnWater()
+
+  const kpis = [
+    {
+      label: 'Vessels tracked',
+      value: summary?.total_fleet != null ? summary.total_fleet.toLocaleString() : '-',
+    },
+    {
+      label: 'Laden tankers',
+      value: summary?.total_laden != null ? summary.total_laden.toLocaleString() : '-',
+      cls: 'text-orange-400',
+    },
+    {
+      label: 'MB on water',
+      value: crude?.estimated_mb_on_water != null ? crude.estimated_mb_on_water.toFixed(0) : '-',
+    },
+    {
+      label: 'Transits 24h',
+      value: summary?.transits_24h != null ? summary.transits_24h.toLocaleString() : '-',
+    },
+    {
+      label: 'Reroutes 24h',
+      value: summary?.reroutes_24h != null ? summary.reroutes_24h.toLocaleString() : '-',
+      cls: summary?.reroutes_24h && summary.reroutes_24h > 5 ? 'text-yellow-400' : undefined,
+    },
+    {
+      label: 'STS 24h',
+      value: summary?.sts_24h != null ? summary.sts_24h.toLocaleString() : '-',
+      cls: summary?.sts_24h && summary.sts_24h > 10 ? 'text-orange-400' : undefined,
+    },
+  ]
+
+  return (
+    <div className="border-b border-border bg-muted/30 px-4 py-2">
+      <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-6 gap-y-1">
+        {kpis.map(kpi => (
+          <div key={kpi.label} className="flex items-baseline gap-1.5">
+            <span className={`text-sm font-semibold tabular-nums ${kpi.cls ?? 'text-foreground'}`}>
+              {kpi.value}
+            </span>
+            <span className="text-[11px] text-muted-foreground">{kpi.label}</span>
+          </div>
+        ))}
+        {summary?.as_of && (
+          <span className="ml-auto text-[10px] text-muted-foreground/50">
+            {new Date(summary.as_of).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+          </span>
+        )}
+      </div>
+    </div>
+  )
 }
 
-function AnalyticsPage() {
+// ---------------------------------------------------------------------------
+// Tab skeleton (shown while lazy chunk loads)
+// ---------------------------------------------------------------------------
+function TabSkeleton() {
   return (
-    <div className="overflow-auto p-4">
-      <div className="mx-auto max-w-5xl space-y-6">
-        <div>
-          <h1 className="text-xl font-semibold">Freight Analytics</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Derived signals from accumulated AIS history. Collection started 2026-06-09.
-            Charts fill in as history grows.
-          </p>
-        </div>
+    <div className="space-y-4 p-4">
+      {[300, 240, 200].map(h => (
+        <div key={h} className="animate-pulse rounded-lg bg-muted/40" style={{ height: h }} />
+      ))}
+    </div>
+  )
+}
 
-        <h2 className="text-base font-semibold text-foreground">Market State</h2>
-        <Suspense fallback={<ChartSkeleton />}><MarketSummaryCard /></Suspense>
-        <Suspense fallback={<ChartSkeleton />}><RegionMomentumCard /></Suspense>
-        <Suspense fallback={<ChartSkeleton />}><FleetAtTimeCard /></Suspense>
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
+function AnalyticsPage() {
+  const { tab } = Route.useSearch()
+  const navigate = useNavigate({ from: '/analytics' })
 
-        <h2 className="text-base font-semibold text-foreground">Chokepoint Traffic</h2>
-        <Suspense fallback={<ChartSkeleton />}><ChokepointAnomalyCard /></Suspense>
-        <Suspense fallback={<ChartSkeleton />}><ChokepointHeatmapCard /></Suspense>
-        <Suspense fallback={<ChartSkeleton />}><TransitRateTimelineCard /></Suspense>
-        <div className="grid gap-4 lg:grid-cols-2">
-          <Suspense fallback={<ChartSkeleton />}><TransitsCard /></Suspense>
-          <Suspense fallback={<ChartSkeleton />}><CongestionCard /></Suspense>
-        </div>
+  function setTab(id: TabId) {
+    void navigate({ search: { tab: id }, replace: true })
+  }
 
-        <h2 className="text-base font-semibold text-foreground">Fleet State</h2>
-        <div className="grid gap-4 lg:grid-cols-2">
-          <Suspense fallback={<ChartSkeleton />}><LadenCard /></Suspense>
-          <Suspense fallback={<ChartSkeleton />}><DensityCard /></Suspense>
-        </div>
+  return (
+    <div className="min-h-screen bg-background text-foreground">
+      <KpiBar />
+      <Tabs tabs={TABS} value={tab} onChange={t => setTab(t as TabId)} />
 
-        <h2 className="text-base font-semibold text-foreground">Port Flow</h2>
-        <Suspense fallback={<ChartSkeleton />}><CrudeOnWaterCard /></Suspense>
-        <Suspense fallback={<ChartSkeleton />}><PortArrivalForecastCard /></Suspense>
-        <Suspense fallback={<ChartSkeleton />}><PortFlowCard /></Suspense>
-
-        <h2 className="text-base font-semibold text-foreground">Port Congestion</h2>
-        <Suspense fallback={<ChartSkeleton />}><AnchorageOccupancyCard /></Suspense>
-        <Suspense fallback={<ChartSkeleton />}><PortCongestionCard /></Suspense>
-
-        <h2 className="text-base font-semibold text-foreground">Cargo Flows</h2>
-        <Suspense fallback={<ChartSkeleton />}><TradeLaneMatrixCard /></Suspense>
-        <Suspense fallback={<ChartSkeleton />}><DestinationFlowCard /></Suspense>
-
-        <h2 className="text-base font-semibold text-foreground">Fleet Age &amp; Risk Profile</h2>
-        <Suspense fallback={<ChartSkeleton />}><FleetAgeCard /></Suspense>
-
-        <h2 className="text-base font-semibold text-foreground">Owner &amp; Flag Risk</h2>
-        <Suspense fallback={<ChartSkeleton />}><OwnerIntelligenceCard /></Suspense>
-        <div className="grid gap-4 lg:grid-cols-2">
-          <Suspense fallback={<ChartSkeleton />}><OwnerRiskCard /></Suspense>
-          <Suspense fallback={<ChartSkeleton />}><FlagRiskCard /></Suspense>
-        </div>
-
-        <h2 className="text-base font-semibold text-foreground">Vessel Risk Leaderboard</h2>
-        <Suspense fallback={<ChartSkeleton />}><VesselRiskLeaderboardCard /></Suspense>
-
-        <h2 className="text-base font-semibold text-foreground">Intelligence Alerts</h2>
-        <Suspense fallback={<ChartSkeleton />}><AnomalyWatchlistCard /></Suspense>
-        <Suspense fallback={<ChartSkeleton />}><DestinationChangesCard /></Suspense>
-        <Suspense fallback={<ChartSkeleton />}><StsProximityCard /></Suspense>
-        <Suspense fallback={<ChartSkeleton />}><EventRateTimelineCard /></Suspense>
-        <Suspense fallback={<ChartSkeleton />}><RiskEventsCard /></Suspense>
-
-        <h2 className="text-base font-semibold text-foreground">Event Intelligence</h2>
-        <Suspense fallback={<ChartSkeleton />}><StsOffendersCard /></Suspense>
-        <div className="grid gap-4 lg:grid-cols-2">
-          <Suspense fallback={<ChartSkeleton />}><TransitRiskCard /></Suspense>
-          <Suspense fallback={<ChartSkeleton />}><AnchorageDwellCard /></Suspense>
-        </div>
-        <div className="grid gap-4 lg:grid-cols-2">
-          <Suspense fallback={<ChartSkeleton />}><StsRiskCard /></Suspense>
-          <Suspense fallback={<ChartSkeleton />}><ReroutesCard /></Suspense>
-        </div>
-
-        <h2 className="text-base font-semibold text-foreground">Cargo Intelligence</h2>
-        <Suspense fallback={<ChartSkeleton />}><CargoStateChangesCard /></Suspense>
-        <Suspense fallback={<ChartSkeleton />}><CargoTransitionsCard /></Suspense>
-
-        <h2 className="text-base font-semibold text-foreground">Market Signals</h2>
-        <Suspense fallback={<ChartSkeleton />}><FleetUtilizationCard /></Suspense>
-        <Suspense fallback={<ChartSkeleton />}><SlowSteamersCard /></Suspense>
-
-        <h2 className="text-base font-semibold text-foreground">Fleet Speed &amp; Utilization</h2>
-        <Suspense fallback={<ChartSkeleton />}><SpeedAnomaliesCard /></Suspense>
-        <Suspense fallback={<ChartSkeleton />}><SpeedTrendCard /></Suspense>
-        <div className="grid gap-4 lg:grid-cols-2">
-          <Suspense fallback={<ChartSkeleton />}><FleetSpeedCard /></Suspense>
-          <Suspense fallback={<ChartSkeleton />}><RegionUtilCard /></Suspense>
-        </div>
-      </div>
+      <main
+        id={`tabpanel-${tab}`}
+        role="tabpanel"
+        aria-labelledby={`tab-${tab}`}
+        className="mx-auto max-w-5xl px-4 py-6"
+      >
+        <Suspense fallback={<TabSkeleton />}>
+          {tab === 'overview'     && <OverviewTab />}
+          {tab === 'chokepoints'  && <ChokepointsTab />}
+          {tab === 'ports'        && <PortsCargoTab />}
+          {tab === 'risk'         && <RiskTab />}
+          {tab === 'intelligence' && <IntelligenceTab />}
+          {tab === 'fleet'        && <FleetTab />}
+        </Suspense>
+      </main>
     </div>
   )
 }

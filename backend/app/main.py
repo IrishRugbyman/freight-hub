@@ -129,6 +129,8 @@ from .schemas import (
     CrudeSegmentRow,
     InboundRegionRow,
     CrudeOnWaterResponse,
+    ChokepointStatusRow,
+    ChokepointStatusResponse,
 )
 
 _STATIC = Path(__file__).parent / "static"
@@ -4935,3 +4937,112 @@ def analytics_crude_on_water():
         by_segment=by_segment_rows,
         inbound_regions=inbound_rows,
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 49: Chokepoint Live Status
+# ---------------------------------------------------------------------------
+
+# Ordered chokepoints to show (only major ones with transit tracking)
+_TRACKED_CHOKEPOINTS = [
+    "suez", "hormuz", "singapore_malacca", "dover_channel",
+    "bosphorus_dardanelles", "gibraltar", "cape_good_hope", "panama",
+]
+
+# Forward direction label per chokepoint (for fwd-direction %)
+_FWD_DIRECTIONS = {
+    "suez": "northbound",
+    "hormuz": "eastbound",
+    "singapore_malacca": "eastbound",
+    "dover_channel": "eastbound",
+    "bosphorus_dardanelles": "northbound",
+    "gibraltar": "eastbound",
+    "cape_good_hope": "eastbound",
+    "panama": "northbound",
+}
+
+
+@app.get("/api/analytics/chokepoint-status", response_model=ChokepointStatusResponse)
+def analytics_chokepoint_status():
+    """
+    Live vessel counts and transit statistics per major chokepoint.
+    Combines live_positions (current traffic) with transit_events (historical throughput).
+    """
+    now_dt = datetime.utcnow()
+    cutoff_24h = now_dt - timedelta(hours=24)
+    cutoff_7d = now_dt - timedelta(days=7)
+
+    # 1. Live vessel counts per region from live_positions cache
+    live_df = _live("region IS NOT NULL")
+
+    live_by_region: dict[str, dict] = {}
+    if not live_df.empty:
+        for _, r in live_df.iterrows():
+            region = r.get("region")
+            if region not in _TRACKED_CHOKEPOINTS:
+                continue
+            sog_val = r.get("sog")
+            sog = float(sog_val) if sog_val is not None and not (isinstance(sog_val, float) and pd.isna(sog_val)) else None
+            if region not in live_by_region:
+                live_by_region[region] = {"total": 0, "transiting": 0, "waiting": 0}
+            live_by_region[region]["total"] += 1
+            if sog is not None:
+                if sog > 4.0:
+                    live_by_region[region]["transiting"] += 1
+                elif sog <= 0.5:
+                    live_by_region[region]["waiting"] += 1
+
+    # 2. Transit statistics from analytics DB
+    transit_df = db.query(
+        "SELECT chokepoint, entered_ts, exited_ts, direction "
+        "FROM transit_events WHERE entered_ts >= ? ORDER BY entered_ts",
+        [cutoff_7d],
+        db=db.analytics_db_path(),
+    )
+
+    transit_stats: dict[str, dict] = {}
+    if not transit_df.empty:
+        for _, r in transit_df.iterrows():
+            cp = r.get("chokepoint")
+            if cp not in _TRACKED_CHOKEPOINTS:
+                continue
+            if cp not in transit_stats:
+                transit_stats[cp] = {"n_7d": 0, "n_24h": 0, "hours": [], "n_fwd": 0}
+            transit_stats[cp]["n_7d"] += 1
+            try:
+                ts = pd.Timestamp(r["entered_ts"])
+                if ts >= pd.Timestamp(cutoff_24h):
+                    transit_stats[cp]["n_24h"] += 1
+                if r["exited_ts"] is not None:
+                    dur_h = (pd.Timestamp(r["exited_ts"]) - ts).total_seconds() / 3600
+                    if 0 < dur_h < 200:  # sanity filter
+                        transit_stats[cp]["hours"].append(dur_h)
+            except Exception:
+                pass
+            direction = r.get("direction")
+            fwd_dir = _FWD_DIRECTIONS.get(cp, "")
+            if direction and direction == fwd_dir:
+                transit_stats[cp]["n_fwd"] += 1
+
+    # 3. Build response
+    rows: list[ChokepointStatusRow] = []
+    for cp in _TRACKED_CHOKEPOINTS:
+        live = live_by_region.get(cp, {"total": 0, "transiting": 0, "waiting": 0})
+        stats = transit_stats.get(cp, {"n_7d": 0, "n_24h": 0, "hours": [], "n_fwd": 0})
+
+        avg_h = round(sum(stats["hours"]) / len(stats["hours"]), 1) if stats["hours"] else None
+        n_7d = stats["n_7d"]
+        pct_fwd = round(stats["n_fwd"] / n_7d * 100, 1) if n_7d > 0 else None
+
+        rows.append(ChokepointStatusRow(
+            chokepoint=cp,
+            live_total=live["total"],
+            live_transiting=live["transiting"],
+            live_waiting=live["waiting"],
+            avg_transit_h_7d=avg_h,
+            n_transits_24h=stats["n_24h"],
+            n_transits_7d=n_7d,
+            pct_fwd_direction=pct_fwd,
+        ))
+
+    return ChokepointStatusResponse(as_of=now_dt.isoformat(), rows=rows)

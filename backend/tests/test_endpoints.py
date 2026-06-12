@@ -4253,3 +4253,103 @@ def test_crude_on_water_inbound_regions(crude_client):
     regions = [reg["region"] for reg in d["inbound_regions"]]
     # NL -> Europe, ES -> Europe, IT -> Europe
     assert "Europe" in regions
+
+
+# ---------------------------------------------------------------------------
+# Phase 49: Chokepoint Live Status
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def chokepoint_status_client(tmp_path, monkeypatch):
+    """Fixture: vessels spread across suez + dover_channel regions with varying SOG."""
+    import duckdb
+    from fastapi.testclient import TestClient
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+    ais_file = tmp_path / "ais_cps.duckdb"
+    conn = duckdb.connect(str(ais_file))
+    conn.execute("""
+    CREATE TABLE live_positions (
+        mmsi BIGINT PRIMARY KEY, name VARCHAR, lat DOUBLE, lon DOUBLE,
+        sog DOUBLE, cog DOUBLE, heading DOUBLE, destination VARCHAR,
+        ship_type INTEGER, length_m DOUBLE, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, updated_ts TIMESTAMP,
+        imo BIGINT, draught DOUBLE, nav_status INTEGER, eta VARCHAR
+    );
+    """)
+    conn.executemany("INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [
+        # suez: 2 transiting (sog>4), 3 waiting (sog<=0.5)
+        (7001, "A", 30.0, 33.0, 12.0, 0.0, 0.0, None, 80, 330.0, "tanker", "VLCC", "suez", now, None, 20.0, 0, None),
+        (7002, "B", 30.1, 33.1, 9.0, 0.0, 0.0, None, 80, 250.0, "tanker", "Suezmax", "suez", now, None, 18.0, 0, None),
+        (7003, "C", 29.8, 32.8, 0.1, 0.0, 0.0, None, 80, 330.0, "tanker", "VLCC", "suez", now, None, 5.0, 0, None),
+        (7004, "D", 29.9, 32.9, 0.0, 0.0, 0.0, None, 80, 250.0, "bulk", "Capesize", "suez", now, None, 15.0, 0, None),
+        (7005, "E", 30.2, 33.2, 0.3, 0.0, 0.0, None, 80, 200.0, "bulk", "Supramax", "suez", now, None, 12.0, 0, None),
+        # dover_channel: 1 transiting, 1 slow (not waiting, not transiting)
+        (7006, "F", 50.5, 1.0, 15.0, 90.0, 90.0, None, 70, 200.0, "bulk", "Capesize", "dover_channel", now, None, 10.0, 0, None),
+        (7007, "G", 50.6, 1.1, 2.0, 90.0, 90.0, None, 70, 180.0, "bulk", "Panamax", "dover_channel", now, None, 8.0, 0, None),
+    ])
+    conn.close()
+
+    analytics_file = tmp_path / "analytics_cps.duckdb"
+    ac = duckdb.connect(str(analytics_file))
+    ac.execute("CREATE TABLE vessel_state (mmsi BIGINT PRIMARY KEY, laden VARCHAR, last_draught DOUBLE, max_draught_seen DOUBLE, updated_ts TIMESTAMP)")
+    # transit_events for suez: 3 in last 7d (2 northbound, 1 southbound), 1 in last 24h
+    ago2d = (now - __import__('datetime').timedelta(days=2)).isoformat()
+    ago5d = (now - __import__('datetime').timedelta(days=5)).isoformat()
+    ago1h = (now - __import__('datetime').timedelta(hours=1)).isoformat()
+    ago2h = (now - __import__('datetime').timedelta(hours=2)).isoformat()
+    ac.execute("""CREATE TABLE transit_events (
+        mmsi BIGINT, chokepoint VARCHAR, entered_ts TIMESTAMP, exited_ts TIMESTAMP,
+        direction VARCHAR, kind VARCHAR, segment VARCHAR, laden BOOLEAN
+    )""")
+    ac.executemany("INSERT INTO transit_events VALUES (?,?,?,?,?,?,?,?)", [
+        (7001, "suez", ago5d, ago5d, "northbound", "tanker", "VLCC", True),
+        (7002, "suez", ago2d, ago2d, "northbound", "tanker", "Suezmax", True),
+        (7003, "suez", ago1h, ago2h, "southbound", "tanker", "VLCC", False),
+        (7006, "dover_channel", ago2d, ago2d, "eastbound", "bulk", "Capesize", None),
+    ])
+    ac.close()
+
+    registry_file = tmp_path / "registry_cps.duckdb"
+    rc = duckdb.connect(str(registry_file))
+    rc.execute("CREATE TABLE vessel_registry (imo BIGINT PRIMARY KEY, risk_score INTEGER, fetch_ok BOOLEAN)")
+    rc.close()
+
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
+    monkeypatch.setenv("ANALYTICS_DB", str(analytics_file))
+    monkeypatch.setenv("REGISTRY_DB", str(registry_file))
+    from app.main import app
+    return TestClient(app)
+
+
+def test_chokepoint_status_structure(chokepoint_status_client):
+    r = chokepoint_status_client.get("/api/analytics/chokepoint-status")
+    assert r.status_code == 200
+    d = r.json()
+    assert "rows" in d
+    assert "as_of" in d
+    assert len(d["rows"]) > 0
+
+
+def test_chokepoint_status_suez_counts(chokepoint_status_client):
+    r = chokepoint_status_client.get("/api/analytics/chokepoint-status")
+    d = r.json()
+    suez = next((row for row in d["rows"] if row["chokepoint"] == "suez"), None)
+    assert suez is not None
+    assert suez["live_total"] == 5
+    assert suez["live_transiting"] == 2   # sog > 4
+    assert suez["live_waiting"] == 3      # sog <= 0.5
+
+
+def test_chokepoint_status_transit_counts(chokepoint_status_client):
+    r = chokepoint_status_client.get("/api/analytics/chokepoint-status")
+    d = r.json()
+    suez = next((row for row in d["rows"] if row["chokepoint"] == "suez"), None)
+    assert suez["n_transits_7d"] == 3
+    # 1 in last 24h (ago1h)
+    assert suez["n_transits_24h"] == 1
+    # 2 northbound out of 3 = 66.7%
+    assert suez["pct_fwd_direction"] is not None
+    assert 60 <= suez["pct_fwd_direction"] <= 70

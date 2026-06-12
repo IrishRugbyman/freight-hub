@@ -1844,3 +1844,29 @@ export function useCrudeOnWater() {
     refetchInterval: 5 * 60 * 1000,
   })
 }
+
+// Phase 49: Chokepoint Live Status
+export interface ChokepointStatusRow {
+  chokepoint: string
+  live_total: number
+  live_transiting: number
+  live_waiting: number
+  avg_transit_h_7d: number | null
+  n_transits_24h: number
+  n_transits_7d: number
+  pct_fwd_direction: number | null
+}
+
+export interface ChokepointStatusResponse {
+  as_of: string
+  rows: ChokepointStatusRow[]
+}
+
+export function useChokepointStatus() {
+  return useQuery({
+    queryKey: ['chokepoint-status'],
+    queryFn: () => getJSON<ChokepointStatusResponse>('/api/analytics/chokepoint-status'),
+    staleTime: 2 * 60 * 1000,
+    refetchInterval: 2 * 60 * 1000,
+  })
+}

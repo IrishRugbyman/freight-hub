@@ -1109,3 +1109,21 @@ class CrudeOnWaterResponse(BaseModel):
     estimated_mb_on_water: float  # laden only
     by_segment: list[CrudeSegmentRow]
     inbound_regions: list[InboundRegionRow]  # where laden tankers are heading
+
+
+# Phase 49: Chokepoint Live Status
+class ChokepointStatusRow(BaseModel):
+    chokepoint: str
+    live_total: int
+    live_transiting: int   # SOG > 4 kn
+    live_waiting: int      # SOG <= 0.5 kn
+    avg_transit_h_7d: float | None
+    n_transits_24h: int
+    n_transits_7d: int
+    pct_fwd_direction: float | None  # northbound or eastbound %
+
+
+class ChokepointStatusResponse(BaseModel):
+    as_of: str
+    rows: list[ChokepointStatusRow]
+
