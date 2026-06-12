@@ -2314,3 +2314,76 @@ def test_trade_lane_matrix_kind_filter(trade_lane_client):
     total = sum(c["vessel_count"] for c in d["cells"])
     assert total == 1
     assert d["cells"][0]["dest_region"] == "NW Europe"
+
+
+# ---------------------------------------------------------------------------
+# Phase 33: per-vessel behavioral risk
+# ---------------------------------------------------------------------------
+
+
+def test_vessel_behavioral_risk_structure(risk_leaderboard_client):
+    r = risk_leaderboard_client.get("/api/vessels/9001/behavioral-risk")
+    assert r.status_code == 200
+    d = r.json()
+    for key in ("mmsi", "imo", "sts_count", "reroute_count", "days",
+                "behavioral_score", "registry_risk", "ofac", "total_score",
+                "risk_level", "recent_events"):
+        assert key in d
+
+
+def test_vessel_behavioral_risk_scoring(risk_leaderboard_client):
+    r = risk_leaderboard_client.get("/api/vessels/9001/behavioral-risk")
+    d = r.json()
+    # 9001: sts=3 reroute=2 -> behavioral = min(3*20+2*5, 100) = 70
+    assert d["mmsi"] == 9001
+    assert d["sts_count"] == 3
+    assert d["reroute_count"] == 2
+    assert d["behavioral_score"] == 70
+    # registry_risk=80 -> total = round(70*0.4 + 80*0.6) = 76 >= 75 -> Critical
+    assert d["registry_risk"] == 80
+    assert d["total_score"] == 76
+    assert d["risk_level"] == "Critical"
+    assert d["ofac"] is False
+
+
+def test_vessel_behavioral_risk_ofac(risk_leaderboard_client):
+    r = risk_leaderboard_client.get("/api/vessels/9003/behavioral-risk")
+    d = r.json()
+    assert d["ofac"] is True
+    assert d["registry_risk"] == 60
+    # 9003: sts=1 (as mmsi2 in sts-4) -> behavioral=20, registry=60, ofac=True
+    # total = min(round(20*0.4+60*0.6)+25, 100) = min(44+25, 100) = 69
+    assert d["total_score"] == pytest.approx(69, abs=2)
+    assert d["risk_level"] in ("High", "Elevated")
+
+
+def test_vessel_behavioral_risk_no_events(risk_leaderboard_client):
+    r = risk_leaderboard_client.get("/api/vessels/9004/behavioral-risk")
+    d = r.json()
+    assert d["sts_count"] == 0
+    assert d["reroute_count"] == 0
+    assert d["behavioral_score"] == 0
+    # registry_risk=10 -> total = round(0*0.4+10*0.6) = 6
+    assert d["total_score"] == 6
+    assert d["risk_level"] == "Low"
+
+
+def test_vessel_behavioral_risk_unknown_mmsi(risk_leaderboard_client):
+    r = risk_leaderboard_client.get("/api/vessels/99999/behavioral-risk")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["sts_count"] == 0
+    assert d["reroute_count"] == 0
+    assert d["total_score"] == 0
+    assert d["risk_level"] == "Low"
+
+
+def test_vessel_behavioral_risk_recent_events(risk_leaderboard_client):
+    r = risk_leaderboard_client.get("/api/vessels/9001/behavioral-risk")
+    d = r.json()
+    # 9001 has 2 reroutes and 3 STS events = 5 total, limited to 5
+    assert len(d["recent_events"]) <= 5
+    for ev in d["recent_events"]:
+        assert "type" in ev
+        assert "ts" in ev
+        assert ev["type"] in ("sts", "reroute")

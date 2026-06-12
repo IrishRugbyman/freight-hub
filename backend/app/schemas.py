@@ -706,6 +706,23 @@ class PortCongestionResponse(BaseModel):
     rows: list[PortCongestionRow]
 
 
+# ---- Phase 33: Per-vessel behavioral risk ----
+
+
+class VesselBehavioralRisk(BaseModel):
+    mmsi: int
+    imo: int | None
+    sts_count: int        # STS events (either party) in last days
+    reroute_count: int    # reroute events in last days
+    days: int
+    behavioral_score: int   # 0-100 from events alone
+    registry_risk: int | None
+    ofac: bool
+    total_score: int        # 0-100 composite
+    risk_level: str         # "Low" | "Elevated" | "High" | "Critical"
+    recent_events: list[dict]  # last 5 sts/reroute events as minimal dicts
+
+
 # ---- Phase 32: Trade Lane Risk Matrix ----
 
 

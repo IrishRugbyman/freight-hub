@@ -72,6 +72,7 @@ from .schemas import (
     ChokepointHeatmapResponse,
     TradeLaneCell,
     TradeLaneMatrixResponse,
+    VesselBehavioralRisk,
     PortCongestionRow,
     PortCongestionResponse,
     VesselRiskRow,
@@ -435,6 +436,114 @@ def vessel_voyages(mmsi: int, days: int = 14):
     # Sort all events chronologically
     events.sort(key=lambda e: e.ts)
     return VoyagesResponse(mmsi=mmsi, events=events)
+
+
+@app.get("/api/vessels/{mmsi}/behavioral-risk", response_model=VesselBehavioralRisk)
+def vessel_behavioral_risk(mmsi: int, days: int = 30):
+    """Behavioral risk assessment for a single vessel.
+
+    Counts STS and reroute events over the last N days, combines with Equasis registry
+    risk score (if the vessel has an IMO in the registry), and returns a composite score.
+
+    Scoring mirrors the fleet leaderboard in /api/analytics/vessel-risk-scores:
+      behavioral_score = min(sts_count * 20 + reroute_count * 5, 100)
+      total_score = round(behavioral * 0.4 + registry * 0.6) [if registry present]
+                  = behavioral                               [if no registry data]
+      + 25 if OFAC sanctioned, capped at 100
+    """
+    days = max(1, min(90, days))
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
+    _adb = db.analytics_db_path()
+
+    # STS count (as either party)
+    sts_df = db.query(
+        "SELECT COUNT(*) AS cnt FROM ais_events "
+        "WHERE type = 'sts' AND (mmsi = ? OR mmsi2 = ?) AND start_ts >= ?",
+        [mmsi, mmsi, cutoff],
+        db=_adb,
+    )
+    sts_count = int(sts_df.iloc[0]["cnt"]) if not sts_df.empty else 0
+
+    # Reroute count
+    rr_df = db.query(
+        "SELECT COUNT(*) AS cnt FROM ais_events "
+        "WHERE type = 'reroute' AND mmsi = ? AND start_ts >= ?",
+        [mmsi, cutoff],
+        db=_adb,
+    )
+    reroute_count = int(rr_df.iloc[0]["cnt"]) if not rr_df.empty else 0
+
+    # Recent events (last 5 STS + reroute)
+    ev_df = db.query(
+        "SELECT type, start_ts, lat, lon, details FROM ais_events "
+        "WHERE (mmsi = ? OR mmsi2 = ?) AND type IN ('sts', 'reroute') AND start_ts >= ? "
+        "ORDER BY start_ts DESC LIMIT 5",
+        [mmsi, mmsi, cutoff],
+        db=_adb,
+    )
+    recent_events: list[dict] = []
+    if not ev_df.empty:
+        for _, r in ev_df.iterrows():
+            try:
+                d = _json.loads(r["details"]) if r["details"] else {}
+            except (ValueError, TypeError):
+                d = {}
+            recent_events.append({
+                "type": str(r["type"]),
+                "ts": _iso(r["start_ts"]) or "",
+                "lat": round(float(r["lat"]), 4) if r["lat"] is not None and not pd.isna(r["lat"]) else None,
+                "lon": round(float(r["lon"]), 4) if r["lon"] is not None and not pd.isna(r["lon"]) else None,
+                **{k: v for k, v in d.items() if k in ("old_destination", "new_destination")},
+            })
+
+    # Look up IMO from live_positions to query registry
+    lp_df = db.query("SELECT imo FROM live_positions WHERE mmsi = ?", [mmsi])
+    imo = _valid_imo(lp_df.iloc[0].get("imo")) if not lp_df.empty else None
+
+    reg_risk: int | None = None
+    ofac = False
+    if imo:
+        reg_df = db.query(
+            "SELECT risk_score, ofac_sanctioned FROM vessel_registry "
+            "WHERE imo = ? AND fetch_ok = true",
+            [imo],
+            db=db.registry_db_path(),
+        )
+        if not reg_df.empty:
+            rs = reg_df.iloc[0].get("risk_score")
+            of = reg_df.iloc[0].get("ofac_sanctioned")
+            reg_risk = int(rs) if rs is not None and not pd.isna(rs) else None
+            ofac = bool(of) if of is not None and not pd.isna(of) else False
+
+    behavioral = min(sts_count * 20 + reroute_count * 5, 100)
+    if reg_risk is not None:
+        base = round(behavioral * 0.4 + reg_risk * 0.6)
+    else:
+        base = behavioral
+    total = min(base + (25 if ofac else 0), 100)
+
+    if total >= 75:
+        risk_level = "Critical"
+    elif total >= 50:
+        risk_level = "High"
+    elif total >= 25:
+        risk_level = "Elevated"
+    else:
+        risk_level = "Low"
+
+    return VesselBehavioralRisk(
+        mmsi=mmsi,
+        imo=imo,
+        sts_count=sts_count,
+        reroute_count=reroute_count,
+        days=days,
+        behavioral_score=behavioral,
+        registry_risk=reg_risk,
+        ofac=ofac,
+        total_score=total,
+        risk_level=risk_level,
+        recent_events=recent_events,
+    )
 
 
 @app.get("/api/analytics/ports", response_model=PortFlowResponse)

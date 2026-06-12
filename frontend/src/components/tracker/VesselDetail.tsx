@@ -1,5 +1,5 @@
-import { X, Anchor, Navigation, ArrowLeftRight, TrendingUp, TrendingDown, Ship } from 'lucide-react'
-import { useEquasis, useVesselState, useVoyages } from '@/lib/api'
+import { X, Anchor, Navigation, ArrowLeftRight, TrendingUp, TrendingDown, Ship, AlertTriangle } from 'lucide-react'
+import { useEquasis, useVesselState, useVoyages, useVesselBehavioralRisk } from '@/lib/api'
 import type { Vessel, VoyageEvent } from '@/lib/api'
 import { colorFor } from '@/lib/segments'
 
@@ -180,6 +180,7 @@ export function VesselDetail({
   const { data: eq, isLoading: eqLoading } = useEquasis(vessel.imo)
   const { data: vesselState } = useVesselState(vessel.mmsi)
   const { data: voyages } = useVoyages(vessel.mmsi, 14)
+  const { data: behavioralRisk } = useVesselBehavioralRisk(vessel.mmsi)
 
   return (
     <div className="w-64">
@@ -260,6 +261,54 @@ export function VesselDetail({
             {voyages.events.slice(-8).map((ev, i) => (
               <VoyageEventRow key={i} ev={ev} />
             ))}
+          </div>
+        </Section>
+      )}
+
+      {/* Behavioral risk */}
+      {behavioralRisk && (behavioralRisk.total_score > 0 || behavioralRisk.sts_count > 0 || behavioralRisk.reroute_count > 0) && (
+        <Section>
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1 flex items-center gap-1.5">
+            <AlertTriangle size={9} className={
+              behavioralRisk.risk_level === 'Critical' ? 'text-red-400' :
+              behavioralRisk.risk_level === 'High' ? 'text-orange-400' :
+              behavioralRisk.risk_level === 'Elevated' ? 'text-yellow-400' :
+              'text-muted-foreground'
+            } />
+            <span>Behavioral Risk</span>
+            <span className={`ml-auto text-[9px] font-semibold rounded px-1 py-px ${
+              behavioralRisk.risk_level === 'Critical' ? 'bg-red-500/20 text-red-400' :
+              behavioralRisk.risk_level === 'High' ? 'bg-orange-500/20 text-orange-400' :
+              behavioralRisk.risk_level === 'Elevated' ? 'bg-yellow-500/20 text-yellow-400' :
+              'bg-muted text-muted-foreground'
+            }`}>
+              {behavioralRisk.risk_level}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <div className="h-1 flex-1 rounded-full bg-muted/60 overflow-hidden">
+              <div
+                className={`h-full rounded-full ${
+                  behavioralRisk.total_score >= 75 ? 'bg-red-500' :
+                  behavioralRisk.total_score >= 50 ? 'bg-orange-500' :
+                  behavioralRisk.total_score >= 25 ? 'bg-yellow-500' :
+                  'bg-green-500/60'
+                }`}
+                style={{ width: `${behavioralRisk.total_score}%` }}
+              />
+            </div>
+            <span className="text-[10px] font-mono tabular-nums text-muted-foreground w-7 text-right">
+              {behavioralRisk.total_score}/100
+            </span>
+          </div>
+          <div className="flex gap-3 text-[10px]">
+            <span className="text-muted-foreground">
+              STS <span className={behavioralRisk.sts_count > 0 ? 'text-orange-400 font-medium' : ''}>{behavioralRisk.sts_count}</span>
+            </span>
+            <span className="text-muted-foreground">
+              Reroutes <span className={behavioralRisk.reroute_count > 0 ? 'text-yellow-400 font-medium' : ''}>{behavioralRisk.reroute_count}</span>
+            </span>
+            <span className="text-muted-foreground">{behavioralRisk.days}d window</span>
           </div>
         </Section>
       )}

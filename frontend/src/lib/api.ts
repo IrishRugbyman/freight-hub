@@ -1299,3 +1299,36 @@ export function useTradeLaneMatrix(kind = '', ladenOnly = true) {
     refetchInterval: REFETCH_MS,
   })
 }
+
+export interface RecentEvent {
+  type: string
+  ts: string
+  lat: number | null
+  lon: number | null
+  old_destination?: string
+  new_destination?: string
+}
+
+export interface VesselBehavioralRisk {
+  mmsi: number
+  imo: number | null
+  sts_count: number
+  reroute_count: number
+  days: number
+  behavioral_score: number
+  registry_risk: number | null
+  ofac: boolean
+  total_score: number
+  risk_level: 'Low' | 'Elevated' | 'High' | 'Critical'
+  recent_events: RecentEvent[]
+}
+
+export function useVesselBehavioralRisk(mmsi: number | null | undefined, days = 30) {
+  return useQuery({
+    queryKey: ['vessel-behavioral-risk', mmsi, days],
+    queryFn: () => getJSON<VesselBehavioralRisk>(`/api/vessels/${mmsi}/behavioral-risk?days=${days}`),
+    enabled: mmsi != null,
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+  })
+}
