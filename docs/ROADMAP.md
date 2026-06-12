@@ -628,30 +628,6 @@ Deliberately Not Building).
 
 ---
 
-## Phase 49 - SOTA tabbed analytics layout - Completed: 2026-06-12, commit 40d506b
-
-Restructured the analytics page from an endless scroll of 41 cards into a
-production-grade 6-tab layout (Overview / Chokepoints / Ports & Cargo / Risk /
-Intelligence / Fleet).
-
-### Changes
-
-- Deleted 3,624-line `AnalyticsCharts.tsx` monolith.
-- 6 per-tab lazy chunks: each tab fetches only its own bundle on first open.
-  Build output confirms 6 distinct rollup chunks + shared analyticsShared chunk.
-- Sticky KPI command-bar above tabs (always visible): total vessels, laden tankers,
-  MB on water, transits/reroutes/STS 24h from live API calls.
-- Accessible `Tabs` primitive: `role="tablist"`, roving tabindex, Arrow/Home/End
-  keyboard nav, aria-selected/controls/labelledby.
-- Tab state in URL search param (?tab=) - deep-links, back/forward, reload work.
-  Invalid values fall back to overview.
-- New `ChokepointStatusCard` (Chokepoints tab): live transiting vs waiting counts
-  per chokepoint, backed by `/api/analytics/chokepoint-status` (Phase 49 backend).
-- Backend: chokepoint-status endpoint + Pydantic schema + 3 pytest tests.
-  311 tests passing.
-
----
-
 ## Backlog ideas (not yet phased)
 
 Captured for later; promote to a phase only with a written plan:
