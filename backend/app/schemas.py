@@ -706,6 +706,25 @@ class PortCongestionResponse(BaseModel):
     rows: list[PortCongestionRow]
 
 
+# ---- Phase 31: Chokepoint Traffic Heatmap ----
+
+
+class ChokepointHeatmapCell(BaseModel):
+    date: str          # YYYY-MM-DD
+    chokepoint: str
+    total: int
+    tanker: int
+    bulk: int
+
+
+class ChokepointHeatmapResponse(BaseModel):
+    as_of: str
+    days: int
+    kind: str          # "" | "tanker" | "bulk"
+    chokepoints: list[str]  # ordered by overall total desc
+    cells: list[ChokepointHeatmapCell]
+
+
 # ---- Phase 30: Vessel Behavioral Risk Leaderboard ----
 
 

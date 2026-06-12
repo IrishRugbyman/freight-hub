@@ -1206,6 +1206,34 @@ export function usePortCongestion(kind = '', days = 14) {
 }
 
 
+export interface ChokepointHeatmapCell {
+  date: string
+  chokepoint: string
+  total: number
+  tanker: number
+  bulk: number
+}
+
+export interface ChokepointHeatmapResponse {
+  as_of: string
+  days: number
+  kind: string
+  chokepoints: string[]
+  cells: ChokepointHeatmapCell[]
+}
+
+export function useChokepointHeatmap(days = 30, kind = '') {
+  return useQuery({
+    queryKey: ['chokepoint-heatmap', days, kind],
+    queryFn: () =>
+      getJSON<ChokepointHeatmapResponse>(
+        `/api/analytics/chokepoint-heatmap?days=${days}&kind=${kind}`
+      ),
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+  })
+}
+
 export interface VesselRiskRow {
   mmsi: number
   imo: number | null

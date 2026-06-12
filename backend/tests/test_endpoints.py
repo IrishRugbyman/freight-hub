@@ -2029,3 +2029,102 @@ def test_vessel_risk_scores_kind_filter(risk_leaderboard_client):
     d = r.json()
     for row in d["rows"]:
         assert row["kind"] == "bulk"
+
+
+# ---------------------------------------------------------------------------
+# Phase 31: chokepoint traffic heatmap
+# ---------------------------------------------------------------------------
+
+
+def test_chokepoint_heatmap_structure(analytics_client):
+    r = analytics_client.get("/api/analytics/chokepoint-heatmap?days=30")
+    assert r.status_code == 200
+    d = r.json()
+    for key in ("as_of", "days", "kind", "chokepoints", "cells"):
+        assert key in d
+    assert d["days"] == 30
+    assert d["kind"] == ""
+    if d["cells"]:
+        cell = d["cells"][0]
+        for field in ("date", "chokepoint", "total", "tanker", "bulk"):
+            assert field in cell
+
+
+def test_chokepoint_heatmap_has_data(analytics_client):
+    r = analytics_client.get("/api/analytics/chokepoint-heatmap?days=30")
+    d = r.json()
+    assert len(d["cells"]) >= 1
+    assert "hormuz" in d["chokepoints"]
+    assert "singapore_malacca" in d["chokepoints"]
+
+
+def test_chokepoint_heatmap_kind_filter(analytics_client):
+    # tanker filter: only the hormuz VLCC transit (kind=tanker) should appear
+    r = analytics_client.get("/api/analytics/chokepoint-heatmap?days=30&kind=tanker")
+    d = r.json()
+    assert d["kind"] == "tanker"
+    # All returned cells must have tanker > 0 (bulk should be 0 for tanker-filtered results)
+    for cell in d["cells"]:
+        assert cell["bulk"] == 0
+
+
+def test_chokepoint_heatmap_totals_consistent(analytics_client):
+    r = analytics_client.get("/api/analytics/chokepoint-heatmap?days=30")
+    d = r.json()
+    for cell in d["cells"]:
+        assert cell["total"] == cell["tanker"] + cell["bulk"]
+
+
+def test_chokepoint_heatmap_chokepoints_ordered_by_traffic(analytics_client):
+    r = analytics_client.get("/api/analytics/chokepoint-heatmap?days=30")
+    d = r.json()
+    # Compute per-chokepoint totals from cells
+    from collections import defaultdict
+    cp_totals: dict[str, int] = defaultdict(int)
+    for cell in d["cells"]:
+        cp_totals[cell["chokepoint"]] += cell["total"]
+    ordered = d["chokepoints"]
+    if len(ordered) >= 2:
+        # First chokepoint must have >= total of second
+        assert cp_totals[ordered[0]] >= cp_totals[ordered[1]]
+
+
+def test_chokepoint_heatmap_no_data_returns_empty(tmp_path, monkeypatch):
+    """Analytics DB with no transit_events returns empty payload gracefully."""
+    import duckdb
+    from fastapi.testclient import TestClient
+
+    an_file = tmp_path / "empty_analytics.duckdb"
+    an_conn = duckdb.connect(str(an_file))
+    an_conn.execute(
+        "CREATE TABLE transit_events ("
+        "  mmsi BIGINT, chokepoint VARCHAR, entered_ts TIMESTAMP, exited_ts TIMESTAMP,"
+        "  direction VARCHAR, kind VARCHAR, segment VARCHAR, laden BOOLEAN,"
+        "  PRIMARY KEY (mmsi, chokepoint, entered_ts)"
+        ")"
+    )
+    an_conn.close()
+    ais_file = tmp_path / "ais.duckdb"
+    ais_conn = duckdb.connect(str(ais_file))
+    ais_conn.execute(
+        "CREATE TABLE live_positions (mmsi BIGINT PRIMARY KEY, name VARCHAR, lat DOUBLE,"
+        " lon DOUBLE, sog DOUBLE, cog DOUBLE, heading DOUBLE, destination VARCHAR,"
+        " ship_type INTEGER, length_m DOUBLE, kind VARCHAR, segment VARCHAR,"
+        " region VARCHAR, updated_ts TIMESTAMP, imo BIGINT, draught DOUBLE,"
+        " nav_status INTEGER, eta VARCHAR)"
+    )
+    ais_conn.execute(
+        "CREATE TABLE ais_snapshots (snapshot_ts TIMESTAMP, mmsi BIGINT, kind VARCHAR,"
+        " segment VARCHAR, region VARCHAR, lat DOUBLE, lon DOUBLE, ship_type INTEGER,"
+        " length_m DOUBLE, sog DOUBLE, nav_status INTEGER, draught DOUBLE,"
+        " destination VARCHAR, PRIMARY KEY (snapshot_ts, mmsi))"
+    )
+    ais_conn.close()
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
+    monkeypatch.setenv("ANALYTICS_DB", str(an_file))
+    from app.main import app
+    r = TestClient(app).get("/api/analytics/chokepoint-heatmap?days=7")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["cells"] == []
+    assert d["chokepoints"] == []

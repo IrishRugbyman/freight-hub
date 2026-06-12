@@ -13,7 +13,7 @@ import {
   YAxis,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion, useDestinationFlows, useMarketSummary, useVesselRiskScores } from '@/lib/api'
+import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion, useDestinationFlows, useMarketSummary, useVesselRiskScores, useChokepointHeatmap } from '@/lib/api'
 import type { RiskEventItem } from '@/lib/api'
 
 const CHOKEPOINTS = [
@@ -1838,6 +1838,125 @@ export function VesselRiskLeaderboardCard() {
               </tbody>
             </table>
           </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Phase 31: Chokepoint Traffic Heatmap (multi-line daily trend)
+// ---------------------------------------------------------------------------
+
+const CP_COLORS: Record<string, string> = {
+  dover_channel: '#60a5fa',
+  singapore_malacca: '#34d399',
+  cape_good_hope: '#f59e0b',
+  suez: '#a78bfa',
+  hormuz: '#f87171',
+  bosphorus_dardanelles: '#fb923c',
+  gibraltar: '#38bdf8',
+  malacca: '#4ade80',
+}
+
+function cpLabel(cp: string) {
+  return cp.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
+export function ChokepointHeatmapCard() {
+  const [days, setDays] = useState(30)
+  const [kindFilter, setKindFilter] = useState('')
+  const { data, isLoading } = useChokepointHeatmap(days, kindFilter)
+
+  // Pivot cells into [{date, cp1: count, cp2: count, ...}] for recharts
+  const chartData = React.useMemo(() => {
+    if (!data?.cells.length) return []
+    const byDate = new Map<string, Record<string, number | string>>()
+    for (const cell of data.cells) {
+      if (!byDate.has(cell.date)) byDate.set(cell.date, { date: cell.date })
+      byDate.get(cell.date)![cell.chokepoint] = cell.total
+    }
+    return Array.from(byDate.values()).sort((a, b) => String(a.date) < String(b.date) ? -1 : 1)
+  }, [data])
+
+  const chokepoints = data?.chokepoints ?? []
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex flex-wrap items-center justify-between gap-2">
+          <span>Chokepoint Traffic Trend</span>
+          <div className="flex flex-wrap gap-2 text-sm font-normal">
+            <select
+              className="rounded border border-border bg-background px-2 py-1 text-xs"
+              value={kindFilter}
+              onChange={e => setKindFilter(e.target.value)}
+            >
+              <option value="">All types</option>
+              <option value="tanker">Tankers</option>
+              <option value="bulk">Bulkers</option>
+            </select>
+            <select
+              className="rounded border border-border bg-background px-2 py-1 text-xs"
+              value={days}
+              onChange={e => setDays(Number(e.target.value))}
+            >
+              <option value={7}>7d</option>
+              <option value={14}>14d</option>
+              <option value={30}>30d</option>
+              <option value={60}>60d</option>
+            </select>
+          </div>
+        </CardTitle>
+        {data && (
+          <p className="text-xs text-muted-foreground">
+            Daily vessel transits per chokepoint. Ordered highest to lowest traffic.
+          </p>
+        )}
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="h-64 animate-pulse rounded bg-muted/40" />
+        ) : chartData.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">
+            No transit data yet.
+          </p>
+        ) : (
+          <ResponsiveContainer width="100%" height={280}>
+            <LineChart data={chartData} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+              <XAxis
+                dataKey="date"
+                tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }}
+                tickFormatter={d => d.slice(5)}
+                interval="preserveStartEnd"
+              />
+              <YAxis
+                tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }}
+                width={32}
+              />
+              <Tooltip
+                contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', fontSize: 12 }}
+                formatter={(v, name) => [v, cpLabel(String(name))]}
+                labelFormatter={l => `Date: ${l}`}
+              />
+              <Legend
+                formatter={cpLabel}
+                wrapperStyle={{ fontSize: 11 }}
+              />
+              {chokepoints.map(cp => (
+                <Line
+                  key={cp}
+                  type="monotone"
+                  dataKey={cp}
+                  stroke={CP_COLORS[cp] ?? '#94a3b8'}
+                  strokeWidth={1.5}
+                  dot={false}
+                  connectNulls
+                />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
         )}
       </CardContent>
     </Card>

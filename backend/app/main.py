@@ -68,6 +68,8 @@ from .schemas import (
     MarketSummaryResponse,
     RiskEventItem,
     RiskEventsResponse,
+    ChokepointHeatmapCell,
+    ChokepointHeatmapResponse,
     PortCongestionRow,
     PortCongestionResponse,
     VesselRiskRow,
@@ -2504,6 +2506,81 @@ def analytics_port_congestion(kind: str = "", days: int = 14):
         as_of=_iso(now_ts) or "",
         days_baseline=days,
         rows=rows_out,
+    )
+
+
+@app.get("/api/analytics/chokepoint-heatmap", response_model=ChokepointHeatmapResponse)
+def analytics_chokepoint_heatmap(
+    days: int = 30,
+    kind: str | None = None,
+):
+    """Daily transit counts per chokepoint for the last N days.
+
+    Returns a flat list of (date, chokepoint, total, tanker, bulk) cells suitable
+    for rendering as a heatmap or multi-line trend chart.
+    """
+    days = max(1, min(90, days))
+    now_ts = datetime.now(UTC).replace(tzinfo=None)
+    cutoff = now_ts - timedelta(days=days)
+
+    where_clauses = ["entered_ts >= ?"]
+    params: list = [cutoff]
+    if kind:
+        where_clauses.append("kind = ?")
+        params.append(kind)
+
+    sql = (
+        "SELECT strftime(entered_ts, '%Y-%m-%d') AS dt, chokepoint, kind, COUNT(*) AS cnt "
+        "FROM transit_events "
+        "WHERE " + " AND ".join(where_clauses) +
+        " GROUP BY 1, 2, 3 ORDER BY 1, 2, 3"
+    )
+    df = db.query(sql, params, db=db.analytics_db_path())
+
+    if df.empty:
+        return ChokepointHeatmapResponse(
+            as_of=_iso(now_ts) or "",
+            days=days,
+            kind=kind or "",
+            chokepoints=[],
+            cells=[],
+        )
+
+    # Pivot into (date, chokepoint) -> {tanker, bulk}
+    from collections import defaultdict
+    cell_map: dict[tuple[str, str], dict[str, int]] = defaultdict(lambda: {"tanker": 0, "bulk": 0})
+    cp_totals: dict[str, int] = defaultdict(int)
+
+    for _, r in df.iterrows():
+        dt = str(r["dt"])
+        cp = str(r["chokepoint"])
+        k = str(r["kind"]) if r.get("kind") else "other"
+        cnt = int(r["cnt"])
+        key = (dt, cp)
+        if k == "tanker":
+            cell_map[key]["tanker"] += cnt
+        elif k == "bulk":
+            cell_map[key]["bulk"] += cnt
+        cp_totals[cp] += cnt
+
+    chokepoints_ordered = sorted(cp_totals, key=lambda cp: -cp_totals[cp])
+
+    cells: list[ChokepointHeatmapCell] = []
+    for (dt, cp), counts in sorted(cell_map.items()):
+        cells.append(ChokepointHeatmapCell(
+            date=dt,
+            chokepoint=cp,
+            total=counts["tanker"] + counts["bulk"],
+            tanker=counts["tanker"],
+            bulk=counts["bulk"],
+        ))
+
+    return ChokepointHeatmapResponse(
+        as_of=_iso(now_ts) or "",
+        days=days,
+        kind=kind or "",
+        chokepoints=chokepoints_ordered,
+        cells=cells,
     )
 
 
