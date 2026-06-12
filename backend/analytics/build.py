@@ -241,6 +241,26 @@ def run(reset: bool = False) -> None:
         raise
 
 
+_AIS_EVENT_SQL = (
+    "INSERT OR REPLACE INTO ais_events "
+    "(event_id, type, mmsi, mmsi2, start_ts, end_ts, lat, lon, "
+    " region, kind, segment, details) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+)
+
+
+def _insert_events(conn: duckdb.DuckDBPyConnection, events: list[dict]) -> None:
+    if not events:
+        return
+    rows = [
+        [e["event_id"], e["type"], e["mmsi"], e["mmsi2"],
+         e["start_ts"], e["end_ts"], e["lat"], e["lon"],
+         e["region"], e["kind"], e["segment"], e["details"]]
+        for e in events
+    ]
+    conn.executemany(_AIS_EVENT_SQL, rows)
+
+
 def _run_inner(conn: duckdb.DuckDBPyConnection, reset: bool) -> None:
 
     if reset:
@@ -383,18 +403,7 @@ def _run_inner(conn: duckdb.DuckDBPyConnection, reset: bool) -> None:
     except Exception as exc:
         log.warning("destination change detection failed, skipping: %s", exc, exc_info=True)
         reroutes = []
-    for e in reroutes:
-        conn.execute(
-            "INSERT OR REPLACE INTO ais_events "
-            "(event_id, type, mmsi, mmsi2, start_ts, end_ts, lat, lon, "
-            " region, kind, segment, details) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            [
-                e["event_id"], e["type"], e["mmsi"], e["mmsi2"],
-                e["start_ts"], e["end_ts"], e["lat"], e["lon"],
-                e["region"], e["kind"], e["segment"], e["details"],
-            ],
-        )
+    _insert_events(conn, reroutes)
 
     # ------------------------------------------------------------------
     # 6. Intelligence events (gaps, loitering, STS) - 48h lookback
@@ -452,18 +461,7 @@ def _run_inner(conn: duckdb.DuckDBPyConnection, reset: bool) -> None:
                                 "UPDATE ais_events SET end_ts = ?, details = ? WHERE event_id = ?",
                                 [refix["snapshot_ts"], _json.dumps(details), event_id_existing],
                             )
-            for e in gaps:
-                conn.execute(
-                    "INSERT OR REPLACE INTO ais_events "
-                    "(event_id, type, mmsi, mmsi2, start_ts, end_ts, lat, lon, "
-                    " region, kind, segment, details) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    [
-                        e["event_id"], e["type"], e["mmsi"], e["mmsi2"],
-                        e["start_ts"], e["end_ts"], e["lat"], e["lon"],
-                        e["region"], e["kind"], e["segment"], e["details"],
-                    ],
-                )
+            _insert_events(conn, gaps)
 
         # 5b. Loitering
         try:
@@ -472,18 +470,7 @@ def _run_inner(conn: duckdb.DuckDBPyConnection, reset: bool) -> None:
         except Exception as exc:
             log.warning("loitering detection failed, skipping: %s", exc, exc_info=True)
             loiters = []
-        for e in loiters:
-            conn.execute(
-                "INSERT OR REPLACE INTO ais_events "
-                "(event_id, type, mmsi, mmsi2, start_ts, end_ts, lat, lon, "
-                " region, kind, segment, details) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                [
-                    e["event_id"], e["type"], e["mmsi"], e["mmsi2"],
-                    e["start_ts"], e["end_ts"], e["lat"], e["lon"],
-                    e["region"], e["kind"], e["segment"], e["details"],
-                ],
-            )
+        _insert_events(conn, loiters)
 
         # 5c. STS candidates
         try:
@@ -492,18 +479,7 @@ def _run_inner(conn: duckdb.DuckDBPyConnection, reset: bool) -> None:
         except Exception as exc:
             log.warning("STS detection failed, skipping: %s", exc, exc_info=True)
             sts = []
-        for e in sts:
-            conn.execute(
-                "INSERT OR REPLACE INTO ais_events "
-                "(event_id, type, mmsi, mmsi2, start_ts, end_ts, lat, lon, "
-                " region, kind, segment, details) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                [
-                    e["event_id"], e["type"], e["mmsi"], e["mmsi2"],
-                    e["start_ts"], e["end_ts"], e["lat"], e["lon"],
-                    e["region"], e["kind"], e["segment"], e["details"],
-                ],
-            )
+        _insert_events(conn, sts)
 
         # 5d. GPS spoofing / position jump anomalies
         try:
@@ -512,18 +488,7 @@ def _run_inner(conn: duckdb.DuckDBPyConnection, reset: bool) -> None:
         except Exception as exc:
             log.warning("GPS spoof detection failed, skipping: %s", exc, exc_info=True)
             spoof_events = []
-        for e in spoof_events:
-            conn.execute(
-                "INSERT OR REPLACE INTO ais_events "
-                "(event_id, type, mmsi, mmsi2, start_ts, end_ts, lat, lon, "
-                " region, kind, segment, details) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                [
-                    e["event_id"], e["type"], e["mmsi"], e["mmsi2"],
-                    e["start_ts"], e["end_ts"], e["lat"], e["lon"],
-                    e["region"], e["kind"], e["segment"], e["details"],
-                ],
-            )
+        _insert_events(conn, spoof_events)
 
     # ------------------------------------------------------------------
     # 7. Dark voyage composite detection (operates on ais_events, not raw snapshots)
@@ -538,18 +503,7 @@ def _run_inner(conn: duckdb.DuckDBPyConnection, reset: bool) -> None:
     except Exception as exc:
         log.warning("dark voyage detection failed, skipping: %s", exc, exc_info=True)
         dark_voyages = []
-    for e in dark_voyages:
-        conn.execute(
-            "INSERT OR REPLACE INTO ais_events "
-            "(event_id, type, mmsi, mmsi2, start_ts, end_ts, lat, lon, "
-            " region, kind, segment, details) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            [
-                e["event_id"], e["type"], e["mmsi"], e["mmsi2"],
-                e["start_ts"], e["end_ts"], e["lat"], e["lon"],
-                e["region"], e["kind"], e["segment"], e["details"],
-            ],
-        )
+    _insert_events(conn, dark_voyages)
 
     # ------------------------------------------------------------------
     # 8. Advance watermark and promote scratch to live
