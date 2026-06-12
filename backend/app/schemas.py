@@ -1032,3 +1032,28 @@ class CargoStateChangesResponse(BaseModel):
     days: int
     total_events: int
     rows: list[CargoStateChangeRow]
+
+
+class SpeedAnomalyRow(BaseModel):
+    mmsi: int
+    imo: int | None
+    name: str | None
+    kind: str | None
+    segment: str | None
+    region: str | None
+    lat: float | None
+    lon: float | None
+    sog: float
+    segment_median_sog: float
+    z_score: float
+    anomaly_type: str
+    destination: str | None
+    nav_status: int | None
+    registry_risk: int | None
+
+
+class SpeedAnomalyResponse(BaseModel):
+    as_of: str
+    total_vessels_checked: int
+    anomaly_count: int
+    rows: list[SpeedAnomalyRow]

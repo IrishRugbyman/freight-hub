@@ -106,6 +106,11 @@ export function VesselLayer({
     const markerMap = markerMapRef.current
 
     vesselsRef.current = vessels
+
+    // Never nuke the map from a transient empty response (DB lock exhaustion returns 200 []).
+    // Keep existing markers; the next successful poll will reconcile correctly.
+    if (vessels.length === 0 && markerMap.size > 0) return
+
     // Cache parsed timestamps - avoids new Date() string parse on every DR tick
     const updatedMs = new Map<number, number>()
     for (const v of vessels) updatedMs.set(v.mmsi, Date.parse(v.updated_ts))

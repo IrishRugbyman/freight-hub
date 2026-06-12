@@ -14,7 +14,7 @@ import {
   YAxis,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion, useDestinationFlows, useMarketSummary, useVesselRiskScores, useChokepointHeatmap, useTradeLaneMatrix, useAnomalyWatchlist, useStsProximity, useRegionMomentum, useEventRateTimeline, useTransitRateTimeline, useAnchorageOccupancy, useStsOffenders, useFleetAtTime, useDestinationChanges, useOwnerIntelligence, useChokepointAnomaly, useCargoStateChanges } from '@/lib/api'
+import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion, useDestinationFlows, useMarketSummary, useVesselRiskScores, useChokepointHeatmap, useTradeLaneMatrix, useAnomalyWatchlist, useStsProximity, useRegionMomentum, useEventRateTimeline, useTransitRateTimeline, useAnchorageOccupancy, useStsOffenders, useFleetAtTime, useDestinationChanges, useOwnerIntelligence, useChokepointAnomaly, useCargoStateChanges, useSpeedAnomalies } from '@/lib/api'
 import type { RiskEventItem } from '@/lib/api'
 
 const CHOKEPOINTS = [
@@ -3326,6 +3326,91 @@ export function CargoStateChangesCard() {
                     {(row.draught_change_m ?? 0) > 0 ? '+' : ''}{row.draught_change_m?.toFixed(1)}m
                   </span>
                   <span className="ml-1 text-muted-foreground/60">{row.dwell_hours}h</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// Phase 46: Speed Anomaly Detection
+export function SpeedAnomaliesCard() {
+  const [kind, setKind] = useState<string>('tanker')
+  const [minZ, setMinZ] = useState<number>(2.5)
+  const { data, isLoading } = useSpeedAnomalies(kind, minZ, 50)
+  const rows = data?.rows ?? []
+  const fast = rows.filter((r) => r.anomaly_type === 'fast').length
+  const slow = rows.filter((r) => r.anomaly_type === 'slow').length
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center justify-between gap-2">
+          <span>Speed Anomaly Detection</span>
+          <div className="flex gap-2">
+            <select
+              className="rounded border border-border bg-background px-2 py-1 text-xs"
+              value={kind}
+              onChange={e => setKind(e.target.value)}
+            >
+              <option value="tanker">Tankers</option>
+              <option value="bulk">Bulkers</option>
+              <option value="">All types</option>
+            </select>
+            <select
+              className="rounded border border-border bg-background px-2 py-1 text-xs"
+              value={minZ}
+              onChange={e => setMinZ(Number(e.target.value))}
+            >
+              <option value={2.0}>z {'>='} 2.0</option>
+              <option value={2.5}>z {'>='} 2.5</option>
+              <option value={3.0}>z {'>='} 3.0</option>
+            </select>
+          </div>
+        </CardTitle>
+        {data && (
+          <p className="text-xs text-muted-foreground">
+            {data.anomaly_count} anomalies from {data.total_vessels_checked} vessels checked.{' '}
+            <span className="text-orange-400">{fast} fast</span>,{' '}
+            <span className="text-blue-400">{slow} slow</span>.
+            MAD-based z-score vs segment peers. Higher z = more anomalous.
+          </p>
+        )}
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="h-40 animate-pulse rounded bg-muted/40" />
+        ) : rows.length === 0 ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">No speed anomalies in current fleet.</p>
+        ) : (
+          <div className="space-y-0.5 max-h-80 overflow-y-auto pr-1">
+            {rows.map((row) => (
+              <div
+                key={`${row.mmsi}`}
+                className={`flex items-center gap-2 rounded px-2 py-1 text-xs ${row.anomaly_type === 'fast' ? 'bg-orange-500/8 hover:bg-orange-500/15' : 'bg-blue-500/8 hover:bg-blue-500/15'}`}
+              >
+                <span className={`w-12 shrink-0 rounded px-1 py-0.5 text-center text-[10px] font-bold ${row.anomaly_type === 'fast' ? 'bg-orange-500/20 text-orange-400' : 'bg-blue-500/20 text-blue-400'}`}>
+                  {row.anomaly_type === 'fast' ? 'FAST' : 'SLOW'}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <span className="font-medium">{row.name ?? `MMSI ${row.mmsi}`}</span>
+                  {row.segment && <span className="ml-1 text-muted-foreground">{row.segment}</span>}
+                  {row.region && <span className="ml-1 text-muted-foreground/60">{row.region}</span>}
+                  {row.registry_risk != null && (
+                    <span className={`ml-1 rounded px-1 text-[10px] ${row.registry_risk >= 70 ? 'bg-red-500/20 text-red-400' : row.registry_risk >= 40 ? 'bg-yellow-500/20 text-yellow-400' : 'bg-green-500/20 text-green-400'}`}>
+                      risk {row.registry_risk}
+                    </span>
+                  )}
+                </div>
+                <div className="shrink-0 text-right tabular-nums">
+                  <span className="font-semibold">{row.sog.toFixed(1)} kn</span>
+                  <span className="ml-1 text-muted-foreground">(med {row.segment_median_sog.toFixed(1)})</span>
+                  <span className={`ml-2 font-bold ${row.anomaly_type === 'fast' ? 'text-orange-400' : 'text-blue-400'}`}>
+                    z={row.z_score > 0 ? '+' : ''}{row.z_score.toFixed(1)}
+                  </span>
                 </div>
               </div>
             ))}

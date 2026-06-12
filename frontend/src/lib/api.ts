@@ -155,9 +155,22 @@ function vesselsUrl(f: VesselFilters): string {
 const REFETCH_MS = 60_000
 
 export function useVessels(filters: VesselFilters) {
+  // Track the last good count so we can detect transient empty responses.
+  // When the AIS DB write lock is held longer than the retry window, the API
+  // returns HTTP 200 [] instead of an error. TanStack Query accepts [] as valid
+  // data and removes all markers. Throwing here converts it to a retriable error;
+  // placeholderData keeps the previous vessels visible during the retry window.
+  const lastGoodCount = useRef(0)
   return useQuery({
     queryKey: ['vessels', filters],
-    queryFn: () => getJSON<Vessel[]>(vesselsUrl(filters)),
+    queryFn: async () => {
+      const data = await getJSON<Vessel[]>(vesselsUrl(filters))
+      if (data.length === 0 && lastGoodCount.current > 20) {
+        throw new Error('vessel list unexpectedly empty - treating as transient failure')
+      }
+      if (data.length > 0) lastGoodCount.current = data.length
+      return data
+    },
     refetchInterval: REFETCH_MS,
     placeholderData: (prev) => prev,
     retry: 3,
@@ -191,7 +204,16 @@ export function useVesselStream(filters: VesselFilters, enabled: boolean) {
           if (filters.region && v.region !== filters.region) return false
           return true
         })
-        queryClient.setQueryData(['vessels', filters], filtered)
+        // Merge into existing cache rather than replacing. The SSE endpoint uses a
+        // 30-minute window for payload efficiency; the REST poll uses 3 hours. If we
+        // replaced the full cache with the SSE batch, vessels seen 31-180 min ago
+        // would silently disappear from the map until the next 60s poll.
+        queryClient.setQueryData(['vessels', filters], (prev: Vessel[] | undefined) => {
+          if (!prev || prev.length === 0) return filtered
+          const merged = new Map(prev.map((v) => [v.mmsi, v]))
+          for (const v of filtered) merged.set(v.mmsi, v)
+          return Array.from(merged.values())
+        })
       } catch {
         // ignore malformed events
       }
@@ -1709,5 +1731,43 @@ export function useCargoStateChanges(days = 7, kind = 'tanker', minChangeM = 1.5
       ),
     staleTime: 10 * 60 * 1000,
     refetchInterval: 10 * 60 * 1000,
+  })
+}
+
+// Phase 46: Speed Anomaly Detection
+export interface SpeedAnomalyRow {
+  mmsi: number
+  imo: number | null
+  name: string | null
+  kind: string | null
+  segment: string | null
+  region: string | null
+  lat: number | null
+  lon: number | null
+  sog: number
+  segment_median_sog: number
+  z_score: number
+  anomaly_type: 'fast' | 'slow'
+  destination: string | null
+  nav_status: number | null
+  registry_risk: number | null
+}
+
+export interface SpeedAnomalyResponse {
+  as_of: string
+  total_vessels_checked: number
+  anomaly_count: number
+  rows: SpeedAnomalyRow[]
+}
+
+export function useSpeedAnomalies(kind = 'tanker', minZ = 2.5, limit = 50) {
+  return useQuery({
+    queryKey: ['speed-anomalies', kind, minZ, limit],
+    queryFn: () =>
+      getJSON<SpeedAnomalyResponse>(
+        `/api/analytics/speed-anomalies?kind=${encodeURIComponent(kind)}&min_z=${minZ}&limit=${limit}`,
+      ),
+    staleTime: 3 * 60 * 1000,
+    refetchInterval: 3 * 60 * 1000,
   })
 }

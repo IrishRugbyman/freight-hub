@@ -40,6 +40,7 @@ const DestinationChangesCard = lazy(() => import('./AnalyticsCharts').then((m) =
 const OwnerIntelligenceCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.OwnerIntelligenceCard })))
 const ChokepointAnomalyCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.ChokepointAnomalyCard })))
 const CargoStateChangesCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.CargoStateChangesCard })))
+const SpeedAnomaliesCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.SpeedAnomaliesCard })))
 
 function ChartSkeleton() {
   return <div className="h-[300px] animate-pulse rounded-lg bg-muted/40" />
@@ -128,6 +129,7 @@ function AnalyticsPage() {
         <Suspense fallback={<ChartSkeleton />}><SlowSteamersCard /></Suspense>
 
         <h2 className="text-base font-semibold text-foreground">Fleet Speed &amp; Utilization</h2>
+        <Suspense fallback={<ChartSkeleton />}><SpeedAnomaliesCard /></Suspense>
         <Suspense fallback={<ChartSkeleton />}><SpeedTrendCard /></Suspense>
         <div className="grid gap-4 lg:grid-cols-2">
           <Suspense fallback={<ChartSkeleton />}><FleetSpeedCard /></Suspense>

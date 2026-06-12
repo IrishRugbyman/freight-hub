@@ -3973,3 +3973,98 @@ def test_cargo_state_min_change_filter(cargo_state_client):
     r = cargo_state_client.get("/api/analytics/cargo-state-changes?days=7&min_change_m=10.0")
     d = r.json()
     assert d["total_events"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Phase 46: Speed Anomaly Detection
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def speed_anomaly_client(tmp_path, monkeypatch):
+    """Fixture: fleet of VLCC tankers with one very fast and one very slow outlier."""
+    import duckdb
+    from fastapi.testclient import TestClient
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+
+    ais_file = tmp_path / "ais_sa.duckdb"
+    conn = duckdb.connect(str(ais_file))
+    conn.execute("""
+    CREATE TABLE live_positions (
+        mmsi BIGINT PRIMARY KEY, name VARCHAR, lat DOUBLE, lon DOUBLE,
+        sog DOUBLE, cog DOUBLE, heading DOUBLE, destination VARCHAR,
+        ship_type INTEGER, length_m DOUBLE, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, updated_ts TIMESTAMP,
+        imo BIGINT, draught DOUBLE, nav_status INTEGER, eta VARCHAR
+    );
+    """)
+    # 8 VLCCs at typical 14 kn, 1 fast outlier at 22 kn, 1 slow outlier at 5 kn
+    normal_vessels = [
+        (100 + i, f"VLCC NORMAL {i}", 10.0 + i, 50.0 + i, 14.0, 90.0, 90.0,
+         "AEJEA", 80, 340.0, "tanker", "VLCC", "arabian_gulf", now,
+         None, 20.0, 0, None)
+        for i in range(8)
+    ]
+    fast_vessel = (200, "VLCC FAST", 20.0, 55.0, 22.0, 90.0, 90.0,
+                   "USHOU", 80, 340.0, "tanker", "VLCC", "us_gulf", now,
+                   None, 18.0, 0, None)
+    slow_vessel = (201, "VLCC SLOW", 21.0, 56.0, 5.0, 90.0, 90.0,
+                   "CNSHA", 80, 340.0, "tanker", "VLCC", "east_china", now,
+                   None, 22.0, 0, None)
+    all_vessels = normal_vessels + [fast_vessel, slow_vessel]
+    conn.executemany(
+        "INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        all_vessels,
+    )
+    conn.close()
+
+    registry_file = tmp_path / "registry_sa.duckdb"
+    reg_conn = duckdb.connect(str(registry_file))
+    reg_conn.execute("""
+    CREATE TABLE vessel_registry (
+        imo BIGINT PRIMARY KEY, risk_score INTEGER, fetch_ok BOOLEAN
+    );
+    """)
+    reg_conn.close()
+
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
+    monkeypatch.setenv("REGISTRY_DB", str(registry_file))
+    from app.main import app
+    return TestClient(app)
+
+
+def test_speed_anomaly_structure(speed_anomaly_client):
+    r = speed_anomaly_client.get("/api/analytics/speed-anomalies?kind=tanker&min_z=2.0&limit=50")
+    assert r.status_code == 200
+    d = r.json()
+    assert "rows" in d
+    assert "total_vessels_checked" in d
+    assert "anomaly_count" in d
+    assert d["total_vessels_checked"] == 10
+    assert d["anomaly_count"] >= 1
+
+
+def test_speed_anomaly_detects_fast(speed_anomaly_client):
+    r = speed_anomaly_client.get("/api/analytics/speed-anomalies?kind=tanker&min_z=2.0&limit=50")
+    d = r.json()
+    fast = [row for row in d["rows"] if row["mmsi"] == 200]
+    assert len(fast) == 1
+    assert fast[0]["anomaly_type"] == "fast"
+    assert fast[0]["z_score"] > 2.0
+
+
+def test_speed_anomaly_detects_slow(speed_anomaly_client):
+    r = speed_anomaly_client.get("/api/analytics/speed-anomalies?kind=tanker&min_z=2.0&limit=50")
+    d = r.json()
+    slow = [row for row in d["rows"] if row["mmsi"] == 201]
+    assert len(slow) == 1
+    assert slow[0]["anomaly_type"] == "slow"
+    assert slow[0]["z_score"] < -2.0
+
+
+def test_speed_anomaly_sorted_by_z(speed_anomaly_client):
+    r = speed_anomaly_client.get("/api/analytics/speed-anomalies?kind=tanker&min_z=2.0&limit=50")
+    d = r.json()
+    scores = [abs(row["z_score"]) for row in d["rows"]]
+    assert scores == sorted(scores, reverse=True)

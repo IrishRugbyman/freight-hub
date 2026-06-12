@@ -121,6 +121,8 @@ from .schemas import (
     ChokepointAnomalyResponse,
     CargoStateChangeRow,
     CargoStateChangesResponse,
+    SpeedAnomalyRow,
+    SpeedAnomalyResponse,
 )
 
 _STATIC = Path(__file__).parent / "static"
@@ -4329,5 +4331,146 @@ def analytics_cargo_state_changes(days: int = 7, kind: str = "tanker", min_chang
         as_of=now_dt.isoformat(),
         days=days,
         total_events=len(rows),
+        rows=rows,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase 46: Speed Anomaly Detection (live fleet)
+# ---------------------------------------------------------------------------
+
+# Typical underway speed ranges per segment (knots) - used for outlier context
+_SEG_TYPICAL_SOG: dict[str, tuple[float, float]] = {
+    "VLCC": (12.0, 16.0),
+    "Suezmax": (12.0, 15.5),
+    "Aframax": (12.0, 15.0),
+    "Panamax": (11.0, 14.5),
+    "MR2": (12.0, 15.0),
+    "MR1": (12.0, 14.5),
+    "Handy": (11.5, 14.0),
+    "Capesize": (11.0, 14.5),
+    "Supramax": (11.0, 13.5),
+    "Handymax": (11.0, 13.5),
+    "Handysize": (10.5, 13.5),
+    "Small": (9.0, 13.0),
+    "Large": (12.0, 16.0),
+    "Medium": (11.0, 14.5),
+}
+
+
+@app.get("/api/analytics/speed-anomalies", response_model=SpeedAnomalyResponse)
+def analytics_speed_anomalies(kind: str = "tanker", min_z: float = 2.5, min_sog: float = 1.0, limit: int = 50):
+    """Detect vessels moving significantly faster or slower than their segment peers.
+
+    Uses live_positions; computes per-segment median and IQR-based Z-score.
+    min_z: minimum |z-score| to include (default 2.5).
+    min_sog: minimum SOG to include (filters anchored/drifting vessels, default 1.0 kn).
+    kind: vessel type filter.
+    limit: max rows returned.
+    """
+    limit = max(1, min(limit, 200))
+    now_dt = datetime.now(UTC).replace(tzinfo=None)
+
+    kind_clause = ""
+    params_live: list = []
+    if kind:
+        kind_clause = "AND kind = ?"
+        params_live.append(kind)
+
+    # Get all underway vessels for the fleet
+    fleet_df = db.query(
+        "SELECT mmsi, name, kind, segment, region, lat, lon, sog, destination, nav_status, imo "
+        "FROM live_positions "
+        f"WHERE sog >= ? {kind_clause} "
+        "AND segment IS NOT NULL ",
+        [min_sog] + params_live,
+    )
+
+    if fleet_df.empty:
+        return SpeedAnomalyResponse(
+            as_of=now_dt.isoformat(),
+            total_vessels_checked=0,
+            anomaly_count=0,
+            rows=[],
+        )
+
+    fleet_df["sog"] = pd.to_numeric(fleet_df["sog"], errors="coerce")
+    fleet_df = fleet_df.dropna(subset=["sog"])
+
+    # Compute per-segment median and MAD (median absolute deviation)
+    seg_stats: dict[str, tuple[float, float]] = {}
+    for seg, grp in fleet_df.groupby("segment"):
+        sogs = grp["sog"].sort_values().values
+        n = len(sogs)
+        if n < 5:
+            continue
+        median_sog = float(sogs[n // 2])
+        mad = float(sorted(abs(s - median_sog) for s in sogs)[n // 2])
+        if mad < 0.1:
+            mad = 0.5  # floor MAD to avoid division by zero / hyper-sensitivity
+        seg_stats[str(seg)] = (median_sog, mad)
+
+    # Build intermediate dicts so we can enrich before constructing Pydantic objects
+    # (Pydantic v2 models are immutable - cannot set attributes after construction)
+    raw_rows: list[dict] = []
+    for _, r in fleet_df.iterrows():
+        seg = _str_or_none(r.get("segment"))
+        if not seg or seg not in seg_stats:
+            continue
+        median_sog, mad = seg_stats[seg]
+        sog_val = float(r["sog"])
+        z = (sog_val - median_sog) / (1.4826 * mad)  # 1.4826 = conversion factor MAD -> sigma
+
+        if abs(z) < min_z:
+            continue
+
+        raw_rows.append({
+            "mmsi": int(r["mmsi"]),
+            "imo": _valid_imo(r.get("imo")),
+            "name": _str_or_none(r.get("name")),
+            "kind": _str_or_none(r.get("kind")),
+            "segment": seg,
+            "region": _str_or_none(r.get("region")),
+            "lat": float(r["lat"]) if not pd.isna(r.get("lat")) else None,
+            "lon": float(r["lon"]) if not pd.isna(r.get("lon")) else None,
+            "sog": round(sog_val, 1),
+            "segment_median_sog": round(median_sog, 1),
+            "z_score": round(z, 2),
+            "anomaly_type": "fast" if z > 0 else "slow",
+            "destination": _str_or_none(r.get("destination")),
+            "nav_status": int(r["nav_status"]) if r.get("nav_status") is not None and not pd.isna(r.get("nav_status")) else None,
+            "registry_risk": None,
+        })
+
+    # Sort by |z_score| descending, take top limit
+    raw_rows.sort(key=lambda d: abs(d["z_score"]), reverse=True)
+    raw_rows = raw_rows[:limit]
+
+    # Enrich with registry risk before constructing Pydantic objects
+    imo_list = [d["imo"] for d in raw_rows if d["imo"] is not None]
+    if imo_list:
+        reg_df = db.query(
+            "SELECT imo, risk_score FROM vessel_registry "
+            "WHERE imo IN (" + ",".join("?" * len(imo_list)) + ") AND fetch_ok = true",
+            imo_list,
+            db=db.registry_db_path(),
+        )
+        risk_m: dict[int, int] = {}
+        if not reg_df.empty:
+            for _, rr in reg_df.iterrows():
+                imo_v = rr.get("imo")
+                risk_v = rr.get("risk_score")
+                if imo_v and not pd.isna(imo_v) and risk_v and not pd.isna(risk_v):
+                    risk_m[int(imo_v)] = int(risk_v)
+        for d in raw_rows:
+            if d["imo"] is not None:
+                d["registry_risk"] = risk_m.get(d["imo"])
+
+    rows = [SpeedAnomalyRow(**d) for d in raw_rows]
+
+    return SpeedAnomalyResponse(
+        as_of=now_dt.isoformat(),
+        total_vessels_checked=len(fleet_df),
+        anomaly_count=len(rows),
         rows=rows,
     )
