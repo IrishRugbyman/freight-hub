@@ -585,3 +585,100 @@ def test_flag_risk_sorted_desc(tmp_path, monkeypatch):
     assert rows[0]["vessel_count"] == 2
     assert rows[0]["avg_risk_score"] == pytest.approx(70.0, abs=0.5)
     assert rows[1]["flag"] == "Malta"
+
+
+# ---- /api/fleet/kpis ----
+
+
+def _make_kpi_client(tmp_path, monkeypatch) -> TestClient:
+    """Registry with 4 fetch_ok vessels (3 scored, 1 OFAC, 1 critical) + empty AIS."""
+    ais_file = tmp_path / "ais.duckdb"
+    ais_conn = duckdb.connect(str(ais_file))
+    ais_conn.execute(_AIS_SCHEMA)
+    ais_conn.close()
+
+    reg_file = tmp_path / "registry.duckdb"
+    reg_conn = duckdb.connect(str(reg_file))
+    reg_conn.execute(_REG_SCHEMA)
+    reg_conn.executemany(
+        "INSERT INTO vessel_registry (imo, ship_name, flag, risk_score, ofac_sanctioned, fetch_ok, fetched_ts) "
+        "VALUES (?,?,?,?,?,true,?)",
+        [
+            (9900001, "CRITICAL", "Iran", 80, True, _NOW),   # critical + ofac
+            (9900002, "HIGH", "Togo", 55, False, _NOW),      # high risk
+            (9900003, "LOW", "Malta", 15, False, _NOW),      # low risk, scored
+            (9900004, "UNSCORED", "Panama", None, False, _NOW),  # no risk_score
+        ],
+    )
+    # fetch_ok=false vessel - should NOT appear
+    reg_conn.execute(
+        "INSERT INTO vessel_registry (imo, ship_name, flag, risk_score, fetch_ok, fetched_ts) "
+        "VALUES (9900005, 'EXCLUDED', 'Cuba', 90, false, ?)",
+        [_NOW],
+    )
+    reg_conn.close()
+
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
+    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
+    from app.main import app
+    return TestClient(app)
+
+
+def test_fleet_kpis_structure(tmp_path, monkeypatch):
+    client = _make_kpi_client(tmp_path, monkeypatch)
+    r = client.get("/api/fleet/kpis")
+    assert r.status_code == 200
+    d = r.json()
+    for key in ("as_of", "total_registry", "scored", "elevated", "high_risk",
+                "critical", "ofac_count", "avg_risk_score", "pct_scored"):
+        assert key in d, f"missing key: {key}"
+
+
+def test_fleet_kpis_counts(tmp_path, monkeypatch):
+    """4 fetch_ok vessels, 3 scored; excludes fetch_ok=false vessel."""
+    client = _make_kpi_client(tmp_path, monkeypatch)
+    r = client.get("/api/fleet/kpis")
+    d = r.json()
+    assert d["total_registry"] == 4
+    assert d["scored"] == 3
+    assert d["ofac_count"] == 1
+
+
+def test_fleet_kpis_risk_bands(tmp_path, monkeypatch):
+    """Score 80 -> critical+high+elevated; 55 -> high+elevated; 15 -> elevated only."""
+    client = _make_kpi_client(tmp_path, monkeypatch)
+    d = client.get("/api/fleet/kpis").json()
+    assert d["elevated"] == 2   # 80 and 55
+    assert d["high_risk"] == 2  # 80 and 55
+    assert d["critical"] == 1   # only 80
+
+
+def test_fleet_kpis_avg_score(tmp_path, monkeypatch):
+    """avg_risk_score is mean of scored vessels (80+55+15)/3 = 50."""
+    client = _make_kpi_client(tmp_path, monkeypatch)
+    d = client.get("/api/fleet/kpis").json()
+    assert d["avg_risk_score"] == pytest.approx(50.0, abs=1.0)
+
+
+def test_fleet_kpis_pct_scored(tmp_path, monkeypatch):
+    """3 of 4 fetch_ok vessels are scored -> 75%."""
+    client = _make_kpi_client(tmp_path, monkeypatch)
+    d = client.get("/api/fleet/kpis").json()
+    assert d["pct_scored"] == pytest.approx(75.0, abs=1.0)
+
+
+def test_fleet_kpis_empty_registry(tmp_path, monkeypatch):
+    """Empty registry returns zeros."""
+    ais_file = tmp_path / "ais.duckdb"
+    duckdb.connect(str(ais_file)).execute(_AIS_SCHEMA)
+    reg_file = tmp_path / "registry.duckdb"
+    duckdb.connect(str(reg_file)).execute(_REG_SCHEMA)
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
+    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
+    from app.main import app
+    r = TestClient(app).get("/api/fleet/kpis")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["total_registry"] == 0
+    assert d["scored"] == 0
+    assert d["avg_risk_score"] is None

@@ -41,6 +41,7 @@ from .schemas import (
     FlagRiskResponse,
     FlagRiskRow,
     FleetFacets,
+    FleetKPIs,
     FleetResponse,
     HighRiskPosition,
     HighRiskPositionsResponse,
@@ -1062,6 +1063,48 @@ def fleet_flag_risk(top_n: int = 30):
     return FlagRiskResponse(
         as_of=_iso(datetime.now(UTC).replace(tzinfo=None)) or "",
         rows=rows[:top_n],
+    )
+
+
+@app.get("/api/fleet/kpis", response_model=FleetKPIs)
+def fleet_kpis():
+    """Aggregate risk intelligence KPIs for the fleet registry.
+
+    Single-query summary: total vessels, risk coverage, OFAC count,
+    high/critical risk counts, avg score among scored vessels.
+    """
+    df = db.query(
+        "SELECT risk_score, COALESCE(ofac_sanctioned, false) AS ofac_sanctioned "
+        "FROM vessel_registry WHERE fetch_ok = true",
+        db=db.registry_db_path(),
+    )
+    if df.empty:
+        return FleetKPIs(
+            as_of=_iso(datetime.now(UTC).replace(tzinfo=None)) or "",
+            total_registry=0, scored=0, elevated=0, high_risk=0,
+            critical=0, ofac_count=0, avg_risk_score=None, pct_scored=0.0,
+        )
+
+    total = len(df)
+    scored_df = df[df["risk_score"].notna()]
+    scored = len(scored_df)
+    elevated = int((scored_df["risk_score"] >= 25).sum()) if scored else 0
+    high_risk = int((scored_df["risk_score"] >= 50).sum()) if scored else 0
+    critical = int((scored_df["risk_score"] >= 75).sum()) if scored else 0
+    ofac_count = int(df["ofac_sanctioned"].fillna(False).astype(bool).sum())
+    avg_risk = round(float(scored_df["risk_score"].mean()), 1) if scored else None
+    pct_scored = round(scored / total * 100, 1) if total else 0.0
+
+    return FleetKPIs(
+        as_of=_iso(datetime.now(UTC).replace(tzinfo=None)) or "",
+        total_registry=total,
+        scored=scored,
+        elevated=elevated,
+        high_risk=high_risk,
+        critical=critical,
+        ofac_count=ofac_count,
+        avg_risk_score=avg_risk,
+        pct_scored=pct_scored,
     )
 
 

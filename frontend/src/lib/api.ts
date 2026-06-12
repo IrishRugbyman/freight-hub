@@ -807,3 +807,25 @@ export function useEvents(params?: { type?: string; days?: number; limit?: numbe
     enabled,
   })
 }
+
+export interface FleetKPIs {
+  as_of: string
+  total_registry: number
+  scored: number
+  elevated: number
+  high_risk: number
+  critical: number
+  ofac_count: number
+  avg_risk_score: number | null
+  pct_scored: number
+}
+
+export function useFleetKPIs() {
+  return useQuery({
+    queryKey: ['fleet-kpis'],
+    queryFn: () => getJSON<FleetKPIs>('/api/fleet/kpis'),
+    staleTime: 5 * 60 * 1000,   // KPIs change slowly, 5 min stale
+    refetchInterval: 5 * 60 * 1000,
+  })
+}
+

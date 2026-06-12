@@ -430,3 +430,15 @@ class FleetResponse(BaseModel):
     page_size: int
     summary: FleetSummary
     rows: list[FleetRow]
+
+
+class FleetKPIs(BaseModel):
+    as_of: str
+    total_registry: int          # all fetch_ok vessels
+    scored: int                  # have risk_score
+    elevated: int                # risk_score >= 25
+    high_risk: int               # risk_score >= 50
+    critical: int                # risk_score >= 75
+    ofac_count: int
+    avg_risk_score: float | None  # among scored vessels
+    pct_scored: float            # scored / total_registry

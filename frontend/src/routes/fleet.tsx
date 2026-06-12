@@ -1,12 +1,14 @@
-import { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { createFileRoute, useNavigate, useSearch } from '@tanstack/react-router'
-import { Download, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
+import { Download, ArrowUpDown, ArrowUp, ArrowDown, AlertTriangle, ShieldAlert, Shield, Activity } from 'lucide-react'
 import {
   useFleet,
   useFleetFacets,
+  useFleetKPIs,
   fleetExportUrl,
   type FleetParams,
   type FleetRow,
+  type FleetKPIs,
 } from '@/lib/api'
 
 export const Route = createFileRoute('/fleet')({
@@ -82,6 +84,99 @@ function useDebounce<T>(value: T, delay: number): T {
   return debounced
 }
 
+function KpiTile({
+  label,
+  value,
+  sub,
+  color,
+  icon,
+  onClick,
+}: {
+  label: string
+  value: string | number
+  sub?: string
+  color?: string
+  icon?: React.ReactNode
+  onClick?: () => void
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={!onClick}
+      className={`flex min-w-[7rem] flex-col rounded-lg border border-border bg-muted/30 px-3 py-2 text-left transition-colors ${onClick ? 'hover:bg-muted/60 cursor-pointer' : 'cursor-default'}`}
+    >
+      <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground uppercase tracking-wide">
+        {icon}
+        {label}
+      </div>
+      <div className={`mt-0.5 text-xl font-semibold tabular-nums ${color ?? 'text-foreground'}`}>
+        {value}
+      </div>
+      {sub && <div className="text-[10px] text-muted-foreground">{sub}</div>}
+    </button>
+  )
+}
+
+function FleetKPIBar({ kpis, onHighRisk, onCritical, onOfac }: {
+  kpis: FleetKPIs
+  onHighRisk: () => void
+  onCritical: () => void
+  onOfac: () => void
+}) {
+  return (
+    <div className="shrink-0 border-b border-border/60 bg-background/80 px-4 py-2.5">
+      <div className="flex flex-wrap gap-2">
+        <KpiTile
+          label="Registry"
+          value={kpis.total_registry.toLocaleString()}
+          sub={`${kpis.pct_scored.toFixed(0)}% scored`}
+          icon={<Shield size={10} />}
+        />
+        <KpiTile
+          label="Elevated"
+          value={kpis.elevated.toLocaleString()}
+          sub="score >= 25"
+          color="text-yellow-400"
+          icon={<Activity size={10} />}
+          onClick={onHighRisk}
+        />
+        <KpiTile
+          label="High Risk"
+          value={kpis.high_risk.toLocaleString()}
+          sub="score >= 50"
+          color={kpis.high_risk > 0 ? 'text-orange-400' : undefined}
+          icon={<ShieldAlert size={10} />}
+          onClick={onHighRisk}
+        />
+        <KpiTile
+          label="Critical"
+          value={kpis.critical.toLocaleString()}
+          sub="score >= 75"
+          color={kpis.critical > 0 ? 'text-red-400' : undefined}
+          icon={<AlertTriangle size={10} />}
+          onClick={onCritical}
+        />
+        <KpiTile
+          label="OFAC"
+          value={kpis.ofac_count.toLocaleString()}
+          sub="sanctioned"
+          color={kpis.ofac_count > 0 ? 'text-red-500' : undefined}
+          icon={<AlertTriangle size={10} />}
+          onClick={onOfac}
+        />
+        {kpis.avg_risk_score != null && (
+          <KpiTile
+            label="Avg Score"
+            value={kpis.avg_risk_score.toFixed(1)}
+            sub="scored vessels"
+            color={kpis.avg_risk_score >= 50 ? 'text-orange-400' : kpis.avg_risk_score >= 25 ? 'text-yellow-400' : 'text-emerald-400'}
+          />
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function FleetPage() {
   const search = useSearch({ from: '/fleet' })
   const navigate = useNavigate({ from: '/fleet' })
@@ -116,6 +211,8 @@ export default function FleetPage() {
     q: debouncedQ || undefined,
     owner: debouncedOwner || undefined,
   }
+
+  const { data: kpisData } = useFleetKPIs()
 
   const { data, isFetching } = useFleet(params)
   const rows = data?.rows ?? []
@@ -169,6 +266,15 @@ export default function FleetPage() {
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
+      {/* Risk intelligence KPI bar */}
+      {kpisData && (
+        <FleetKPIBar
+          kpis={kpisData}
+          onHighRisk={() => set({ risk_min: 50, sort: 'risk_score', order: 'desc' })}
+          onCritical={() => set({ risk_min: 75, sort: 'risk_score', order: 'desc' })}
+          onOfac={() => set({ risk_min: 75, sort: 'risk_score', order: 'desc' })}
+        />
+      )}
       {/* Filter bar */}
       <div className="shrink-0 border-b border-border bg-background px-4 py-2.5">
         <div className="flex flex-wrap items-center gap-2">
