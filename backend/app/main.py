@@ -270,12 +270,11 @@ def health() -> dict:
 @app.get("/api/vessels", response_model=list[Vessel])
 def vessels(kind: str | None = None, segment: str | None = None, region: str | None = None):
     """Fresh vessel positions, optionally filtered by kind / segment / region."""
-    conds, params = [], []
-    for col, val in (("kind", kind), ("segment", segment), ("region", region)):
-        if val:
-            conds.append(f"{col} = ?")
-            params.append(val)
-    df = _live(" AND ".join(conds), params)
+    df = _live_all()
+    if not df.empty:
+        for col, val in (("kind", kind), ("segment", segment), ("region", region)):
+            if val:
+                df = df[df[col] == val]
     if df.empty:
         return []
     # Round to AIS-native resolution: cuts JSON size ~35% before gzip, lossless for display
@@ -1269,7 +1268,9 @@ def vessel_equasis(imo: int):
 @app.get("/api/chokepoints", response_model=list[ChokepointCount])
 def chokepoints():
     """Per-region live vessel counts (with bbox + per-segment breakdown)."""
-    df = _live("region IS NOT NULL")
+    df = _live_all()
+    if not df.empty:
+        df = df[df["region"].notna()]
     out = []
     for name, bbox in REGIONS.items():
         sub = df[df["region"] == name] if not df.empty else df
@@ -4840,8 +4841,10 @@ def analytics_crude_on_water():
             if m is not None and l is not None:
                 laden_map[int(m)] = str(l)
 
-    # 2. Get live tankers
-    live_df = _live("kind = ?", ["tanker"])
+    # 2. Get live tankers (use cache to avoid DB lock contention)
+    live_df = _live_all()
+    if not live_df.empty:
+        live_df = live_df[live_df["kind"] == "tanker"]
     if live_df.empty:
         return CrudeOnWaterResponse(
             as_of=now_dt.isoformat(),
@@ -4973,7 +4976,9 @@ def analytics_chokepoint_status():
     cutoff_7d = now_dt - timedelta(days=7)
 
     # 1. Live vessel counts per region from live_positions cache
-    live_df = _live("region IS NOT NULL")
+    live_df = _live_all()
+    if not live_df.empty:
+        live_df = live_df[live_df["region"].notna()]
 
     live_by_region: dict[str, dict] = {}
     if not live_df.empty:
