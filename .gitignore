@@ -13,3 +13,4 @@ frontend/src/routeTree.gen.ts
 # env
 .env
 backend/data/
+.playwright-mcp/
