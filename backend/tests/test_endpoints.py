@@ -379,3 +379,95 @@ def test_analytics_ports_top_n_clamped(analytics_client):
     assert r.status_code == 200
     # top_n=1 is clamped to 5, so <=5 ports returned
     assert len(r.json()["ports"]) <= 5
+
+
+# ---- /api/analytics/speed ----
+
+def test_analytics_speed_structure(client):
+    r = client.get("/api/analytics/speed")
+    assert r.status_code == 200
+    d = r.json()
+    assert "as_of" in d
+    assert "total_vessels" in d
+    assert isinstance(d["rows"], list)
+    for row in d["rows"]:
+        assert "segment" in row
+        assert "kind" in row
+        assert "underway" in row
+        assert "anchored" in row
+        assert "moored" in row
+        assert "total" in row
+        assert "pct_underway" in row
+
+
+def test_analytics_speed_counts(client):
+    r = client.get("/api/analytics/speed")
+    assert r.status_code == 200
+    rows = {f"{row['kind']}-{row['segment']}": row for row in r.json()["rows"]}
+    # CAPE A nav=0, CAPE B nav=1 -> Capesize bulk: underway=1, anchored=1
+    capes = rows.get("bulk-Capesize")
+    assert capes is not None
+    assert capes["underway"] == 1
+    assert capes["anchored"] == 1
+    assert capes["total"] == 2
+    # VLCC A nav=0 -> tanker VLCC: underway=1
+    vlcc = rows.get("tanker-VLCC")
+    assert vlcc is not None
+    assert vlcc["underway"] == 1
+    assert vlcc["total"] == 1
+
+
+def test_analytics_speed_avg_sog(client):
+    r = client.get("/api/analytics/speed")
+    d = r.json()
+    rows = {f"{row['kind']}-{row['segment']}": row for row in d["rows"]}
+    vlcc = rows.get("tanker-VLCC")
+    assert vlcc is not None
+    # VLCC SOG = 14.0 kn, nav=0
+    assert vlcc["avg_sog_underway"] == pytest.approx(14.0, abs=0.2)
+
+
+def test_analytics_speed_total_vessels(client):
+    r = client.get("/api/analytics/speed")
+    d = r.json()
+    # 4 fresh vessels (stale excluded): CAPE A, CAPE B, VLCC A, COASTER
+    # COASTER has region=None but kind=bulk -> included (kind IS NOT NULL)
+    assert d["total_vessels"] == 4
+
+
+# ---- /api/analytics/region-util ----
+
+def test_region_util_structure(client):
+    r = client.get("/api/analytics/region-util")
+    assert r.status_code == 200
+    d = r.json()
+    assert "as_of" in d
+    assert isinstance(d["rows"], list)
+    for row in d["rows"]:
+        assert "region" in row
+        assert "total" in row
+        assert "underway" in row
+        assert "anchored" in row
+        assert "pct_underway" in row
+
+
+def test_region_util_singapore(client):
+    r = client.get("/api/analytics/region-util")
+    d = r.json()
+    rows = {row["region"]: row for row in d["rows"]}
+    # CAPE A and CAPE B are in singapore_malacca; COASTER has region=None (excluded)
+    sg = rows.get("singapore_malacca")
+    assert sg is not None
+    assert sg["total"] == 2
+    # CAPE A nav=0, CAPE B nav=1
+    assert sg["underway"] == 1
+    assert sg["anchored"] == 1
+
+
+def test_region_util_excludes_null_region(client):
+    r = client.get("/api/analytics/region-util")
+    d = r.json()
+    regions = {row["region"] for row in d["rows"]}
+    # COASTER has region=None -> not in results
+    assert "None" not in regions
+    assert None not in regions

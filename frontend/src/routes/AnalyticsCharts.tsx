@@ -12,7 +12,7 @@ import {
   YAxis,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk } from '@/lib/api'
+import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil } from '@/lib/api'
 
 const CHOKEPOINTS = [
   'singapore_malacca', 'suez', 'hormuz', 'panama', 'gibraltar',
@@ -387,6 +387,148 @@ export function OwnerRiskCard() {
               Avg/Max: risk score 0-100. High: vessels with score &gt;= 50.
             </div>
           </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+const SEG_COLORS: Record<string, string> = {
+  VLCC: '#ef4444',
+  Suezmax: '#f97316',
+  Aframax: '#eab308',
+  Panamax: '#22c55e',
+  Capesize: '#3b82f6',
+  Supramax: '#8b5cf6',
+  Handymax: '#06b6d4',
+  Handysize: '#64748b',
+  Small: '#94a3b8',
+  ULCC: '#be123c',
+}
+
+export function FleetSpeedCard() {
+  const [kindFilter, setKindFilter] = useState<string | undefined>()
+  const { data, isLoading } = useFleetSpeed()
+
+  const rows = (data?.rows ?? []).filter((r) => !kindFilter || r.kind === kindFilter)
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className="text-sm font-medium">Fleet Speed by Segment</CardTitle>
+        <div className="flex gap-1">
+          {([undefined, 'tanker', 'bulk'] as const).map((k) => (
+            <button
+              key={k ?? 'all'}
+              onClick={() => setKindFilter(k)}
+              className={`rounded px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                kindFilter === k ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {k ?? 'All'}
+            </button>
+          ))}
+        </div>
+      </CardHeader>
+      <CardContent>
+        {isLoading || !data ? (
+          <EmptyState message="Loading..." />
+        ) : rows.length === 0 ? (
+          <EmptyState message="No speed data available." />
+        ) : (
+          <>
+            <div className="mb-1 text-[10px] text-muted-foreground">
+              {data.total_vessels.toLocaleString()} vessels tracked. Avg SOG = underway (nav=0, SOG &gt; 0.2 kn).
+            </div>
+            <div className="space-y-1.5">
+              <div className="grid grid-cols-[1fr_3rem_3.5rem_3.5rem_4rem] gap-1 text-[10px] font-medium text-muted-foreground pb-1 border-b border-border">
+                <span>Segment</span>
+                <span className="text-right">Ships</span>
+                <span className="text-right">%Underway</span>
+                <span className="text-right">Avg kn</span>
+                <div className="text-right">Status</div>
+              </div>
+              {rows.map((r) => (
+                <div key={`${r.kind}-${r.segment}`} className="grid grid-cols-[1fr_3rem_3.5rem_3.5rem_4rem] gap-1 items-center text-xs">
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      className="h-2 w-2 shrink-0 rounded-full"
+                      style={{ backgroundColor: SEG_COLORS[r.segment] ?? '#94a3b8' }}
+                    />
+                    <span className="font-medium">{r.segment}</span>
+                    <span className="text-[10px] text-muted-foreground/60">{r.kind[0].toUpperCase()}</span>
+                  </div>
+                  <span className="text-right text-muted-foreground">{r.total}</span>
+                  <span className={`text-right font-mono font-semibold ${r.pct_underway >= 60 ? 'text-green-400' : r.pct_underway >= 40 ? 'text-yellow-400' : 'text-red-400'}`}>
+                    {r.pct_underway.toFixed(0)}%
+                  </span>
+                  <span className="text-right font-mono text-muted-foreground">
+                    {r.avg_sog_underway != null ? r.avg_sog_underway.toFixed(1) : '-'}
+                  </span>
+                  <div className="flex gap-0.5 justify-end">
+                    {r.underway > 0 && (
+                      <span className="rounded bg-green-500/10 px-1 py-0.5 text-[9px] text-green-400">
+                        {r.underway}U
+                      </span>
+                    )}
+                    {r.anchored > 0 && (
+                      <span className="rounded bg-yellow-500/10 px-1 py-0.5 text-[9px] text-yellow-400">
+                        {r.anchored}A
+                      </span>
+                    )}
+                    {r.moored > 0 && (
+                      <span className="rounded bg-blue-500/10 px-1 py-0.5 text-[9px] text-blue-400">
+                        {r.moored}M
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+export function RegionUtilCard() {
+  const { data, isLoading } = useRegionUtil()
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-medium">Regional Utilization</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {isLoading || !data ? (
+          <EmptyState message="Loading..." />
+        ) : data.rows.length === 0 ? (
+          <EmptyState message="No region data." />
+        ) : (
+          <ResponsiveContainer width="100%" height={280}>
+            <BarChart
+              data={data.rows.map((r) => ({
+                region: r.region.replace(/_/g, ' '),
+                underway: r.underway,
+                anchored: r.anchored,
+                moored: r.moored,
+                other: r.total - r.underway - r.anchored - r.moored,
+              }))}
+              layout="vertical"
+              margin={{ top: 0, right: 8, left: 80, bottom: 0 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+              <XAxis type="number" tick={{ fontSize: 9 }} allowDecimals={false} />
+              <YAxis type="category" dataKey="region" tick={{ fontSize: 9 }} width={80} />
+              <Tooltip contentStyle={TOOLTIP_STYLE} />
+              <Legend wrapperStyle={LEGEND_STYLE} />
+              <Bar dataKey="underway" stackId="a" fill="#22c55e" name="Underway" />
+              <Bar dataKey="anchored" stackId="a" fill="#eab308" name="Anchored" />
+              <Bar dataKey="moored" stackId="a" fill="#3b82f6" name="Moored" />
+              <Bar dataKey="other" stackId="a" fill="#475569" name="Other" />
+            </BarChart>
+          </ResponsiveContainer>
         )}
       </CardContent>
     </Card>

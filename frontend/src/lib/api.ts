@@ -663,6 +663,58 @@ export function useOwnerRisk(minVessels = 2, topN = 30) {
   })
 }
 
+export interface SpeedSegmentRow {
+  segment: string
+  kind: string
+  underway: number
+  anchored: number
+  moored: number
+  other: number
+  total: number
+  avg_sog_underway: number | null
+  p50_sog: number | null
+  pct_underway: number
+}
+
+export interface SpeedAnalyticsResponse {
+  as_of: string
+  total_vessels: number
+  rows: SpeedSegmentRow[]
+}
+
+export interface RegionUtilRow {
+  region: string
+  total: number
+  underway: number
+  anchored: number
+  moored: number
+  pct_underway: number
+  avg_sog: number | null
+}
+
+export interface RegionUtilResponse {
+  as_of: string
+  rows: RegionUtilRow[]
+}
+
+export function useFleetSpeed() {
+  return useQuery({
+    queryKey: ['fleet-speed'],
+    queryFn: () => getJSON<SpeedAnalyticsResponse>('/api/analytics/speed'),
+    staleTime: REFETCH_MS,
+    refetchInterval: REFETCH_MS,
+  })
+}
+
+export function useRegionUtil() {
+  return useQuery({
+    queryKey: ['region-util'],
+    queryFn: () => getJSON<RegionUtilResponse>('/api/analytics/region-util'),
+    staleTime: REFETCH_MS,
+    refetchInterval: REFETCH_MS,
+  })
+}
+
 export function useEvents(params?: { type?: string; days?: number; limit?: number }, enabled = true) {
   const searchParams = new URLSearchParams()
   if (params?.type) searchParams.set('type', params.type)

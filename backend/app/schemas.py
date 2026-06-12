@@ -319,6 +319,40 @@ class OwnerRiskResponse(BaseModel):
     as_of: str
     rows: list[OwnerRiskItem]
 
+class SpeedSegmentRow(BaseModel):
+    segment: str
+    kind: str
+    underway: int         # nav_status 0 (under way using engine)
+    anchored: int         # nav_status 1 (at anchor)
+    moored: int           # nav_status 5 (moored)
+    other: int
+    total: int
+    avg_sog_underway: float | None   # avg SOG for nav_status=0, SOG > 0.2
+    p50_sog: float | None            # median SOG all vessels
+    pct_underway: float  # underway / total
+
+
+class SpeedAnalyticsResponse(BaseModel):
+    as_of: str
+    total_vessels: int
+    rows: list[SpeedSegmentRow]
+
+
+class RegionUtilRow(BaseModel):
+    region: str
+    total: int
+    underway: int
+    anchored: int
+    moored: int
+    pct_underway: float
+    avg_sog: float | None
+
+
+class RegionUtilResponse(BaseModel):
+    as_of: str
+    rows: list[RegionUtilRow]
+
+
 class FleetFacetItem(BaseModel):
     value: str
     count: int

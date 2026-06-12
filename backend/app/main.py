@@ -47,7 +47,11 @@ from .schemas import (
     OwnerRiskResponse,
     PortFlowResponse,
     PortDestItem,
+    RegionUtilResponse,
+    RegionUtilRow,
     RoutesResponse,
+    SpeedAnalyticsResponse,
+    SpeedSegmentRow,
     TrackPoint,
     TransitsResponse,
     Vessel,
@@ -358,6 +362,101 @@ def analytics_ports(kind: str | None = None, top_n: int = 20):
         as_of=_iso(datetime.now(UTC).replace(tzinfo=None)) or "",
         total_with_dest=total_with_dest,
         ports=ports,
+    )
+
+
+@app.get("/api/analytics/speed", response_model=SpeedAnalyticsResponse)
+def analytics_speed():
+    """Fleet speed and utilization by segment, computed from live positions.
+
+    Nav status codes: 0=under way engine, 1=at anchor, 5=moored.
+    avg_sog_underway is the mean SOG of nav_status=0 vessels with SOG > 0.2 kn.
+    Useful as a demand signal: rising average speed = tighter freight market.
+    """
+    cutoff = _fresh_cutoff()
+    df = db.query(
+        "SELECT kind, segment, nav_status, sog "
+        "FROM live_positions "
+        "WHERE updated_ts > ? AND kind IS NOT NULL AND segment IS NOT NULL",
+        [cutoff],
+    )
+    if df.empty:
+        return SpeedAnalyticsResponse(
+            as_of=_iso(datetime.now(UTC).replace(tzinfo=None)) or "",
+            total_vessels=0,
+            rows=[],
+        )
+
+    rows = []
+    for (kind, segment), grp in df.groupby(["kind", "segment"]):
+        total = len(grp)
+        underway = int((grp["nav_status"] == 0).sum())
+        anchored = int((grp["nav_status"] == 1).sum())
+        moored = int((grp["nav_status"] == 5).sum())
+        other = total - underway - anchored - moored
+        underway_sog = grp.loc[(grp["nav_status"] == 0) & (grp["sog"] > 0.2), "sog"]
+        avg_sog_uw = round(float(underway_sog.mean()), 1) if len(underway_sog) > 0 else None
+        p50 = grp["sog"].dropna()
+        p50_sog = round(float(p50.median()), 1) if len(p50) > 0 else None
+        rows.append(SpeedSegmentRow(
+            segment=str(segment),
+            kind=str(kind),
+            underway=underway,
+            anchored=anchored,
+            moored=moored,
+            other=other,
+            total=total,
+            avg_sog_underway=avg_sog_uw,
+            p50_sog=p50_sog,
+            pct_underway=round(underway / total * 100, 1) if total > 0 else 0.0,
+        ))
+
+    rows.sort(key=lambda r: r.total, reverse=True)
+    return SpeedAnalyticsResponse(
+        as_of=_iso(datetime.now(UTC).replace(tzinfo=None)) or "",
+        total_vessels=len(df),
+        rows=rows,
+    )
+
+
+@app.get("/api/analytics/region-util", response_model=RegionUtilResponse)
+def analytics_region_util():
+    """Fleet utilization (underway/anchored/moored) per maritime region.
+
+    Aggregates from live positions. High anchor ratios = congestion signal.
+    """
+    cutoff = _fresh_cutoff()
+    df = db.query(
+        "SELECT region, nav_status, sog "
+        "FROM live_positions "
+        "WHERE updated_ts > ? AND region IS NOT NULL",
+        [cutoff],
+    )
+    if df.empty:
+        return RegionUtilResponse(as_of=_iso(datetime.now(UTC).replace(tzinfo=None)) or "", rows=[])
+
+    rows = []
+    for region, grp in df.groupby("region"):
+        total = len(grp)
+        underway = int((grp["nav_status"] == 0).sum())
+        anchored = int((grp["nav_status"] == 1).sum())
+        moored = int((grp["nav_status"] == 5).sum())
+        sog_vals = grp["sog"].dropna()
+        avg_sog = round(float(sog_vals.mean()), 1) if len(sog_vals) > 0 else None
+        rows.append(RegionUtilRow(
+            region=str(region),
+            total=total,
+            underway=underway,
+            anchored=anchored,
+            moored=moored,
+            pct_underway=round(underway / total * 100, 1) if total > 0 else 0.0,
+            avg_sog=avg_sog,
+        ))
+
+    rows.sort(key=lambda r: r.total, reverse=True)
+    return RegionUtilResponse(
+        as_of=_iso(datetime.now(UTC).replace(tzinfo=None)) or "",
+        rows=rows,
     )
 
 
