@@ -835,6 +835,15 @@ export function useEvents(params?: { type?: string; days?: number; limit?: numbe
   })
 }
 
+export function useRecentEventCount() {
+  return useQuery({
+    queryKey: ['events-count-24h'],
+    queryFn: () => getJSON<EventsResponse>('/api/events?days=1&limit=200').then(r => r.total),
+    staleTime: EVENTS_STALE,
+    refetchInterval: 5 * 60_000,
+  })
+}
+
 export interface AnchoredVessel {
   mmsi: number
   name: string | null

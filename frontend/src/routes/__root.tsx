@@ -1,8 +1,9 @@
 import { createRootRoute, Link, Outlet } from '@tanstack/react-router'
 import { Ship } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useRecentEventCount } from '@/lib/api'
 
-function NavItem({ to, children, disabled }: { to?: string; children: string; disabled?: boolean }) {
+function NavItem({ to, children, disabled }: { to?: string; children: React.ReactNode; disabled?: boolean }) {
   if (disabled) {
     return (
       <span className="cursor-not-allowed px-3 py-1.5 text-sm text-muted-foreground/50">
@@ -21,8 +22,10 @@ function NavItem({ to, children, disabled }: { to?: string; children: string; di
   )
 }
 
-export const Route = createRootRoute({
-  component: () => (
+function RootLayout() {
+  const { data: eventCount } = useRecentEventCount()
+
+  return (
     <div className="flex h-full flex-col">
       <header className={cn('flex items-center gap-4 border-b border-border px-4 py-2.5')}>
         <div className="flex items-center gap-2 font-semibold">
@@ -35,18 +38,31 @@ export const Route = createRootRoute({
           <NavItem to="/routes">Routes</NavItem>
           <NavItem to="/dispersion">Dispersion</NavItem>
           <NavItem to="/analytics">Analytics</NavItem>
-          <NavItem to="/events">Events</NavItem>
+          <NavItem to="/events">
+            <span className="flex items-center gap-1.5">
+              Events
+              {eventCount != null && eventCount > 0 && (
+                <span className="rounded-full bg-primary/20 px-1.5 py-px text-[10px] font-medium tabular-nums text-primary">
+                  {eventCount > 99 ? '99+' : eventCount}
+                </span>
+              )}
+            </span>
+          </NavItem>
         </nav>
         <a
           href="https://quant.lbzgiu.xyz"
           className="ml-auto text-sm text-muted-foreground hover:text-foreground"
         >
-          ← quant portfolio
+          quant portfolio
         </a>
       </header>
       <main className="min-h-0 flex-1">
         <Outlet />
       </main>
     </div>
-  ),
+  )
+}
+
+export const Route = createRootRoute({
+  component: RootLayout,
 })
