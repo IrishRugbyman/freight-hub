@@ -283,8 +283,12 @@ def _run_inner(conn: duckdb.DuckDBPyConnection, reset: bool) -> None:
     # ------------------------------------------------------------------
     # 1. Transit detection
     # ------------------------------------------------------------------
-    transits = transit_episodes(df)
-    log.info("detected %d transit episodes", len(transits))
+    try:
+        transits = transit_episodes(df)
+        log.info("detected %d transit episodes", len(transits))
+    except Exception as exc:
+        log.warning("transit detection failed, skipping: %s", exc, exc_info=True)
+        transits = []
 
     if transits:
         for t in transits:
@@ -301,8 +305,12 @@ def _run_inner(conn: duckdb.DuckDBPyConnection, reset: bool) -> None:
     # ------------------------------------------------------------------
     # 2. Anchored episode detection
     # ------------------------------------------------------------------
-    anchored = anchored_episodes(df)
-    log.info("detected %d anchored episodes", len(anchored))
+    try:
+        anchored = anchored_episodes(df)
+        log.info("detected %d anchored episodes", len(anchored))
+    except Exception as exc:
+        log.warning("anchored detection failed, skipping: %s", exc, exc_info=True)
+        anchored = []
 
     if anchored:
         for a in anchored:
@@ -347,12 +355,14 @@ def _run_inner(conn: duckdb.DuckDBPyConnection, reset: bool) -> None:
     # Round snapshot_ts to the nearest hour for density aggregation
     df["_hour"] = df["snapshot_ts"].dt.floor("h")
     density_rows: list[dict] = []
-
-    for hour_ts, hour_grp in df.groupby("_hour"):
-        rows = fleet_density_rows(hour_grp, hour_ts, vessel_states)
-        density_rows.extend(rows)
-
-    log.info("computed %d fleet_density rows", len(density_rows))
+    try:
+        for hour_ts, hour_grp in df.groupby("_hour"):
+            rows = fleet_density_rows(hour_grp, hour_ts, vessel_states)
+            density_rows.extend(rows)
+        log.info("computed %d fleet_density rows", len(density_rows))
+    except Exception as exc:
+        log.warning("fleet density computation failed, skipping: %s", exc, exc_info=True)
+        density_rows = []
 
     if density_rows:
         for r in density_rows:
@@ -367,8 +377,12 @@ def _run_inner(conn: duckdb.DuckDBPyConnection, reset: bool) -> None:
     # ------------------------------------------------------------------
     # 5. Destination changes - detect reroutes in the incremental window
     # ------------------------------------------------------------------
-    reroutes = destination_change_events(df)
-    log.info("detected %d destination-change (reroute) events", len(reroutes))
+    try:
+        reroutes = destination_change_events(df)
+        log.info("detected %d destination-change (reroute) events", len(reroutes))
+    except Exception as exc:
+        log.warning("destination change detection failed, skipping: %s", exc, exc_info=True)
+        reroutes = []
     for e in reroutes:
         conn.execute(
             "INSERT OR REPLACE INTO ais_events "
@@ -402,8 +416,12 @@ def _run_inner(conn: duckdb.DuckDBPyConnection, reset: bool) -> None:
         df_48h["snapshot_ts"] = pd.to_datetime(df_48h["snapshot_ts"])
 
         # 5a. AIS gaps
-        gaps = ais_gap_events(df_48h, max_ts)
-        log.info("detected %d gap events", len(gaps))
+        try:
+            gaps = ais_gap_events(df_48h, max_ts)
+            log.info("detected %d gap events", len(gaps))
+        except Exception as exc:
+            log.warning("gap detection failed, skipping: %s", exc, exc_info=True)
+            gaps = []
         if gaps:
             # Close any gap events for vessels that have reappeared
             active_recent = set(
@@ -448,8 +466,12 @@ def _run_inner(conn: duckdb.DuckDBPyConnection, reset: bool) -> None:
                 )
 
         # 5b. Loitering
-        loiters = loitering_events(df_48h)
-        log.info("detected %d loitering events", len(loiters))
+        try:
+            loiters = loitering_events(df_48h)
+            log.info("detected %d loitering events", len(loiters))
+        except Exception as exc:
+            log.warning("loitering detection failed, skipping: %s", exc, exc_info=True)
+            loiters = []
         for e in loiters:
             conn.execute(
                 "INSERT OR REPLACE INTO ais_events "
@@ -464,8 +486,12 @@ def _run_inner(conn: duckdb.DuckDBPyConnection, reset: bool) -> None:
             )
 
         # 5c. STS candidates
-        sts = sts_candidates(df_48h)
-        log.info("detected %d STS candidates", len(sts))
+        try:
+            sts = sts_candidates(df_48h)
+            log.info("detected %d STS candidates", len(sts))
+        except Exception as exc:
+            log.warning("STS detection failed, skipping: %s", exc, exc_info=True)
+            sts = []
         for e in sts:
             conn.execute(
                 "INSERT OR REPLACE INTO ais_events "
@@ -480,8 +506,12 @@ def _run_inner(conn: duckdb.DuckDBPyConnection, reset: bool) -> None:
             )
 
         # 5d. GPS spoofing / position jump anomalies
-        spoof_events = gps_spoof_events(df_48h)
-        log.info("detected %d GPS position-jump events", len(spoof_events))
+        try:
+            spoof_events = gps_spoof_events(df_48h)
+            log.info("detected %d GPS position-jump events", len(spoof_events))
+        except Exception as exc:
+            log.warning("GPS spoof detection failed, skipping: %s", exc, exc_info=True)
+            spoof_events = []
         for e in spoof_events:
             conn.execute(
                 "INSERT OR REPLACE INTO ais_events "
@@ -498,12 +528,16 @@ def _run_inner(conn: duckdb.DuckDBPyConnection, reset: bool) -> None:
     # ------------------------------------------------------------------
     # 7. Dark voyage composite detection (operates on ais_events, not raw snapshots)
     # ------------------------------------------------------------------
-    all_events_df = conn.execute(
-        "SELECT event_id, type, mmsi, mmsi2, start_ts, end_ts, lat, lon, region, kind, segment, details "
-        "FROM ais_events"
-    ).df()
-    dark_voyages = dark_voyage_events(all_events_df)
-    log.info("detected %d dark voyage composites", len(dark_voyages))
+    try:
+        all_events_df = conn.execute(
+            "SELECT event_id, type, mmsi, mmsi2, start_ts, end_ts, lat, lon, region, kind, segment, details "
+            "FROM ais_events"
+        ).df()
+        dark_voyages = dark_voyage_events(all_events_df)
+        log.info("detected %d dark voyage composites", len(dark_voyages))
+    except Exception as exc:
+        log.warning("dark voyage detection failed, skipping: %s", exc, exc_info=True)
+        dark_voyages = []
     for e in dark_voyages:
         conn.execute(
             "INSERT OR REPLACE INTO ais_events "
