@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import React, { useState } from 'react'
 import {
   Bar,
   BarChart,
@@ -13,7 +13,7 @@ import {
   YAxis,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell } from '@/lib/api'
+import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions } from '@/lib/api'
 
 const CHOKEPOINTS = [
   'singapore_malacca', 'suez', 'hormuz', 'panama', 'gibraltar',
@@ -1044,6 +1044,106 @@ export function AnchorageDwellCard() {
                           : <span className="text-muted-foreground">?</span>}
                     </td>
                     <td className="py-0.5">{riskBadge(v.risk_score, v.ofac)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+const CARGO_SEGMENTS = [
+  { value: '', label: 'All' },
+  { value: 'VLCC', label: 'VLCC' },
+  { value: 'Suezmax', label: 'Suezmax' },
+  { value: 'Aframax', label: 'Aframax' },
+  { value: 'Panamax', label: 'Panamax' },
+  { value: 'MR', label: 'MR Tanker' },
+  { value: 'Capesize', label: 'Capesize' },
+]
+
+export function CargoTransitionsCard() {
+  const [days, setDays] = React.useState(7)
+  const [seg, setSeg] = React.useState('')
+  const { data, isLoading } = useCargoTransitions(days, 2.0, seg)
+  const rows = data?.rows ?? []
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <CardTitle className="text-sm font-medium">Cargo Transitions</CardTitle>
+          <div className="flex gap-1 flex-wrap">
+            {[3, 7, 14].map((d) => (
+              <button
+                key={d}
+                onClick={() => setDays(d)}
+                className={`rounded px-2 py-0.5 text-xs ${days === d ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+              >
+                {d}d
+              </button>
+            ))}
+            <select
+              value={seg}
+              onChange={(e) => setSeg(e.target.value)}
+              className="rounded border border-border bg-background px-1.5 py-0.5 text-xs text-foreground ml-1"
+            >
+              {CARGO_SEGMENTS.map((s) => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          Loading and discharge events inferred from draught step-changes (6h median buckets)
+        </p>
+      </CardHeader>
+      <CardContent className="pt-0">
+        {isLoading && <p className="text-xs text-muted-foreground">Loading...</p>}
+        {!isLoading && rows.length === 0 && (
+          <p className="text-xs text-muted-foreground">No transitions detected for selected filters.</p>
+        )}
+        {!isLoading && rows.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-muted-foreground">
+                  <th className="pb-1 pr-2 font-normal">Vessel</th>
+                  <th className="pb-1 pr-2 font-normal">Seg</th>
+                  <th className="pb-1 pr-2 font-normal">Region</th>
+                  <th className="pb-1 pr-2 font-normal">Direction</th>
+                  <th className="pb-1 pr-2 font-normal">Before</th>
+                  <th className="pb-1 pr-2 font-normal">After</th>
+                  <th className="pb-1 pr-2 font-normal">Change</th>
+                  <th className="pb-1 font-normal">Risk</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r, i) => (
+                  <tr key={`${r.mmsi}-${i}`} className="border-t border-border/30">
+                    <td className="max-w-[8rem] truncate py-0.5 pr-2">{r.name ?? r.mmsi}</td>
+                    <td className="py-0.5 pr-2 text-muted-foreground">{r.segment ?? r.kind ?? '-'}</td>
+                    <td className="max-w-[7rem] truncate py-0.5 pr-2 text-muted-foreground">
+                      {r.region ? r.region.replace(/_/g, ' ') : '-'}
+                    </td>
+                    <td className="py-0.5 pr-2">
+                      {r.direction === 'loading' ? (
+                        <span className="text-green-400">&#8679; Loading</span>
+                      ) : (
+                        <span className="text-orange-400">&#8681; Discharging</span>
+                      )}
+                    </td>
+                    <td className="py-0.5 pr-2 tabular-nums">{r.draught_before.toFixed(1)}m</td>
+                    <td className="py-0.5 pr-2 tabular-nums">{r.draught_after.toFixed(1)}m</td>
+                    <td className="py-0.5 pr-2 tabular-nums font-medium">
+                      <span className={r.direction === 'loading' ? 'text-green-400' : 'text-orange-400'}>
+                        {r.direction === 'loading' ? '+' : '-'}{r.change_m.toFixed(1)}m
+                      </span>
+                    </td>
+                    <td className="py-0.5">{riskBadge(r.risk_score, r.ofac)}</td>
                   </tr>
                 ))}
               </tbody>

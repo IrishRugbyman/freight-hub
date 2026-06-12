@@ -451,6 +451,30 @@ class AnchorageDwellResponse(BaseModel):
     rows: list[AnchoredVessel]
 
 
+class CargoTransitionEvent(BaseModel):
+    mmsi: int
+    name: str | None
+    kind: str | None
+    segment: str | None
+    region: str | None
+    direction: str           # "loading" or "discharging"
+    draught_before: float    # median draught in bucket before the step change
+    draught_after: float     # median draught in bucket after the step change
+    change_m: float          # absolute draught change in metres
+    transition_ts: str       # start of the 6h bucket where the step occurred
+    lat: float | None        # vessel position at transition
+    lon: float | None
+    risk_score: int | None
+    ofac: bool
+
+
+class CargoTransitionsResponse(BaseModel):
+    as_of: str
+    days: int
+    min_change: float
+    rows: list[CargoTransitionEvent]
+
+
 class FleetAgeBand(BaseModel):
     age_band: str            # "0-4", "5-9", "10-14", "15-19", "20-24", "25+"
     vessel_count: int

@@ -56,6 +56,8 @@ from .schemas import (
     RegionUtilRow,
     AnchorageDwellResponse,
     AnchoredVessel,
+    CargoTransitionEvent,
+    CargoTransitionsResponse,
     FleetAgeBand,
     FleetAgeResponse,
     RerouteRiskEvent,
@@ -1209,6 +1211,180 @@ def analytics_anchorage_dwell(zone: str = "singapore_west", limit: int = 50):
 
     rows.sort(key=lambda r: r.dwell_hours, reverse=True)
     return AnchorageDwellResponse(as_of=_iso(now) or "", zone=zone, rows=rows)
+
+
+@app.get("/api/analytics/cargo-transitions", response_model=CargoTransitionsResponse)
+def analytics_cargo_transitions(days: int = 7, min_change: float = 2.0, segment: str = ""):
+    """Vessels with significant draught step-changes: cargo loading or discharge events.
+
+    Groups each vessel's draught history into 6-hour buckets (median), then finds the
+    largest single-bucket-to-bucket step. Loading = draught increases, discharging =
+    draught decreases. Only fires when the step >= min_change metres and the bucket
+    has >= 2 fixes (filters static-data noise).
+    """
+    days = max(1, min(30, days))
+    min_change = max(0.5, min(20.0, min_change))
+    since = (datetime.now(UTC) - timedelta(days=days)).replace(tzinfo=None)
+    now = datetime.now(UTC).replace(tzinfo=None)
+
+    seg_clause = " AND segment = ?" if segment else ""
+    seg_params: list = [segment] if segment else []
+
+    # Pre-filter: vessels with enough draught variation (fast aggregation)
+    cand_df = db.query(
+        "SELECT mmsi, MAX(draught) - MIN(draught) as draught_range "
+        "FROM ais_snapshots "
+        f"WHERE snapshot_ts >= ? AND draught > 0 {seg_clause} "
+        "GROUP BY mmsi "
+        "HAVING COUNT(*) >= 6 AND MAX(draught) - MIN(draught) >= ? "
+        "ORDER BY MAX(draught) - MIN(draught) DESC "
+        "LIMIT 500",
+        [since] + seg_params + [min_change * 0.7],
+    )
+    if cand_df.empty:
+        return CargoTransitionsResponse(as_of=_iso(now) or "", days=days, min_change=min_change, rows=[])
+
+    cand_mmsis = [int(m) for m in cand_df["mmsi"].unique()]
+    ph = ",".join("?" * len(cand_mmsis))
+
+    snap_df = db.query(
+        f"SELECT mmsi, snapshot_ts, draught, lat, lon, kind, segment, region "
+        f"FROM ais_snapshots "
+        f"WHERE snapshot_ts >= ? AND draught > 0 AND mmsi IN ({ph}) "
+        f"ORDER BY mmsi, snapshot_ts",
+        [since] + cand_mmsis,
+    )
+    if snap_df.empty:
+        return CargoTransitionsResponse(as_of=_iso(now) or "", days=days, min_change=min_change, rows=[])
+
+    snap_df["snapshot_ts"] = pd.to_datetime(snap_df["snapshot_ts"])
+
+    # Floor timestamps to 6h buckets (dt.floor handles datetime64[us] and datetime64[ns])
+    snap_df["bucket"] = snap_df["snapshot_ts"].dt.floor("6h")
+
+    transitions: list[dict] = []
+    for mmsi_val, grp in snap_df.groupby("mmsi"):
+        bucket_agg = (
+            grp.groupby("bucket")
+            .agg(d_median=("draught", "median"), lat=("lat", "median"), lon=("lon", "median"), fix_cnt=("draught", "count"))
+            .reset_index()
+        )
+        bucket_agg = bucket_agg[bucket_agg["fix_cnt"] >= 2].sort_values("bucket").reset_index(drop=True)
+        if len(bucket_agg) < 2:
+            continue
+
+        bucket_agg["prev_d"] = bucket_agg["d_median"].shift(1)
+        bucket_agg["change"] = bucket_agg["d_median"] - bucket_agg["prev_d"]
+        bucket_agg = bucket_agg.dropna(subset=["change"])
+        if bucket_agg.empty:
+            continue
+
+        max_idx = bucket_agg["change"].abs().idxmax()
+        best = bucket_agg.loc[max_idx]
+        change_val = float(best["change"])
+        if abs(change_val) < min_change:
+            continue
+
+        # Bucket timestamp directly from pd.Timestamp floor
+        trans_ts = best["bucket"]
+        if hasattr(trans_ts, "to_pydatetime"):
+            trans_ts = trans_ts.to_pydatetime().replace(tzinfo=None)
+
+        # Most-common kind/segment/region for this vessel
+        kind_val = _str_or_none(grp["kind"].mode().iloc[0]) if not grp["kind"].dropna().empty else None
+        seg_val = _str_or_none(grp["segment"].mode().iloc[0]) if not grp["segment"].dropna().empty else None
+        region_slice = grp[
+            (grp["snapshot_ts"] >= pd.Timestamp(trans_ts))
+            & (grp["snapshot_ts"] < pd.Timestamp(trans_ts) + pd.Timedelta(hours=6))
+        ]
+        region_val = _str_or_none(
+            region_slice["region"].mode().iloc[0]
+            if not region_slice.empty and not region_slice["region"].dropna().empty
+            else (grp["region"].mode().iloc[0] if not grp["region"].dropna().empty else None)
+        )
+
+        transitions.append({
+            "mmsi": int(mmsi_val),
+            "kind": kind_val,
+            "segment": seg_val,
+            "region": region_val,
+            "direction": "loading" if change_val > 0 else "discharging",
+            "draught_before": round(float(best["prev_d"]), 1),
+            "draught_after": round(float(best["d_median"]), 1),
+            "change_m": round(abs(change_val), 1),
+            "transition_ts": _iso(trans_ts) or "",
+            "lat": round(float(best["lat"]), 4),
+            "lon": round(float(best["lon"]), 4),
+        })
+
+    if not transitions:
+        return CargoTransitionsResponse(as_of=_iso(now) or "", days=days, min_change=min_change, rows=[])
+
+    transitions.sort(key=lambda t: t["change_m"], reverse=True)
+
+    # Enrich with vessel names
+    all_mmsis = [t["mmsi"] for t in transitions[:100]]
+    ph2 = ",".join("?" * len(all_mmsis))
+
+    mmsi_name: dict[int, str | None] = {}
+    lp_df = db.query(f"SELECT mmsi, name FROM live_positions WHERE mmsi IN ({ph2})", all_mmsis)
+    for _, r in lp_df.iterrows():
+        mmsi_name[int(r["mmsi"])] = _str_or_none(r.get("name"))
+    missing = [m for m in all_mmsis if m not in mmsi_name]
+    if missing:
+        ph3 = ",".join("?" * len(missing))
+        v_df = db.query(f"SELECT mmsi, name FROM vessels WHERE mmsi IN ({ph3})", missing)
+        for _, r in v_df.iterrows():
+            mmsi_name[int(r["mmsi"])] = _str_or_none(r.get("name"))
+
+    # MMSI -> IMO -> risk score
+    mmsi_imo: dict[int, int | None] = {}
+    lp2 = db.query(f"SELECT mmsi, imo FROM live_positions WHERE mmsi IN ({ph2})", all_mmsis)
+    for _, r in lp2.iterrows():
+        mmsi_imo[int(r["mmsi"])] = _valid_imo(r.get("imo"))
+    for m in all_mmsis:
+        if m not in mmsi_imo:
+            mmsi_imo[m] = None
+
+    known_imos = list(set(i for i in mmsi_imo.values() if i))
+    imo_risk: dict[int, dict] = {}
+    if known_imos:
+        ph4 = ",".join("?" * len(known_imos))
+        reg_df = db.query(
+            f"SELECT imo, risk_score, COALESCE(ofac_sanctioned, false) AS ofac_sanctioned "
+            f"FROM vessel_registry WHERE imo IN ({ph4}) AND fetch_ok = true",
+            known_imos,
+            db=db.registry_db_path(),
+        )
+        for _, r in reg_df.iterrows():
+            imo_risk[int(r["imo"])] = {
+                "risk_score": int(r["risk_score"]) if r["risk_score"] is not None else None,
+                "ofac": bool(r["ofac_sanctioned"]),
+            }
+
+    rows = []
+    for t in transitions[:100]:
+        mmsi_val = t["mmsi"]
+        imo_val = mmsi_imo.get(mmsi_val)
+        risk_info = imo_risk.get(imo_val, {}) if imo_val else {}
+        rows.append(CargoTransitionEvent(
+            mmsi=mmsi_val,
+            name=mmsi_name.get(mmsi_val),
+            kind=t["kind"],
+            segment=t["segment"],
+            region=t["region"],
+            direction=t["direction"],
+            draught_before=t["draught_before"],
+            draught_after=t["draught_after"],
+            change_m=t["change_m"],
+            transition_ts=t["transition_ts"],
+            lat=t.get("lat"),
+            lon=t.get("lon"),
+            risk_score=risk_info.get("risk_score"),
+            ofac=bool(risk_info.get("ofac", False)),
+        ))
+
+    return CargoTransitionsResponse(as_of=_iso(now) or "", days=days, min_change=min_change, rows=rows)
 
 
 @app.get("/api/analytics/density", response_model=DensityResponse)

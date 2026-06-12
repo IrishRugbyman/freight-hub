@@ -836,6 +836,42 @@ export function useAnchorageDwell(zone = 'singapore_west', limit = 50) {
   })
 }
 
+export interface CargoTransitionEvent {
+  mmsi: number
+  name: string | null
+  kind: string | null
+  segment: string | null
+  region: string | null
+  direction: 'loading' | 'discharging'
+  draught_before: number
+  draught_after: number
+  change_m: number
+  transition_ts: string
+  lat: number | null
+  lon: number | null
+  risk_score: number | null
+  ofac: boolean
+}
+
+export interface CargoTransitionsResponse {
+  as_of: string
+  days: number
+  min_change: number
+  rows: CargoTransitionEvent[]
+}
+
+export function useCargoTransitions(days = 7, minChange = 2.0, segment = '') {
+  return useQuery({
+    queryKey: ['cargo-transitions', days, minChange, segment],
+    queryFn: () =>
+      getJSON<CargoTransitionsResponse>(
+        `/api/analytics/cargo-transitions?days=${days}&min_change=${minChange}${segment ? `&segment=${segment}` : ''}`,
+      ),
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+  })
+}
+
 export interface FleetAgeBand {
   age_band: string
   vessel_count: number

@@ -894,3 +894,157 @@ def test_anchorage_dwell_wrong_zone(dwell_client):
     r = dwell_client.get("/api/analytics/anchorage-dwell?zone=galveston_ltg")
     assert r.status_code == 200
     assert r.json()["rows"] == []
+
+
+# ---------------------------------------------------------------------------
+# Phase 22: cargo transition detection (loading / discharge events)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def cargo_client(tmp_path, monkeypatch):
+    """AIS DB seeded with two vessels showing clear draught step-changes.
+
+    Vessel 7001 (LOADING VLCC): draught 8m in early bucket, 20m in late bucket.
+    Vessel 7002 (DISCHARGING BULK): draught 18m early, 7m late.
+    Vessel 7003 (STABLE): draught 5m throughout - no transition.
+    All snapshots placed across two distinct 6h buckets (15h apart) to guarantee
+    bucket separation regardless of when the tests run.
+    """
+    import duckdb
+    from datetime import UTC, datetime, timedelta
+    from fastapi.testclient import TestClient
+
+    _now = datetime.now(UTC).replace(tzinfo=None)
+
+    # Two groups: early (23-20h ago) and late (5-2h ago) - always in different 6h buckets
+    early = [_now - timedelta(hours=h) for h in (23, 22, 21, 20)]
+    late = [_now - timedelta(hours=h) for h in (5, 4, 3, 2)]
+
+    ais_schema = """
+    CREATE TABLE live_positions (
+        mmsi BIGINT PRIMARY KEY, name VARCHAR, lat DOUBLE, lon DOUBLE,
+        sog DOUBLE, cog DOUBLE, heading DOUBLE, destination VARCHAR,
+        ship_type INTEGER, length_m DOUBLE, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, updated_ts TIMESTAMP,
+        imo BIGINT, draught DOUBLE, nav_status INTEGER, eta VARCHAR
+    );
+    CREATE TABLE vessels (
+        mmsi BIGINT PRIMARY KEY, imo BIGINT, name VARCHAR, flag VARCHAR,
+        flag_iso2 VARCHAR, mid INTEGER, call_sign VARCHAR, vessel_type VARCHAR,
+        dwt DOUBLE, grt DOUBLE, build_year INTEGER, length_m DOUBLE, beam_m DOUBLE,
+        owner VARCHAR, manager VARCHAR, class_society VARCHAR, enriched_at TIMESTAMP,
+        equasis_ok BOOLEAN
+    );
+    CREATE TABLE ais_snapshots (
+        snapshot_ts TIMESTAMP, mmsi BIGINT,
+        kind VARCHAR, segment VARCHAR, region VARCHAR,
+        lat DOUBLE, lon DOUBLE, ship_type INTEGER, length_m DOUBLE,
+        sog DOUBLE, nav_status INTEGER, draught DOUBLE, destination VARCHAR,
+        PRIMARY KEY (snapshot_ts, mmsi)
+    );
+    """
+
+    ais_file = tmp_path / "ais.duckdb"
+    conn = duckdb.connect(str(ais_file))
+    conn.execute(ais_schema)
+    conn.execute(
+        "INSERT INTO live_positions VALUES (7001,'LOADING VLCC',25.0,56.0,0.0,0.0,NULL,'DUBAI',80,330,'tanker','VLCC','hormuz',?,9001001,8.0,1,NULL)",
+        [_now],
+    )
+    conn.execute(
+        "INSERT INTO live_positions VALUES (7002,'DISCH BULK',1.3,103.7,0.5,0.0,NULL,'SINGAPORE',71,200,'bulk','Capesize','singapore_malacca',?,9001002,7.0,1,NULL)",
+        [_now],
+    )
+    conn.execute(
+        "INSERT INTO live_positions VALUES (7003,'STABLE COASTER',51.9,4.5,3.0,0.0,NULL,'ROTTERDAM',80,90,'tanker','MR','ara',?,NULL,5.0,0,NULL)",
+        [_now],
+    )
+
+    # Vessel 7001: loading (8m -> 20m)
+    for ts in early:
+        conn.execute(
+            "INSERT INTO ais_snapshots VALUES (?,7001,'tanker','VLCC','hormuz',25.0,56.0,80,330,0.5,1,8.0,'DUBAI')",
+            [ts],
+        )
+    for ts in late:
+        conn.execute(
+            "INSERT INTO ais_snapshots VALUES (?,7001,'tanker','VLCC','hormuz',25.1,56.1,80,330,0.3,1,20.0,'FUJAIRAH')",
+            [ts],
+        )
+
+    # Vessel 7002: discharging (18m -> 7m)
+    for ts in early:
+        conn.execute(
+            "INSERT INTO ais_snapshots VALUES (?,7002,'bulk','Capesize','singapore_malacca',1.3,103.7,71,200,0.2,1,18.0,'SINGAPORE')",
+            [ts],
+        )
+    for ts in late:
+        conn.execute(
+            "INSERT INTO ais_snapshots VALUES (?,7002,'bulk','Capesize','singapore_malacca',1.35,103.75,71,200,0.1,1,7.0,'SINGAPORE')",
+            [ts],
+        )
+
+    # Vessel 7003: stable draught (no transition)
+    for ts in early + late:
+        conn.execute(
+            "INSERT INTO ais_snapshots VALUES (?,7003,'tanker','MR','ara',51.9,4.5,80,90,8.0,0,5.0,'ROTTERDAM')",
+            [ts],
+        )
+    conn.close()
+
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
+    monkeypatch.setenv("ANALYTICS_DB", str(tmp_path / "analytics.duckdb"))
+    from app.main import app
+    return TestClient(app)
+
+
+def test_cargo_transitions_structure(cargo_client):
+    r = cargo_client.get("/api/analytics/cargo-transitions")
+    assert r.status_code == 200
+    d = r.json()
+    assert "rows" in d
+    assert "days" in d
+    assert "min_change" in d
+    assert "as_of" in d
+
+
+def test_cargo_transitions_loading_detected(cargo_client):
+    r = cargo_client.get("/api/analytics/cargo-transitions?days=7&min_change=2.0")
+    rows = r.json()["rows"]
+    loading = [row for row in rows if row["mmsi"] == 7001]
+    assert len(loading) == 1
+    assert loading[0]["direction"] == "loading"
+    assert loading[0]["draught_after"] > loading[0]["draught_before"]
+    assert loading[0]["change_m"] >= 10.0
+
+
+def test_cargo_transitions_discharging_detected(cargo_client):
+    r = cargo_client.get("/api/analytics/cargo-transitions?days=7&min_change=2.0")
+    rows = r.json()["rows"]
+    disch = [row for row in rows if row["mmsi"] == 7002]
+    assert len(disch) == 1
+    assert disch[0]["direction"] == "discharging"
+    assert disch[0]["draught_before"] > disch[0]["draught_after"]
+    assert disch[0]["change_m"] >= 10.0
+
+
+def test_cargo_transitions_stable_excluded(cargo_client):
+    r = cargo_client.get("/api/analytics/cargo-transitions?days=7&min_change=2.0")
+    rows = r.json()["rows"]
+    stable = [row for row in rows if row["mmsi"] == 7003]
+    assert len(stable) == 0
+
+
+def test_cargo_transitions_min_change_filter(cargo_client):
+    r = cargo_client.get("/api/analytics/cargo-transitions?days=7&min_change=20.0")
+    assert r.status_code == 200
+    # Both transitions are ~12m, below min_change=20 - should return empty
+    assert r.json()["rows"] == []
+
+
+def test_cargo_transitions_sorted_by_change(cargo_client):
+    r = cargo_client.get("/api/analytics/cargo-transitions?days=7&min_change=2.0")
+    rows = r.json()["rows"]
+    if len(rows) >= 2:
+        changes = [row["change_m"] for row in rows]
+        assert changes == sorted(changes, reverse=True)

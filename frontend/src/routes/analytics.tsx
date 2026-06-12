@@ -18,6 +18,7 @@ const ReroutesCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ defau
 const TransitRiskCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.TransitRiskCard })))
 const FleetAgeCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.FleetAgeCard })))
 const AnchorageDwellCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.AnchorageDwellCard })))
+const CargoTransitionsCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.CargoTransitionsCard })))
 
 function ChartSkeleton() {
   return <div className="h-[300px] animate-pulse rounded-lg bg-muted/40" />
@@ -68,6 +69,9 @@ function AnalyticsPage() {
           <Suspense fallback={<ChartSkeleton />}><StsRiskCard /></Suspense>
           <Suspense fallback={<ChartSkeleton />}><ReroutesCard /></Suspense>
         </div>
+
+        <h2 className="text-base font-semibold text-foreground">Cargo Intelligence</h2>
+        <Suspense fallback={<ChartSkeleton />}><CargoTransitionsCard /></Suspense>
 
         <h2 className="text-base font-semibold text-foreground">Fleet Speed &amp; Utilization</h2>
         <Suspense fallback={<ChartSkeleton />}><SpeedTrendCard /></Suspense>
