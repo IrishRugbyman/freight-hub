@@ -203,8 +203,47 @@ def _norm_dest(s: str) -> str:
     return _re.sub(r'\s+', ' ', _re.sub(r'[^A-Z0-9 ]', '', s.strip().upper())).strip()
 
 
+import threading as _threading
+
+# In-process cache for the full live_positions DataFrame.
+# The AIS collector writes every ~150s holding a brief write lock. When the
+# Analytics page loads it fires ~15 simultaneous DB queries; without a cache
+# those that hit the lock window all get empty results and cache 0s for their
+# stale period. One warm copy per 30s eliminates the problem.
+_live_cache_lock = _threading.Lock()
+_live_cache: dict = {"df": None, "ts": 0.0, "path": ""}
+_LIVE_CACHE_TTL = 30.0  # seconds
+
+
+def _live_all():
+    """Return the full live_positions DataFrame, served from a 30s in-process cache."""
+    import time
+
+    now = time.monotonic()
+    current_path = str(db.db_path())
+    with _live_cache_lock:
+        path_match = _live_cache["path"] == current_path
+        if path_match and _live_cache["df"] is not None and now - _live_cache["ts"] < _LIVE_CACHE_TTL:
+            return _live_cache["df"]
+    df = db.query(
+        "SELECT * FROM live_positions WHERE updated_ts > ?",
+        [_fresh_cutoff()],
+    )
+    if not df.empty:
+        with _live_cache_lock:
+            _live_cache["df"] = df
+            _live_cache["ts"] = now
+            _live_cache["path"] = current_path
+    elif _live_cache["df"] is not None and path_match:
+        # DB was locked on same path - return stale cache rather than propagating 0s
+        return _live_cache["df"]
+    return df
+
+
 def _live(where: str = "", params: list | None = None):
     """Fresh live_positions rows with an optional extra WHERE clause."""
+    if not where and not params:
+        return _live_all()
     clause = f" AND {where}" if where else ""
     return db.query(
         f"SELECT * FROM live_positions WHERE updated_ts > ?{clause}",
