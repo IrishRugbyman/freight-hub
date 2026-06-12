@@ -496,6 +496,25 @@ class FleetAgeResponse(BaseModel):
     bands: list[FleetAgeBand]
 
 
+class SlowSteamerEvent(BaseModel):
+    mmsi: int
+    name: str | None
+    kind: str | None
+    segment: str | None
+    region: str | None
+    sog: float                  # current speed over ground (knots)
+    segment_median_sog: float   # median for this segment among underway vessels
+    pct_of_median: float        # sog / segment_median_sog * 100
+    risk_score: int | None
+    ofac: bool
+
+
+class SlowSteamersResponse(BaseModel):
+    as_of: str
+    total_fleet_underway: int   # live vessels with sog > 0.5 and not anchored/moored
+    rows: list[SlowSteamerEvent]
+
+
 class TransitRiskEvent(BaseModel):
     mmsi: int
     name: str | None

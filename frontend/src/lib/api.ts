@@ -877,6 +877,35 @@ export function useCargoTransitions(days = 7, minChange = 2.0, segment = '') {
   })
 }
 
+export interface SlowSteamerEvent {
+  mmsi: number
+  name: string | null
+  kind: string | null
+  segment: string | null
+  region: string | null
+  sog: number
+  segment_median_sog: number
+  pct_of_median: number
+  risk_score: number | null
+  ofac: boolean
+}
+
+export interface SlowSteamersResponse {
+  as_of: string
+  total_fleet_underway: number
+  rows: SlowSteamerEvent[]
+}
+
+export function useSlowSteamers(kind = '') {
+  return useQuery({
+    queryKey: ['slow-steamers', kind],
+    queryFn: () =>
+      getJSON<SlowSteamersResponse>(`/api/analytics/slow-steamers${kind ? `?kind=${kind}` : ''}`),
+    staleTime: REFETCH_MS,
+    refetchInterval: REFETCH_MS,
+  })
+}
+
 export interface FleetAgeBand {
   age_band: string
   vessel_count: number

@@ -1048,3 +1048,132 @@ def test_cargo_transitions_sorted_by_change(cargo_client):
     if len(rows) >= 2:
         changes = [row["change_m"] for row in rows]
         assert changes == sorted(changes, reverse=True)
+
+
+# ---------------------------------------------------------------------------
+# Phase 24: slow steamer detection (fleet speed anomaly)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def slow_client(tmp_path, monkeypatch):
+    """Client with live_positions seeded to have clear slow-steaming outliers.
+
+    Segment 'Capesize' (bulk): 10 vessels at 11-12 kn (median ~11.5), one at 4 kn (slow).
+    Segment 'VLCC' (tanker): 8 vessels at 13-14 kn, one at 3 kn (slow).
+    Vessel marked MOORED (nav_status=5) at 0.5 kn is excluded.
+    """
+    import duckdb
+    from datetime import UTC, datetime
+    from fastapi.testclient import TestClient
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+
+    ais_schema = """
+    CREATE TABLE live_positions (
+        mmsi BIGINT PRIMARY KEY, name VARCHAR, lat DOUBLE, lon DOUBLE,
+        sog DOUBLE, cog DOUBLE, heading DOUBLE, destination VARCHAR,
+        ship_type INTEGER, length_m DOUBLE, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, updated_ts TIMESTAMP,
+        imo BIGINT, draught DOUBLE, nav_status INTEGER, eta VARCHAR
+    );
+    CREATE TABLE ais_snapshots (
+        snapshot_ts TIMESTAMP, mmsi BIGINT,
+        kind VARCHAR, segment VARCHAR, region VARCHAR,
+        lat DOUBLE, lon DOUBLE, ship_type INTEGER, length_m DOUBLE,
+        sog DOUBLE, nav_status INTEGER, draught DOUBLE, destination VARCHAR,
+        PRIMARY KEY (snapshot_ts, mmsi)
+    );
+    """
+
+    f = tmp_path / "ais.duckdb"
+    conn = duckdb.connect(str(f))
+    conn.execute(ais_schema)
+
+    # 10 normal Capesizes at ~11.5 kn
+    for i in range(10):
+        conn.execute(
+            "INSERT INTO live_positions VALUES (?,?,10.0,20.0,?,90.0,NULL,'CNSHA',74,200,'bulk','Capesize','ara',?,NULL,NULL,0,NULL)",
+            [8000 + i, f"CAPE_{i:02d}", 11.0 + i * 0.1, now],
+        )
+
+    # One slow Capesize at 4 kn
+    conn.execute(
+        "INSERT INTO live_positions VALUES (8099,'SLOW CAPE',10.5,20.5,4.0,90.0,NULL,'CNSHA',74,200,'bulk','Capesize','ara',?,NULL,NULL,0,NULL)",
+        [now],
+    )
+
+    # 8 normal VLCCs at ~13.5 kn
+    for i in range(8):
+        conn.execute(
+            "INSERT INTO live_positions VALUES (?,?,25.0,56.0,?,270.0,NULL,'AEFJR',80,330,'tanker','VLCC','hormuz',?,NULL,NULL,0,NULL)",
+            [9000 + i, f"VLCC_{i:02d}", 13.0 + i * 0.1, now],
+        )
+
+    # One slow VLCC at 3 kn
+    conn.execute(
+        "INSERT INTO live_positions VALUES (9099,'SLOW VLCC',25.5,56.5,3.0,270.0,NULL,'AEFJR',80,330,'tanker','VLCC','hormuz',?,NULL,NULL,0,NULL)",
+        [now],
+    )
+
+    # One moored vessel at slow speed - should be EXCLUDED (nav_status=5)
+    conn.execute(
+        "INSERT INTO live_positions VALUES (9999,'MOORED SHIP',51.9,4.5,0.5,0.0,NULL,'ROTTERDAM',80,100,'tanker','MR','ara',?,NULL,NULL,5,NULL)",
+        [now],
+    )
+
+    conn.close()
+
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(f))
+    monkeypatch.setenv("ANALYTICS_DB", str(tmp_path / "analytics.duckdb"))
+    from app.main import app
+    return TestClient(app)
+
+
+def test_slow_steamers_structure(slow_client):
+    r = slow_client.get("/api/analytics/slow-steamers")
+    assert r.status_code == 200
+    d = r.json()
+    assert "rows" in d
+    assert "total_fleet_underway" in d
+    assert "as_of" in d
+
+
+def test_slow_steamers_detects_outliers(slow_client):
+    r = slow_client.get("/api/analytics/slow-steamers")
+    rows = r.json()["rows"]
+    mmsis = {row["mmsi"] for row in rows}
+    assert 8099 in mmsis  # slow Capesize
+    assert 9099 in mmsis  # slow VLCC
+
+
+def test_slow_steamers_excludes_normal(slow_client):
+    r = slow_client.get("/api/analytics/slow-steamers")
+    rows = r.json()["rows"]
+    mmsis = {row["mmsi"] for row in rows}
+    # Normal vessels should not appear as slow steamers
+    for i in range(5):
+        assert (8000 + i) not in mmsis
+
+
+def test_slow_steamers_excludes_moored(slow_client):
+    r = slow_client.get("/api/analytics/slow-steamers")
+    rows = r.json()["rows"]
+    assert 9999 not in {row["mmsi"] for row in rows}
+
+
+def test_slow_steamers_kind_filter(slow_client):
+    r = slow_client.get("/api/analytics/slow-steamers?kind=tanker")
+    rows = r.json()["rows"]
+    for row in rows:
+        assert row["kind"] == "tanker"
+    assert 8099 not in {row["mmsi"] for row in rows}
+
+
+def test_slow_steamers_pct_of_median(slow_client):
+    r = slow_client.get("/api/analytics/slow-steamers")
+    rows = r.json()["rows"]
+    slow_cape = next((row for row in rows if row["mmsi"] == 8099), None)
+    if slow_cape:
+        assert slow_cape["pct_of_median"] < 60.0
+        assert slow_cape["segment_median_sog"] > 0
+        assert slow_cape["sog"] == 4.0

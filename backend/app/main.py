@@ -63,6 +63,8 @@ from .schemas import (
     RerouteRiskEvent,
     RerouteRiskResponse,
     RoutesResponse,
+    SlowSteamerEvent,
+    SlowSteamersResponse,
     TransitRiskEvent,
     TransitRiskResponse,
     SpeedAnalyticsResponse,
@@ -1870,6 +1872,109 @@ def fleet_age():
         reference_year=ref_year,
         bands=bands,
     )
+
+
+@app.get("/api/analytics/slow-steamers", response_model=SlowSteamersResponse)
+def analytics_slow_steamers(kind: str = "", limit: int = 50):
+    """Vessels currently underway at less than 60% of their segment's median SOG.
+
+    Slow steaming is a freight market signal: vessels reduce speed when cargo demand
+    falls (fuel savings > waiting-for-cargo cost). Anchored and moored vessels are
+    excluded. Segment medians are computed from the live fleet.
+    """
+    limit = max(5, min(200, limit))
+    now = datetime.now(UTC).replace(tzinfo=None)
+
+    # All underway vessels with reliable SOG (nav_status 0 = underway engine; exclude anchored=1, moored=5)
+    lp_df = db.query(
+        "SELECT mmsi, name, kind, segment, region, sog, imo "
+        "FROM live_positions "
+        "WHERE sog IS NOT NULL AND sog > 0.5 AND sog < 25.0 "
+        "  AND (nav_status IS NULL OR nav_status NOT IN (1, 5))"
+    )
+
+    if kind:
+        lp_df = lp_df[lp_df["kind"] == kind]
+
+    if lp_df.empty:
+        return SlowSteamersResponse(as_of=_iso(now) or "", total_fleet_underway=0, rows=[])
+
+    total_underway = len(lp_df)
+
+    # Segment medians from vessels actually underway (sog >= 2 kn)
+    underway_mask = lp_df["sog"] >= 2.0
+    seg_medians: dict[str, float] = {}
+    for seg, grp in lp_df[underway_mask].groupby("segment"):
+        if len(grp) >= 5:  # require at least 5 vessels for a reliable median
+            seg_medians[str(seg)] = float(grp["sog"].median())
+
+    if not seg_medians:
+        return SlowSteamersResponse(as_of=_iso(now) or "", total_fleet_underway=total_underway, rows=[])
+
+    # Find vessels at < 60% of their segment median
+    candidates: list[dict] = []
+    for _, v in lp_df.iterrows():
+        seg = _str_or_none(v.get("segment"))
+        if not seg:
+            continue
+        median_sog = seg_medians.get(seg)
+        if not median_sog or median_sog < 1.0:
+            continue
+        ratio = float(v["sog"]) / median_sog
+        if ratio >= 0.6:
+            continue
+        candidates.append({
+            "mmsi": int(v["mmsi"]),
+            "name": _str_or_none(v.get("name")),
+            "kind": _str_or_none(v.get("kind")),
+            "segment": seg,
+            "region": _str_or_none(v.get("region")),
+            "sog": round(float(v["sog"]), 1),
+            "segment_median_sog": round(median_sog, 1),
+            "pct_of_median": round(ratio * 100, 1),
+            "imo": _valid_imo(v.get("imo")),
+        })
+
+    candidates.sort(key=lambda c: c["pct_of_median"])
+    candidates = candidates[:limit]
+
+    if not candidates:
+        return SlowSteamersResponse(as_of=_iso(now) or "", total_fleet_underway=total_underway, rows=[])
+
+    # Enrich with risk scores
+    all_imos = list(set(c["imo"] for c in candidates if c["imo"]))
+    imo_risk: dict[int, dict] = {}
+    if all_imos:
+        ph = ",".join("?" * len(all_imos))
+        reg_df = db.query(
+            f"SELECT imo, risk_score, COALESCE(ofac_sanctioned, false) AS ofac_sanctioned "
+            f"FROM vessel_registry WHERE imo IN ({ph}) AND fetch_ok = true",
+            all_imos,
+            db=db.registry_db_path(),
+        )
+        for _, r in reg_df.iterrows():
+            imo_risk[int(r["imo"])] = {
+                "risk_score": int(r["risk_score"]) if r["risk_score"] is not None else None,
+                "ofac": bool(r["ofac_sanctioned"]),
+            }
+
+    rows = []
+    for c in candidates:
+        risk_info = imo_risk.get(c["imo"], {}) if c["imo"] else {}
+        rows.append(SlowSteamerEvent(
+            mmsi=c["mmsi"],
+            name=c["name"],
+            kind=c["kind"],
+            segment=c["segment"],
+            region=c["region"],
+            sog=c["sog"],
+            segment_median_sog=c["segment_median_sog"],
+            pct_of_median=c["pct_of_median"],
+            risk_score=risk_info.get("risk_score"),
+            ofac=bool(risk_info.get("ofac", False)),
+        ))
+
+    return SlowSteamersResponse(as_of=_iso(now) or "", total_fleet_underway=total_underway, rows=rows)
 
 
 @app.get("/api/fleet/export")

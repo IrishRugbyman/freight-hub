@@ -13,7 +13,7 @@ import {
   YAxis,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions } from '@/lib/api'
+import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers } from '@/lib/api'
 
 const CHOKEPOINTS = [
   'singapore_malacca', 'suez', 'hormuz', 'panama', 'gibraltar',
@@ -1142,6 +1142,83 @@ export function CargoTransitionsCard() {
                       <span className={r.direction === 'loading' ? 'text-green-400' : 'text-orange-400'}>
                         {r.direction === 'loading' ? '+' : '-'}{r.change_m.toFixed(1)}m
                       </span>
+                    </td>
+                    <td className="py-0.5">{riskBadge(r.risk_score, r.ofac)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+export function SlowSteamersCard() {
+  const [kind, setKind] = React.useState('')
+  const { data, isLoading } = useSlowSteamers(kind)
+  const rows = data?.rows ?? []
+
+  const pctColor = (pct: number) => {
+    if (pct < 30) return 'text-red-400'
+    if (pct < 45) return 'text-orange-400'
+    return 'text-yellow-400'
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <CardTitle className="text-sm font-medium">Slow Steamers</CardTitle>
+          <div className="flex gap-1">
+            {(['', 'tanker', 'bulk'] as const).map((k) => (
+              <button
+                key={k || 'all'}
+                onClick={() => setKind(k)}
+                className={`rounded px-2 py-0.5 text-xs ${kind === k ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+              >
+                {k || 'All'}
+              </button>
+            ))}
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          Underway vessels below 60% of segment median SOG
+          {data && ` (${data.total_fleet_underway.toLocaleString()} underway tracked)`}
+        </p>
+      </CardHeader>
+      <CardContent className="pt-0">
+        {isLoading && <p className="text-xs text-muted-foreground">Loading...</p>}
+        {!isLoading && rows.length === 0 && (
+          <p className="text-xs text-muted-foreground">No slow-steaming vessels detected.</p>
+        )}
+        {!isLoading && rows.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-muted-foreground">
+                  <th className="pb-1 pr-2 font-normal">Vessel</th>
+                  <th className="pb-1 pr-2 font-normal">Seg</th>
+                  <th className="pb-1 pr-2 font-normal">Region</th>
+                  <th className="pb-1 pr-2 font-normal">SOG</th>
+                  <th className="pb-1 pr-2 font-normal">Median</th>
+                  <th className="pb-1 pr-2 font-normal">% of Med</th>
+                  <th className="pb-1 font-normal">Risk</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r, i) => (
+                  <tr key={`${r.mmsi}-${i}`} className="border-t border-border/30">
+                    <td className="max-w-[8rem] truncate py-0.5 pr-2">{r.name ?? r.mmsi}</td>
+                    <td className="py-0.5 pr-2 text-muted-foreground">{r.segment ?? r.kind ?? '-'}</td>
+                    <td className="max-w-[7rem] truncate py-0.5 pr-2 text-muted-foreground">
+                      {r.region ? r.region.replace(/_/g, ' ') : '-'}
+                    </td>
+                    <td className="py-0.5 pr-2 tabular-nums">{r.sog.toFixed(1)} kn</td>
+                    <td className="py-0.5 pr-2 tabular-nums text-muted-foreground">{r.segment_median_sog.toFixed(1)} kn</td>
+                    <td className={`py-0.5 pr-2 tabular-nums font-medium ${pctColor(r.pct_of_median)}`}>
+                      {r.pct_of_median.toFixed(0)}%
                     </td>
                     <td className="py-0.5">{riskBadge(r.risk_score, r.ofac)}</td>
                   </tr>
