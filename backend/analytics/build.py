@@ -29,6 +29,7 @@ from .detect import (
     dark_voyage_events,
     destination_change_events,
     fleet_density_rows,
+    gps_spoof_events,
     loitering_events,
     sts_candidates,
     transit_episodes,
@@ -349,6 +350,7 @@ def run(reset: bool = False) -> None:
         [lookback_since],
     )
 
+    spoof_events: list[dict] = []
     if not df_48h.empty:
         df_48h["snapshot_ts"] = pd.to_datetime(df_48h["snapshot_ts"])
 
@@ -430,6 +432,22 @@ def run(reset: bool = False) -> None:
                 ],
             )
 
+        # 5d. GPS spoofing / position jump anomalies
+        spoof_events = gps_spoof_events(df_48h)
+        log.info("detected %d GPS position-jump events", len(spoof_events))
+        for e in spoof_events:
+            conn.execute(
+                "INSERT OR REPLACE INTO ais_events "
+                "(event_id, type, mmsi, mmsi2, start_ts, end_ts, lat, lon, "
+                " region, kind, segment, details) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    e["event_id"], e["type"], e["mmsi"], e["mmsi2"],
+                    e["start_ts"], e["end_ts"], e["lat"], e["lon"],
+                    e["region"], e["kind"], e["segment"], e["details"],
+                ],
+            )
+
     # ------------------------------------------------------------------
     # 7. Dark voyage composite detection (operates on ais_events, not raw snapshots)
     # ------------------------------------------------------------------
@@ -461,8 +479,8 @@ def run(reset: bool = False) -> None:
 
     conn.close()
     log.info(
-        "analytics.build complete: transits=%d anchored=%d density=%d reroutes=%d dark_voyages=%d",
-        len(transits), len(anchored), len(density_rows), len(reroutes), len(dark_voyages),
+        "analytics.build complete: transits=%d anchored=%d density=%d reroutes=%d dark_voyages=%d spoof=%d",
+        len(transits), len(anchored), len(density_rows), len(reroutes), len(dark_voyages), len(spoof_events),
     )
 
 

@@ -578,3 +578,65 @@ def test_dark_voyage_no_duplicates():
     result = dark_voyage_events(_dark_df(rows))
     event_ids = [r["event_id"] for r in result]
     assert len(event_ids) == len(set(event_ids))
+
+
+# ---------------------------------------------------------------------------
+# gps_spoof_events
+# ---------------------------------------------------------------------------
+
+from analytics.detect import gps_spoof_events
+
+
+def _spoof_df(rows: list[dict]) -> pd.DataFrame:
+    df = pd.DataFrame(rows)
+    df["snapshot_ts"] = pd.to_datetime(df["snapshot_ts"])
+    for col in ("sog", "nav_status", "draught", "destination", "kind", "segment", "region"):
+        if col not in df.columns:
+            df[col] = None
+    return df
+
+
+def test_spoof_fires_large_jump():
+    """Vessel moving 300km in 15 minutes should fire a spoof event."""
+    rows = [
+        {"mmsi": 7001, "snapshot_ts": _NOW - timedelta(minutes=20), "lat": 0.0, "lon": 0.0, "sog": 12.0},
+        {"mmsi": 7001, "snapshot_ts": _NOW - timedelta(minutes=5), "lat": 2.7, "lon": 0.0, "sog": 14.0},
+        # ~300 km jump in 15 min
+    ]
+    result = gps_spoof_events(_spoof_df(rows))
+    assert len(result) >= 1
+    assert result[0]["type"] == "spoof"
+    import json
+    det = json.loads(result[0]["details"])
+    assert det["jump_km"] > 50
+
+
+def test_spoof_no_fire_slow_vessel():
+    """Anchored vessel (SOG < threshold) should not fire spoof."""
+    rows = [
+        {"mmsi": 7002, "snapshot_ts": _NOW - timedelta(minutes=20), "lat": 0.0, "lon": 0.0, "sog": 0.1},
+        {"mmsi": 7002, "snapshot_ts": _NOW - timedelta(minutes=5), "lat": 2.7, "lon": 0.0, "sog": 0.2},
+    ]
+    result = gps_spoof_events(_spoof_df(rows))
+    assert len(result) == 0
+
+
+def test_spoof_no_fire_small_jump():
+    """Small jump (< 50km) should not fire."""
+    rows = [
+        {"mmsi": 7003, "snapshot_ts": _NOW - timedelta(minutes=20), "lat": 0.0, "lon": 0.0, "sog": 15.0},
+        {"mmsi": 7003, "snapshot_ts": _NOW - timedelta(minutes=10), "lat": 0.05, "lon": 0.0, "sog": 15.0},
+        # ~5.5 km
+    ]
+    result = gps_spoof_events(_spoof_df(rows))
+    assert len(result) == 0
+
+
+def test_spoof_no_fire_long_gap():
+    """Jump over a long time gap (> 30 min) should not fire - could be a real gap."""
+    rows = [
+        {"mmsi": 7004, "snapshot_ts": _NOW - timedelta(hours=2), "lat": 0.0, "lon": 0.0, "sog": 15.0},
+        {"mmsi": 7004, "snapshot_ts": _NOW, "lat": 2.7, "lon": 0.0, "sog": 14.0},
+    ]
+    result = gps_spoof_events(_spoof_df(rows))
+    assert len(result) == 0

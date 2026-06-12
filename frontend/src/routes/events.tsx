@@ -11,6 +11,7 @@ const TYPE_LABELS: Record<string, string> = {
   sts: 'STS Candidate',
   reroute: 'Reroute',
   dark_voyage: 'Dark Voyage',
+  spoof: 'Position Jump',
 }
 
 const TYPE_COLORS: Record<string, string> = {
@@ -19,6 +20,7 @@ const TYPE_COLORS: Record<string, string> = {
   sts: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
   reroute: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
   dark_voyage: 'bg-purple-500/20 text-purple-300 border-purple-500/30',
+  spoof: 'bg-pink-500/20 text-pink-300 border-pink-500/30',
 }
 
 function timeAgo(ts: string): string {
@@ -47,7 +49,7 @@ export default function EventsPage() {
     navigate({ to: '/', search: { mmsi: ev.mmsi, lat: ev.lat, lon: ev.lon } as never })
   }
 
-  const types = ['dark_voyage', 'gap', 'loiter', 'sts', 'reroute'] as const
+  const types = ['dark_voyage', 'spoof', 'gap', 'loiter', 'sts', 'reroute'] as const
 
   return (
     <div className="mx-auto max-w-5xl space-y-4 p-4">
@@ -136,7 +138,10 @@ function EventRow({ ev, onSelect }: { ev: AisEvent; onSelect: (ev: AisEvent) => 
               <span>{ev.details.new_destination as string ?? '?'}</span>
             </span>
           )}
-          {ev.type !== 'reroute' && durationLabel(ev) && <span>{durationLabel(ev)}</span>}
+          {ev.type === 'spoof' && typeof ev.details.jump_km === 'number' && (
+            <span>{(ev.details.jump_km as number).toFixed(0)} km jump in {(ev.details.dt_minutes as number).toFixed(0)} min</span>
+          )}
+          {ev.type !== 'reroute' && ev.type !== 'spoof' && durationLabel(ev) && <span>{durationLabel(ev)}</span>}
         </div>
       </div>
 

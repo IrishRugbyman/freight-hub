@@ -375,7 +375,7 @@ export function useAnalyticsZones() {
 
 export interface AisEvent {
   event_id: string
-  type: 'gap' | 'loiter' | 'sts' | 'reroute' | 'dark_voyage'
+  type: 'gap' | 'loiter' | 'sts' | 'reroute' | 'dark_voyage' | 'spoof'
   mmsi: number
   mmsi2: number | null
   start_ts: string

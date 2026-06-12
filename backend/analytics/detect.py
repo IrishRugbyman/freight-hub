@@ -804,3 +804,83 @@ def dark_voyage_events(events_df: pd.DataFrame) -> list[dict]:
             )
 
     return results
+
+
+# --- GPS spoofing / position anomaly detection --------------------------------
+
+# A vessel reporting a position jump > X km in a short interval is likely spoofed
+_SPOOF_JUMP_KM = 50.0        # minimum jump distance to flag
+_SPOOF_MAX_GAP_H = 0.5       # max time between fixes to call it a jump (not a gap)
+_SPOOF_MIN_SOG_KN = 2.0      # only flag if vessel was nominally moving
+
+
+def gps_spoof_events(df: pd.DataFrame) -> list[dict]:
+    """Detect implausible position jumps that indicate GPS spoofing.
+
+    For each vessel, compare consecutive AIS fixes. If two fixes within _SPOOF_MAX_GAP_H
+    of each other show displacement > _SPOOF_JUMP_KM, record a position_jump event.
+
+    Only vessels reporting SOG >= _SPOOF_MIN_SOG_KN are checked - anchored vessels
+    occasionally report stale positions and create false positives.
+
+    Returns dicts compatible with ais_events (type='spoof').
+    details JSON: {jump_km, dt_minutes, reported_sog, from_lat, from_lon, to_lat, to_lon}
+    """
+    if df.empty:
+        return []
+
+    results: list[dict] = []
+
+    for mmsi, grp in df.groupby("mmsi"):
+        mmsi_int = int(mmsi)
+        g = grp.sort_values("snapshot_ts").reset_index(drop=True)
+        if len(g) < 2:
+            continue
+
+        for i in range(1, len(g)):
+            prev = g.iloc[i - 1]
+            curr = g.iloc[i]
+
+            dt_h = (curr["snapshot_ts"] - prev["snapshot_ts"]).total_seconds() / 3600
+            if dt_h <= 0 or dt_h > _SPOOF_MAX_GAP_H:
+                continue
+
+            sog = float(curr["sog"]) if curr.get("sog") is not None and not (isinstance(curr.get("sog"), float) and pd.isna(curr["sog"])) else 0.0
+            if sog < _SPOOF_MIN_SOG_KN:
+                continue
+
+            dist_m = _haversine_m(float(prev["lat"]), float(prev["lon"]),
+                                   float(curr["lat"]), float(curr["lon"]))
+            jump_km = dist_m / 1000.0
+
+            if jump_km < _SPOOF_JUMP_KM:
+                continue
+
+            start_ts = curr["snapshot_ts"].to_pydatetime() if hasattr(curr["snapshot_ts"], "to_pydatetime") else curr["snapshot_ts"]
+
+            results.append(
+                {
+                    "event_id": _event_id("spoof", mmsi_int, start_ts, 0),
+                    "type": "spoof",
+                    "mmsi": mmsi_int,
+                    "mmsi2": None,
+                    "start_ts": start_ts,
+                    "end_ts": start_ts,
+                    "lat": float(curr["lat"]),
+                    "lon": float(curr["lon"]),
+                    "region": str(curr.get("region") or "") or None,
+                    "kind": str(curr.get("kind") or "") or None,
+                    "segment": str(curr.get("segment") or "") or None,
+                    "details": json.dumps(
+                        {
+                            "jump_km": round(jump_km, 1),
+                            "dt_minutes": round(dt_h * 60, 1),
+                            "reported_sog": round(sog, 1),
+                            "from_lat": round(float(prev["lat"]), 4),
+                            "from_lon": round(float(prev["lon"]), 4),
+                        }
+                    ),
+                }
+            )
+
+    return results
