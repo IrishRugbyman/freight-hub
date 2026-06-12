@@ -62,6 +62,8 @@ from .schemas import (
     FleetAgeResponse,
     RerouteRiskEvent,
     RerouteRiskResponse,
+    DestinationFlowRow,
+    DestinationFlowsResponse,
     RiskEventItem,
     RiskEventsResponse,
     PortCongestionRow,
@@ -2044,6 +2046,92 @@ def analytics_fleet_utilization():
     rows_out.sort(key=lambda r: r.underway_pct)  # most idle first
     total_fleet = len(lp_df)
     return FleetUtilizationResponse(as_of=_iso(now) or "", total_fleet=total_fleet, rows=rows_out)
+
+
+@app.get("/api/analytics/destination-flows", response_model=DestinationFlowsResponse)
+def analytics_destination_flows(
+    kind: str = "",
+    segment: str = "",
+    region: str = "",
+    top_n: int = 20,
+    laden_only: bool = True,
+):
+    """Cargo destination flow: where are laden (or all) vessels heading?
+
+    Two-step pattern: vessel_state (analytics DB) provides laden/ballast classification,
+    live_positions (AIS DB) provides destination, region, and segment.
+
+    Returns top-N flows by origin_region x destination x segment, vessel_count descending.
+    Filters out 'Small' segment noise. Non-standard destination strings are shown verbatim.
+    """
+    top_n = max(5, min(100, top_n))
+    now_ts = datetime.now(UTC).replace(tzinfo=None)
+
+    # Step 1: get laden MMSIs from vessel_state (analytics DB)
+    mmsi_filter: list[int] | None = None
+    total_laden = 0
+    if laden_only:
+        laden_df = db.query(
+            "SELECT mmsi FROM vessel_state WHERE laden = 'laden'",
+            db=db.analytics_db_path(),
+        )
+        if laden_df.empty:
+            return DestinationFlowsResponse(
+                as_of=_iso(now_ts) or "", laden_only=laden_only, total_laden=0, rows=[]
+            )
+        mmsi_filter = [int(m) for m in laden_df["mmsi"].unique()]
+        total_laden = len(mmsi_filter)
+
+    # Step 2: query live_positions for flow aggregation
+    conds: list[str] = ["destination IS NOT NULL", "TRIM(destination) != ''", "segment != 'Small'"]
+    params: list = []
+
+    if mmsi_filter is not None:
+        ph = ",".join("?" * len(mmsi_filter))
+        conds.append(f"mmsi IN ({ph})")
+        params.extend(mmsi_filter)
+    if kind:
+        conds.append("kind = ?")
+        params.append(kind)
+    if segment:
+        conds.append("segment = ?")
+        params.append(segment)
+    if region:
+        conds.append("region = ?")
+        params.append(region)
+
+    params.append(top_n)
+    flow_df = db.query(
+        "SELECT region AS origin_region, destination, segment, kind, COUNT(*) AS vessel_count "
+        "FROM live_positions "
+        f"WHERE {' AND '.join(conds)} "
+        "GROUP BY region, destination, segment, kind "
+        "ORDER BY vessel_count DESC LIMIT ?",
+        params,
+    )
+
+    if flow_df.empty:
+        return DestinationFlowsResponse(
+            as_of=_iso(now_ts) or "", laden_only=laden_only, total_laden=total_laden, rows=[]
+        )
+
+    rows_out = [
+        DestinationFlowRow(
+            origin_region=_str_or_none(r.get("origin_region")) or "unknown",
+            destination=str(r["destination"]).strip(),
+            segment=_str_or_none(r.get("segment")),
+            kind=_str_or_none(r.get("kind")),
+            vessel_count=int(r["vessel_count"]),
+        )
+        for _, r in flow_df.iterrows()
+    ]
+
+    return DestinationFlowsResponse(
+        as_of=_iso(now_ts) or "",
+        laden_only=laden_only,
+        total_laden=total_laden,
+        rows=rows_out,
+    )
 
 
 @app.get("/api/analytics/risk-events", response_model=RiskEventsResponse)

@@ -650,6 +650,21 @@ class RiskEventsResponse(BaseModel):
     rows: list[RiskEventItem]
 
 
+class DestinationFlowRow(BaseModel):
+    origin_region: str
+    destination: str
+    segment: str | None
+    kind: str | None
+    vessel_count: int
+
+
+class DestinationFlowsResponse(BaseModel):
+    as_of: str
+    laden_only: bool
+    total_laden: int
+    rows: list[DestinationFlowRow]
+
+
 class PortCongestionRow(BaseModel):
     zone: str
     region: str | None

@@ -1587,3 +1587,167 @@ def test_port_congestion_dwell_hours(congestion_client):
         # 2 open episodes started 8h and 10h ago -> avg ~9h
         if sg["avg_current_dwell_hours"] is not None:
             assert 7.0 <= sg["avg_current_dwell_hours"] <= 12.0
+
+
+# ---------------------------------------------------------------------------
+# Phase 28: destination flow intelligence
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def flow_client(tmp_path, monkeypatch):
+    """Client seeded with laden vessels and destinations.
+
+    Two laden VLCCs (mmsi 8001+8002) heading CNSHA from hormuz.
+    One laden Capesize (mmsi 8003) heading KRPUS from ara.
+    One ballast VLCC (mmsi 8004) with destination AEFJR.
+    vessel_state: 8001, 8002, 8003 = laden; 8004 = ballast.
+    """
+    import duckdb
+    from datetime import UTC, datetime
+    from fastapi.testclient import TestClient
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+
+    ais_schema = """
+    CREATE TABLE live_positions (
+        mmsi BIGINT PRIMARY KEY, name VARCHAR, lat DOUBLE, lon DOUBLE,
+        sog DOUBLE, cog DOUBLE, heading DOUBLE, destination VARCHAR,
+        ship_type INTEGER, length_m DOUBLE, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, updated_ts TIMESTAMP,
+        imo BIGINT, draught DOUBLE, nav_status INTEGER, eta VARCHAR
+    );
+    CREATE TABLE ais_snapshots (
+        snapshot_ts TIMESTAMP, mmsi BIGINT, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, lat DOUBLE, lon DOUBLE, ship_type INTEGER, length_m DOUBLE,
+        sog DOUBLE, nav_status INTEGER, draught DOUBLE, destination VARCHAR,
+        PRIMARY KEY (snapshot_ts, mmsi)
+    );
+    """
+
+    an_schema = """
+    CREATE TABLE meta_watermark (key VARCHAR PRIMARY KEY, ts TIMESTAMP);
+    CREATE TABLE ais_events (
+        event_id VARCHAR PRIMARY KEY, type VARCHAR,
+        mmsi BIGINT, mmsi2 BIGINT,
+        start_ts TIMESTAMP, end_ts TIMESTAMP,
+        lat DOUBLE, lon DOUBLE,
+        region VARCHAR, kind VARCHAR, segment VARCHAR, details VARCHAR
+    );
+    CREATE TABLE transit_events (
+        mmsi BIGINT, chokepoint VARCHAR, entered_ts TIMESTAMP, exited_ts TIMESTAMP,
+        direction VARCHAR, kind VARCHAR, segment VARCHAR, laden BOOLEAN,
+        PRIMARY KEY (mmsi, chokepoint, entered_ts)
+    );
+    CREATE TABLE anchored_episodes (
+        mmsi BIGINT, zone VARCHAR, start_ts TIMESTAMP, end_ts TIMESTAMP,
+        kind VARCHAR, segment VARCHAR, PRIMARY KEY (mmsi, zone, start_ts)
+    );
+    CREATE TABLE fleet_density (
+        ts TIMESTAMP, region VARCHAR, kind VARCHAR, segment VARCHAR,
+        laden_count INTEGER, ballast_count INTEGER, unknown_count INTEGER,
+        PRIMARY KEY (ts, region, kind, segment)
+    );
+    CREATE TABLE vessel_state (
+        mmsi BIGINT PRIMARY KEY, max_draught_seen DOUBLE, last_draught DOUBLE,
+        laden VARCHAR, updated_ts TIMESTAMP
+    );
+    """
+
+    ais_file = tmp_path / "ais.duckdb"
+    ais_conn = duckdb.connect(str(ais_file))
+    ais_conn.execute(ais_schema)
+    # Two laden VLCCs from hormuz -> CNSHA
+    ais_conn.execute(
+        "INSERT INTO live_positions VALUES (8001,'VLCC FLOW A',25.0,56.0,14.0,90.0,NULL,'CNSHA',80,330,'tanker','VLCC','hormuz',?,9501,20.0,0,NULL)",
+        [now],
+    )
+    ais_conn.execute(
+        "INSERT INTO live_positions VALUES (8002,'VLCC FLOW B',25.5,56.5,13.5,90.0,NULL,'CNSHA',80,330,'tanker','VLCC','hormuz',?,9502,19.5,0,NULL)",
+        [now],
+    )
+    # One laden Capesize from ara -> KRPUS
+    ais_conn.execute(
+        "INSERT INTO live_positions VALUES (8003,'CAPE FLOW',3.5,5.0,12.0,45.0,NULL,'KRPUS',74,300,'bulk','Capesize','ara',?,9503,18.0,0,NULL)",
+        [now],
+    )
+    # One ballast VLCC from hormuz -> AEFJR (should be excluded in laden_only mode)
+    ais_conn.execute(
+        "INSERT INTO live_positions VALUES (8004,'VLCC BALLAST',26.0,57.0,15.0,270.0,NULL,'AEFJR',80,330,'tanker','VLCC','hormuz',?,9504,5.0,0,NULL)",
+        [now],
+    )
+    ais_conn.close()
+
+    an_file = tmp_path / "analytics.duckdb"
+    an_conn = duckdb.connect(str(an_file))
+    an_conn.execute(an_schema)
+    an_conn.executemany("INSERT INTO vessel_state VALUES (?,?,?,?,?)", [
+        (8001, 21.0, 20.0, 'laden', now),
+        (8002, 21.0, 19.5, 'laden', now),
+        (8003, 19.0, 18.0, 'laden', now),
+        (8004, 21.0, 5.0, 'ballast', now),
+    ])
+    an_conn.close()
+
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
+    monkeypatch.setenv("ANALYTICS_DB", str(an_file))
+    from app.main import app
+    return TestClient(app)
+
+
+def test_destination_flows_structure(flow_client):
+    r = flow_client.get("/api/analytics/destination-flows")
+    assert r.status_code == 200
+    d = r.json()
+    for key in ("as_of", "laden_only", "total_laden", "rows"):
+        assert key in d
+    assert d["laden_only"] is True
+    if d["rows"]:
+        row = d["rows"][0]
+        for field in ("origin_region", "destination", "vessel_count"):
+            assert field in row
+
+
+def test_destination_flows_laden_only(flow_client):
+    r = flow_client.get("/api/analytics/destination-flows?laden_only=true")
+    d = r.json()
+    destinations = {row["destination"] for row in d["rows"]}
+    assert "CNSHA" in destinations   # 2 laden VLCCs
+    assert "KRPUS" in destinations   # 1 laden Capesize
+    # Ballast vessel destination AEFJR must be excluded
+    assert "AEFJR" not in destinations
+
+
+def test_destination_flows_total_laden(flow_client):
+    r = flow_client.get("/api/analytics/destination-flows?laden_only=true")
+    d = r.json()
+    assert d["total_laden"] == 3   # 3 laden vessels in vessel_state
+
+
+def test_destination_flows_includes_all(flow_client):
+    r = flow_client.get("/api/analytics/destination-flows?laden_only=false")
+    d = r.json()
+    destinations = {row["destination"] for row in d["rows"]}
+    # All 4 vessels have destinations; laden_only=false includes ballast
+    assert "AEFJR" in destinations
+    assert d["laden_only"] is False
+
+
+def test_destination_flows_kind_filter(flow_client):
+    r = flow_client.get("/api/analytics/destination-flows?laden_only=true&kind=bulk")
+    d = r.json()
+    destinations = {row["destination"] for row in d["rows"]}
+    assert "KRPUS" in destinations      # only the Capesize
+    assert "CNSHA" not in destinations  # VLCCs (tanker) excluded
+
+
+def test_destination_flows_sorted_by_count(flow_client):
+    r = flow_client.get("/api/analytics/destination-flows?laden_only=true")
+    rows = r.json()["rows"]
+    counts = [row["vessel_count"] for row in rows]
+    assert counts == sorted(counts, reverse=True)
+    # CNSHA should be first (2 vessels) before KRPUS (1 vessel)
+    if len(rows) >= 2:
+        cnsha = next((r for r in rows if r["destination"] == "CNSHA"), None)
+        krpus = next((r for r in rows if r["destination"] == "KRPUS"), None)
+        if cnsha and krpus:
+            assert cnsha["vessel_count"] >= krpus["vessel_count"]

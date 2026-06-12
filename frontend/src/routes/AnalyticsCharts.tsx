@@ -13,7 +13,7 @@ import {
   YAxis,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion } from '@/lib/api'
+import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion, useDestinationFlows } from '@/lib/api'
 import type { RiskEventItem } from '@/lib/api'
 
 const CHOKEPOINTS = [
@@ -1507,6 +1507,93 @@ export function PortCongestionCard() {
                     </td>
                     <td className={`text-right text-[10px] font-medium ${congestionColor(row.congestion_factor)}`}>
                       {congestionBadge(row.congestion_factor)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Phase 28: Destination Flow Intelligence
+// ---------------------------------------------------------------------------
+
+const REGION_LABELS: Record<string, string> = {
+  ara: 'ARA', singapore_malacca: 'Sing/Mal', hormuz: 'Hormuz',
+  suez: 'Suez', japan_korea: 'Japan/Korea', us_gulf: 'US Gulf',
+  west_africa: 'W Africa', east_africa: 'E Africa', north_sea: 'N Sea',
+  black_sea: 'Black Sea', med: 'Med', us_east_coast: 'US East',
+  us_west_coast: 'US West', brazil: 'Brazil', australia: 'Australia',
+  saldanha_richards_bay: 'S Africa', unknown: '?',
+}
+
+export function DestinationFlowCard() {
+  const [kindFilter, setKindFilter] = React.useState<'' | 'tanker' | 'bulk'>('')
+  const [ladenOnly, setLadenOnly] = React.useState(true)
+  const { data, isLoading } = useDestinationFlows(kindFilter, '', '', ladenOnly)
+  const rows = data?.rows ?? []
+
+  return (
+    <Card className="bg-card/60 backdrop-blur border-border/40">
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <CardTitle className="text-sm font-medium">Cargo Destination Flows</CardTitle>
+          <div className="flex gap-2">
+            <div className="flex gap-1">
+              {(['', 'tanker', 'bulk'] as const).map(k => (
+                <button key={k || 'all'} onClick={() => setKindFilter(k)}
+                  className={`rounded px-2 py-0.5 text-xs ${kindFilter === k ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+                  {k || 'All'}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setLadenOnly(!ladenOnly)}
+              className={`rounded px-2 py-0.5 text-xs ${ladenOnly ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+              Laden only
+            </button>
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          Top destination flows by origin region
+          {data && ladenOnly && ` — ${data.total_laden.toLocaleString()} laden vessels`}
+        </p>
+      </CardHeader>
+      <CardContent className="pt-0">
+        {isLoading && <p className="text-xs text-muted-foreground">Loading...</p>}
+        {!isLoading && rows.length === 0 && (
+          <p className="text-xs text-muted-foreground">No destination data available.</p>
+        )}
+        {rows.length > 0 && (
+          <div className="overflow-auto max-h-[400px]">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border/40 text-muted-foreground">
+                  <th className="text-left py-1 pr-3 font-medium">Origin</th>
+                  <th className="text-left py-1 pr-3 font-medium">Destination</th>
+                  <th className="text-left py-1 pr-3 font-medium">Segment</th>
+                  <th className="text-right py-1 font-medium">Vessels</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, i) => (
+                  <tr key={i} className="border-b border-border/20 hover:bg-muted/20">
+                    <td className="py-1.5 pr-3 text-muted-foreground">
+                      {REGION_LABELS[row.origin_region] ?? row.origin_region.replace(/_/g, ' ')}
+                    </td>
+                    <td className="py-1.5 pr-3 font-mono font-medium text-foreground/90">
+                      {row.destination}
+                    </td>
+                    <td className="pr-3 text-muted-foreground">
+                      {row.segment ?? row.kind ?? '-'}
+                    </td>
+                    <td className="text-right tabular-nums font-semibold text-foreground/80">
+                      {row.vessel_count}
                     </td>
                   </tr>
                 ))}

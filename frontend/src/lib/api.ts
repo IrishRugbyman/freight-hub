@@ -1120,6 +1120,32 @@ export function useRiskEvents(minRisk = 25, days = 2) {
   })
 }
 
+export interface DestinationFlowRow {
+  origin_region: string
+  destination: string
+  segment: string | null
+  kind: string | null
+  vessel_count: number
+}
+
+export interface DestinationFlowsResponse {
+  as_of: string
+  laden_only: boolean
+  total_laden: number
+  rows: DestinationFlowRow[]
+}
+
+export function useDestinationFlows(kind = '', segment = '', region = '', ladenOnly = true) {
+  return useQuery({
+    queryKey: ['destination-flows', kind, segment, region, ladenOnly],
+    queryFn: () => getJSON<DestinationFlowsResponse>(
+      `/api/analytics/destination-flows?kind=${kind}&segment=${segment}&region=${region}&laden_only=${ladenOnly}&top_n=30`
+    ),
+    staleTime: REFETCH_MS,
+    refetchInterval: REFETCH_MS,
+  })
+}
+
 export interface PortCongestionRow {
   zone: string
   region: string | null
