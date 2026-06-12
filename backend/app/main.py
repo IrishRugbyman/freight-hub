@@ -2649,32 +2649,23 @@ def analytics_fleet_utilization():
     Sorted by underway_pct ascending (most-idle segments first).
     """
     now = datetime.now(UTC).replace(tzinfo=None)
-    lp_df = db.query(
-        "SELECT segment, kind, sog, nav_status "
-        "FROM live_positions "
-        "WHERE segment IS NOT NULL AND segment != 'Small'"
-    )
+    lp_df = _live_all()
+    if not lp_df.empty:
+        lp_df = lp_df[lp_df["segment"].notna() & (lp_df["segment"] != "Small")]
+        lp_df = lp_df[["segment", "kind", "sog", "nav_status"]].copy()
 
     if lp_df.empty:
         return FleetUtilizationResponse(as_of=_iso(now) or "", total_fleet=0, rows=[])
 
-    def classify(row) -> str:
-        sog = row.get("sog")
-        ns = row.get("nav_status")
-        # Anchored or moored: explicit nav status wins
-        if (ns is not None and not pd.isna(ns) and int(ns) in (1, 5)):
-            return "idle"
-        sog_f = float(sog) if sog is not None and not pd.isna(sog) else None
-        if sog_f is None:
-            return "unknown"
-        if sog_f > 2.0:
-            return "underway"
-        if sog_f < 0.5:
-            return "idle"
-        return "unknown"
-
-    lp_df["status"] = lp_df.apply(classify, axis=1)
     lp_df["sog_num"] = pd.to_numeric(lp_df["sog"], errors="coerce")
+    ns = pd.to_numeric(lp_df["nav_status"], errors="coerce")
+    # Vectorized classification
+    anchored = ns.isin([1, 5])
+    underway_mask = (~anchored) & (lp_df["sog_num"] > 2.0)
+    idle_mask = anchored | (~underway_mask & (lp_df["sog_num"] < 0.5))
+    lp_df["status"] = "unknown"
+    lp_df.loc[underway_mask, "status"] = "underway"
+    lp_df.loc[idle_mask & ~underway_mask, "status"] = "idle"
 
     rows_out: list[FleetUtilizationRow] = []
     for (segment, kind), grp in lp_df.groupby(["segment", "kind"]):
@@ -4419,20 +4410,15 @@ def analytics_speed_anomalies(kind: str = "tanker", min_z: float = 2.5, min_sog:
     limit = max(1, min(limit, 200))
     now_dt = datetime.now(UTC).replace(tzinfo=None)
 
-    kind_clause = ""
-    params_live: list = []
-    if kind:
-        kind_clause = "AND kind = ?"
-        params_live.append(kind)
-
-    # Get all underway vessels for the fleet
-    fleet_df = db.query(
-        "SELECT mmsi, name, kind, segment, region, lat, lon, sog, destination, nav_status, imo "
-        "FROM live_positions "
-        f"WHERE sog >= ? {kind_clause} "
-        "AND segment IS NOT NULL ",
-        [min_sog] + params_live,
-    )
+    # Use the in-process live cache to avoid DB lock contention
+    fleet_df = _live_all()
+    if not fleet_df.empty:
+        fleet_df = fleet_df[fleet_df["sog"].fillna(0) >= min_sog]
+        if kind:
+            fleet_df = fleet_df[fleet_df["kind"] == kind]
+        fleet_df = fleet_df[fleet_df["segment"].notna()]
+        needed = ["mmsi", "name", "kind", "segment", "region", "lat", "lon", "sog", "destination", "nav_status", "imo"]
+        fleet_df = fleet_df[[c for c in needed if c in fleet_df.columns]]
 
     if fleet_df.empty:
         return SpeedAnomalyResponse(
