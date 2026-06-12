@@ -319,6 +319,24 @@ class OwnerRiskResponse(BaseModel):
     as_of: str
     rows: list[OwnerRiskItem]
 
+class HighRiskPosition(BaseModel):
+    mmsi: int
+    imo: int
+    lat: float
+    lon: float
+    name: str | None
+    segment: str | None
+    kind: str | None
+    risk_score: int
+    ofac_sanctioned: bool
+
+
+class HighRiskPositionsResponse(BaseModel):
+    as_of: str
+    min_risk: int
+    rows: list[HighRiskPosition]
+
+
 class SpeedSegmentRow(BaseModel):
     segment: str
     kind: str

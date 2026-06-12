@@ -17,6 +17,7 @@ export function LayerToggles({
       <Switch checked={layers.counts} onChange={set('counts')} label="Counts panel" />
       <Switch checked={layers.chokepoints} onChange={set('chokepoints')} label="Chokepoints" />
       <Switch checked={layers.eventPins} onChange={set('eventPins')} label="Event pins" />
+      <Switch checked={layers.riskOverlay} onChange={set('riskOverlay')} label="Risk overlay" />
       <div className="mt-1 border-t border-border pt-1">
         <Switch checked={layers.deckgl} onChange={set('deckgl')} label="WebGL mode" />
         {layers.deckgl && (

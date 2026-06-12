@@ -8,6 +8,7 @@ export interface LayerState {
   eventPins: boolean
   deckgl: boolean
   heatmap: boolean
+  riskOverlay: boolean
 }
 
 export const DEFAULT_LAYERS: LayerState = {
@@ -18,6 +19,7 @@ export const DEFAULT_LAYERS: LayerState = {
   eventPins: true,
   deckgl: false,
   heatmap: false,
+  riskOverlay: true,
 }
 
 export type Filters = VesselFilters

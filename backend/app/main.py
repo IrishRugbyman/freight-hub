@@ -40,6 +40,8 @@ from .schemas import (
     EventsResponse,
     FleetFacets,
     FleetResponse,
+    HighRiskPosition,
+    HighRiskPositionsResponse,
     LadenResponse,
     LadenSegment,
     Meta,
@@ -362,6 +364,69 @@ def analytics_ports(kind: str | None = None, top_n: int = 20):
         as_of=_iso(datetime.now(UTC).replace(tzinfo=None)) or "",
         total_with_dest=total_with_dest,
         ports=ports,
+    )
+
+
+@app.get("/api/analytics/high-risk-positions", response_model=HighRiskPositionsResponse)
+def analytics_high_risk_positions(min_risk: int = 60):
+    """Live positions of vessels with risk_score >= min_risk from the vessel registry.
+
+    Two-query approach: fetch scored vessels from registry, then look up their
+    current live positions by IMO. min_risk clamped 0-100.
+    """
+    min_risk = max(0, min(100, min_risk))
+    cutoff = _fresh_cutoff()
+
+    reg_df = db.query(
+        "SELECT imo, risk_score, COALESCE(ofac_sanctioned, false) AS ofac_sanctioned "
+        "FROM vessel_registry "
+        "WHERE risk_score >= ? AND fetch_ok = true AND imo IS NOT NULL",
+        [min_risk],
+        db=db.registry_db_path(),
+    )
+    if reg_df.empty:
+        return HighRiskPositionsResponse(
+            as_of=_iso(datetime.now(UTC).replace(tzinfo=None)) or "",
+            min_risk=min_risk,
+            rows=[],
+        )
+
+    ifo_list = reg_df["imo"].tolist()
+    placeholders = ",".join(["?" for _ in ifo_list])
+    live_df = db.query(
+        f"SELECT mmsi, imo, lat, lon, name, segment, kind "
+        f"FROM live_positions "
+        f"WHERE updated_ts > ? AND imo IN ({placeholders})",
+        [cutoff, *ifo_list],
+    )
+
+    if live_df.empty:
+        return HighRiskPositionsResponse(
+            as_of=_iso(datetime.now(UTC).replace(tzinfo=None)) or "",
+            min_risk=min_risk,
+            rows=[],
+        )
+
+    merged = live_df.merge(reg_df, on="imo", how="inner")
+    rows = []
+    for _, r in merged.iterrows():
+        rows.append(HighRiskPosition(
+            mmsi=int(r["mmsi"]),
+            imo=int(r["imo"]),
+            lat=float(r["lat"]),
+            lon=float(r["lon"]),
+            name=str(r["name"]) if r["name"] else None,
+            segment=str(r["segment"]) if r["segment"] else None,
+            kind=str(r["kind"]) if r["kind"] else None,
+            risk_score=int(r["risk_score"]),
+            ofac_sanctioned=bool(r["ofac_sanctioned"]),
+        ))
+
+    rows.sort(key=lambda x: -x.risk_score)
+    return HighRiskPositionsResponse(
+        as_of=_iso(datetime.now(UTC).replace(tzinfo=None)) or "",
+        min_risk=min_risk,
+        rows=rows,
     )
 
 

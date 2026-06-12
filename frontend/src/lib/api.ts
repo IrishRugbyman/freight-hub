@@ -715,6 +715,34 @@ export function useRegionUtil() {
   })
 }
 
+export interface HighRiskPosition {
+  mmsi: number
+  imo: number
+  lat: number
+  lon: number
+  name: string | null
+  segment: string | null
+  kind: string | null
+  risk_score: number
+  ofac_sanctioned: boolean
+}
+
+export interface HighRiskPositionsResponse {
+  as_of: string
+  min_risk: number
+  rows: HighRiskPosition[]
+}
+
+export function useHighRiskPositions(minRisk = 60, enabled = true) {
+  return useQuery({
+    queryKey: ['high-risk-positions', minRisk],
+    queryFn: () => getJSON<HighRiskPositionsResponse>(`/api/analytics/high-risk-positions?min_risk=${minRisk}`),
+    staleTime: REFETCH_MS,
+    refetchInterval: REFETCH_MS,
+    enabled,
+  })
+}
+
 export function useEvents(params?: { type?: string; days?: number; limit?: number }, enabled = true) {
   const searchParams = new URLSearchParams()
   if (params?.type) searchParams.set('type', params.type)

@@ -6,6 +6,8 @@ import { VesselLayer } from './VesselLayer'
 import { ChokepointLayer } from './ChokepointLayer'
 import { TrailLayer } from './TrailLayer'
 import { EventPinsLayer } from './EventPinsLayer'
+import { RiskLayer } from './RiskLayer'
+import { useHighRiskPositions } from '@/lib/api'
 import { colorFor } from '@/lib/segments'
 
 const DeckGLLayer = lazy(() =>
@@ -36,6 +38,9 @@ export function VesselMap({
   trailPoints?: TrackPoint[]
   focusTarget?: { lat: number; lon: number } | null
 }) {
+  const { data: riskData } = useHighRiskPositions(60, layers.riskOverlay)
+  const riskPositions = layers.riskOverlay ? (riskData?.rows ?? []) : []
+
   return (
     <MapContainer
       center={[20, 40]}
@@ -80,6 +85,15 @@ export function VesselMap({
       )}
       {layers.chokepoints && <ChokepointLayer />}
       <EventPinsLayer visible={layers.eventPins} />
+      {layers.riskOverlay && riskPositions.length > 0 && (
+        <RiskLayer
+          positions={riskPositions}
+          onSelect={(pos) => {
+            const v = vessels.find((vessel) => vessel.mmsi === pos.mmsi)
+            if (v) onSelect(v)
+          }}
+        />
+      )}
       <MapFocuser target={focusTarget} />
     </MapContainer>
   )

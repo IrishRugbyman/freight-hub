@@ -412,3 +412,99 @@ def test_owner_risk_top_n_clamped(tmp_path, monkeypatch):
     r = client.get("/api/fleet/owner-risk?min_vessels=1&top_n=2")
     assert r.status_code == 200
     assert len(r.json()["rows"]) <= 2
+
+
+# ---------------------------------------------------------------------------
+# /api/analytics/high-risk-positions
+# ---------------------------------------------------------------------------
+
+def _make_high_risk_client(tmp_path, monkeypatch) -> "TestClient":
+    """AIS DB with IMO-linked vessels + registry with risk scores."""
+    ais_file = tmp_path / "ais.duckdb"
+    ais_conn = duckdb.connect(str(ais_file))
+    ais_conn.execute(_AIS_SCHEMA)
+    # mmsi, name, lat, lon, sog, cog, heading, dest, type, len, kind, segment, region, ts, imo, draught, nav_status, eta
+    ais_conn.executemany(
+        "INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            # high risk vessel (score=75), IMO matches registry
+            (7001, "HIGH RISK TANKER", 26.0, 56.0, 12.0, 270.0, 271.0, "AEFJR", 80, 330,
+             "tanker", "VLCC", "hormuz", _NOW, 5000001, 20.0, 0, None),
+            # medium risk vessel (score=45), below default threshold
+            (7002, "MED TANKER", 1.2, 103.6, 10.0, 90.0, 91.0, "SGSIN", 80, 280,
+             "tanker", "Aframax", "singapore_malacca", _NOW, 5000002, 15.0, 0, None),
+            # no IMO in live -> never matches
+            (7003, "NO IMO BULK", 51.0, 1.5, 8.0, 45.0, None, None, 74, 200,
+             "bulk", "Small", "dover_channel", _NOW, None, None, None, None),
+        ],
+    )
+    ais_conn.close()
+
+    reg_file = tmp_path / "registry.duckdb"
+    reg_conn = duckdb.connect(str(reg_file))
+    reg_conn.execute(_REG_SCHEMA)
+    reg_conn.executemany(
+        "INSERT INTO vessel_registry (imo, ship_name, flag, risk_score, ofac_sanctioned, fetch_ok, fetched_ts) VALUES (?,?,?,?,?,true,?)",
+        [
+            (5000001, "HIGH RISK TANKER", "Togo", 75, False, _NOW),
+            (5000002, "MED TANKER", "Panama", 45, False, _NOW),
+        ],
+    )
+    reg_conn.close()
+
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
+    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
+    from app.main import app
+    return TestClient(app)
+
+
+def test_high_risk_positions_structure(tmp_path, monkeypatch):
+    client = _make_high_risk_client(tmp_path, monkeypatch)
+    r = client.get("/api/analytics/high-risk-positions")
+    assert r.status_code == 200
+    d = r.json()
+    assert "as_of" in d
+    assert "min_risk" in d
+    assert isinstance(d["rows"], list)
+    for row in d["rows"]:
+        assert "mmsi" in row
+        assert "imo" in row
+        assert "lat" in row
+        assert "lon" in row
+        assert "risk_score" in row
+        assert "ofac_sanctioned" in row
+
+
+def test_high_risk_positions_filters_by_threshold(tmp_path, monkeypatch):
+    client = _make_high_risk_client(tmp_path, monkeypatch)
+    r = client.get("/api/analytics/high-risk-positions?min_risk=60")
+    assert r.status_code == 200
+    rows = r.json()["rows"]
+    # only score=75 vessel should appear (45 is below 60)
+    assert len(rows) == 1
+    assert rows[0]["mmsi"] == 7001
+    assert rows[0]["risk_score"] == 75
+
+
+def test_high_risk_positions_lower_threshold(tmp_path, monkeypatch):
+    client = _make_high_risk_client(tmp_path, monkeypatch)
+    r = client.get("/api/analytics/high-risk-positions?min_risk=40")
+    assert r.status_code == 200
+    mmsis = {row["mmsi"] for row in r.json()["rows"]}
+    assert 7001 in mmsis
+    assert 7002 in mmsis
+
+
+def test_high_risk_positions_sorted_desc(tmp_path, monkeypatch):
+    client = _make_high_risk_client(tmp_path, monkeypatch)
+    r = client.get("/api/analytics/high-risk-positions?min_risk=0")
+    rows = r.json()["rows"]
+    scores = [row["risk_score"] for row in rows]
+    assert scores == sorted(scores, reverse=True)
+
+
+def test_high_risk_no_imo_excluded(tmp_path, monkeypatch):
+    client = _make_high_risk_client(tmp_path, monkeypatch)
+    r = client.get("/api/analytics/high-risk-positions?min_risk=0")
+    mmsis = {row["mmsi"] for row in r.json()["rows"]}
+    assert 7003 not in mmsis
