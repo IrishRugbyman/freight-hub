@@ -64,6 +64,8 @@ from .schemas import (
     RerouteRiskResponse,
     RiskEventItem,
     RiskEventsResponse,
+    PortCongestionRow,
+    PortCongestionResponse,
     RoutesResponse,
     SlowSteamerEvent,
     SlowSteamersResponse,
@@ -2201,6 +2203,119 @@ def analytics_risk_events(min_risk: int = 25, days: int = 2, limit: int = 50):
         days=days,
         total_high_risk_vessels=len(known_imos),
         rows=risk_rows[:limit],
+    )
+
+
+@app.get("/api/analytics/port-congestion", response_model=PortCongestionResponse)
+def analytics_port_congestion(kind: str = "", days: int = 14):
+    """Port and anchorage congestion monitor.
+
+    Compares current anchored vessel counts against a historical baseline derived
+    from completed episodes in the last `days` days. Returns a congestion_factor
+    (current / baseline) per zone, sorted most congested first.
+
+    Zones with no historical baseline still appear if vessels are currently anchored:
+    they get congestion_factor=1.0 (no comparison available).
+    """
+    days = max(3, min(90, days))
+    now_ts = datetime.now(UTC).replace(tzinfo=None)
+    since = now_ts - timedelta(days=days)
+
+    # Step 1: Current open anchored episodes (end_ts IS NULL)
+    kind_cond = " AND kind = ?" if kind else ""
+    kind_params = [kind] if kind else []
+
+    # Cannot JOIN across DuckDB files - fetch open episodes then look up region separately
+    open_df = db.query(
+        f"SELECT mmsi, zone, start_ts, kind, segment "
+        f"FROM anchored_episodes "
+        f"WHERE end_ts IS NULL{kind_cond}",
+        kind_params,
+        db=db.analytics_db_path(),
+    )
+
+    # Enrich with region from live_positions (separate DB)
+    open_df["region"] = None
+    if not open_df.empty:
+        open_mmsis = [int(m) for m in open_df["mmsi"].unique()]
+        ph_open = ",".join("?" * len(open_mmsis))
+        region_df = db.query(
+            f"SELECT mmsi, region FROM live_positions WHERE mmsi IN ({ph_open})",
+            open_mmsis,
+        )
+        if not region_df.empty:
+            region_map = {int(r["mmsi"]): _str_or_none(r.get("region")) for _, r in region_df.iterrows()}
+            open_df["region"] = open_df["mmsi"].apply(lambda m: region_map.get(int(m)))
+
+    # Step 2: Completed historical episodes for baseline
+    hist_df = db.query(
+        f"SELECT zone, kind, start_ts, end_ts, "
+        f"       DATEDIFF('hour', start_ts, end_ts) AS dwell_hours "
+        f"FROM anchored_episodes "
+        f"WHERE end_ts IS NOT NULL AND start_ts >= ?{kind_cond}",
+        [since] + kind_params,
+        db=db.analytics_db_path(),
+    )
+
+    now_pd = pd.Timestamp(now_ts)
+
+    # Build current state: zone -> {vessels, avg_dwell}
+    zone_current: dict[str, dict] = {}
+    if not open_df.empty:
+        open_df["dwell_hours_so_far"] = (
+            (now_pd - pd.to_datetime(open_df["start_ts"])).dt.total_seconds() / 3600
+        )
+        for zone_key, grp in open_df.groupby("zone"):
+            zone_current[str(zone_key)] = {
+                "current_vessels": len(grp),
+                "avg_current_dwell_hours": round(float(grp["dwell_hours_so_far"].mean()), 1),
+                "region": _str_or_none(grp["region"].iloc[0]) if not grp["region"].isnull().all() else None,
+                "kind": _str_or_none(grp["kind"].iloc[0]),
+            }
+
+    # Build historical baseline: zone -> avg_count per snapshot, avg_dwell
+    zone_baseline: dict[str, dict] = {}
+    if not hist_df.empty:
+        hist_df["dwell_hours"] = pd.to_numeric(hist_df["dwell_hours"], errors="coerce")
+        for zone_key, grp in hist_df.groupby("zone"):
+            valid_dwell = grp["dwell_hours"].dropna()
+            # Estimate concurrent vessel count: sum(dwell_hours) / observation_window_hours
+            obs_hours = max((now_ts - since).total_seconds() / 3600, 1)
+            avg_concurrent = float(valid_dwell.sum()) / obs_hours
+            zone_baseline[str(zone_key)] = {
+                "baseline_avg_vessels": round(avg_concurrent, 2),
+                "baseline_avg_dwell_hours": round(float(valid_dwell.mean()), 1) if len(valid_dwell) else None,
+            }
+
+    # Combine: include zones with current vessels or historical baseline
+    all_zones = set(zone_current.keys()) | set(zone_baseline.keys())
+    rows_out: list[PortCongestionRow] = []
+    for z in all_zones:
+        cur = zone_current.get(z, {})
+        bas = zone_baseline.get(z, {})
+        cv = cur.get("current_vessels", 0)
+        bav = bas.get("baseline_avg_vessels")
+        if bav and bav > 0:
+            factor = round(cv / bav, 2)
+        else:
+            factor = 1.0 if cv > 0 else 0.0
+
+        rows_out.append(PortCongestionRow(
+            zone=z,
+            region=cur.get("region"),
+            kind=cur.get("kind"),
+            current_vessels=cv,
+            avg_current_dwell_hours=cur.get("avg_current_dwell_hours"),
+            baseline_avg_vessels=bav,
+            baseline_avg_dwell_hours=bas.get("baseline_avg_dwell_hours"),
+            congestion_factor=factor,
+        ))
+
+    rows_out.sort(key=lambda r: (-r.congestion_factor, -r.current_vessels))
+    return PortCongestionResponse(
+        as_of=_iso(now_ts) or "",
+        days_baseline=days,
+        rows=rows_out,
     )
 
 

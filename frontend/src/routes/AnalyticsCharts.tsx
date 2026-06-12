@@ -13,7 +13,7 @@ import {
   YAxis,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents } from '@/lib/api'
+import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion } from '@/lib/api'
 import type { RiskEventItem } from '@/lib/api'
 
 const CHOKEPOINTS = [
@@ -1411,6 +1411,107 @@ export function RiskEventsCard() {
         {rows.length > 0 && (
           <div className="space-y-2 max-h-[480px] overflow-y-auto pr-1">
             {rows.map(ev => <RiskRow key={ev.event_id} ev={ev} />)}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Phase 27: Port Congestion Monitor
+// ---------------------------------------------------------------------------
+
+function congestionColor(factor: number): string {
+  if (factor >= 2.0) return 'text-red-400'
+  if (factor >= 1.3) return 'text-orange-400'
+  if (factor >= 0.7) return 'text-yellow-400'
+  return 'text-green-400'
+}
+
+function congestionBadge(factor: number): string {
+  if (factor >= 2.0) return 'CRITICAL'
+  if (factor >= 1.3) return 'ELEVATED'
+  if (factor >= 0.7) return 'NORMAL'
+  return 'LOW'
+}
+
+export function PortCongestionCard() {
+  const [kindFilter, setKindFilter] = React.useState<'' | 'tanker' | 'bulk'>('')
+  const [days, setDays] = React.useState(14)
+  const { data, isLoading } = usePortCongestion(kindFilter, days)
+  const rows = (data?.rows ?? []).filter(r => r.current_vessels > 0 || (r.baseline_avg_vessels ?? 0) > 0)
+
+  return (
+    <Card className="bg-card/60 backdrop-blur border-border/40">
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <CardTitle className="text-sm font-medium">Port Congestion Monitor</CardTitle>
+          <div className="flex gap-2">
+            <div className="flex gap-1">
+              {(['', 'tanker', 'bulk'] as const).map(k => (
+                <button key={k || 'all'} onClick={() => setKindFilter(k)}
+                  className={`rounded px-2 py-0.5 text-xs ${kindFilter === k ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+                  {k || 'All'}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-1">
+              {([7, 14, 30] as const).map(d => (
+                <button key={d} onClick={() => setDays(d)}
+                  className={`rounded px-2 py-0.5 text-xs ${days === d ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+                  {d}d
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          Current anchored vessels vs {days}d baseline - congestion factor = current / avg
+        </p>
+      </CardHeader>
+      <CardContent className="pt-0">
+        {isLoading && <p className="text-xs text-muted-foreground">Loading...</p>}
+        {!isLoading && rows.length === 0 && (
+          <p className="text-xs text-muted-foreground">No anchored episodes in selected window.</p>
+        )}
+        {rows.length > 0 && (
+          <div className="overflow-auto max-h-[400px]">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border/40 text-muted-foreground">
+                  <th className="text-left py-1 pr-3 font-medium">Zone</th>
+                  <th className="text-right py-1 pr-3 font-medium">Now</th>
+                  <th className="text-right py-1 pr-3 font-medium">Dwell</th>
+                  <th className="text-right py-1 pr-3 font-medium">Baseline</th>
+                  <th className="text-right py-1 pr-3 font-medium">Factor</th>
+                  <th className="text-right py-1 font-medium">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(row => (
+                  <tr key={row.zone} className="border-b border-border/20 hover:bg-muted/20">
+                    <td className="py-1.5 pr-3 font-medium text-foreground/90">
+                      {row.zone.replace(/_/g, ' ')}
+                      {row.region && <span className="ml-1 text-muted-foreground/60 text-[10px]">({row.region})</span>}
+                    </td>
+                    <td className="text-right pr-3 tabular-nums">{row.current_vessels}</td>
+                    <td className="text-right pr-3 tabular-nums text-muted-foreground">
+                      {row.avg_current_dwell_hours != null ? `${row.avg_current_dwell_hours.toFixed(0)}h` : '-'}
+                    </td>
+                    <td className="text-right pr-3 tabular-nums text-muted-foreground">
+                      {row.baseline_avg_vessels != null ? row.baseline_avg_vessels.toFixed(1) : '-'}
+                    </td>
+                    <td className={`text-right pr-3 tabular-nums font-semibold ${congestionColor(row.congestion_factor)}`}>
+                      {row.congestion_factor.toFixed(2)}x
+                    </td>
+                    <td className={`text-right text-[10px] font-medium ${congestionColor(row.congestion_factor)}`}>
+                      {congestionBadge(row.congestion_factor)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </CardContent>

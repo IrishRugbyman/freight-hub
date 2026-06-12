@@ -1120,3 +1120,29 @@ export function useRiskEvents(minRisk = 25, days = 2) {
   })
 }
 
+export interface PortCongestionRow {
+  zone: string
+  region: string | null
+  kind: string | null
+  current_vessels: number
+  avg_current_dwell_hours: number | null
+  baseline_avg_vessels: number | null
+  baseline_avg_dwell_hours: number | null
+  congestion_factor: number
+}
+
+export interface PortCongestionResponse {
+  as_of: string
+  days_baseline: number
+  rows: PortCongestionRow[]
+}
+
+export function usePortCongestion(kind = '', days = 14) {
+  return useQuery({
+    queryKey: ['port-congestion', kind, days],
+    queryFn: () => getJSON<PortCongestionResponse>(`/api/analytics/port-congestion?kind=${kind}&days=${days}`),
+    staleTime: 3 * 60 * 1000,
+    refetchInterval: 3 * 60 * 1000,
+  })
+}
+

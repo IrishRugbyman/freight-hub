@@ -1423,3 +1423,167 @@ def test_risk_events_sorted_by_max_risk(risk_events_client):
     rows = r.json()["rows"]
     max_risks = [row["max_risk"] for row in rows]
     assert max_risks == sorted(max_risks, reverse=True)
+
+
+# ---------------------------------------------------------------------------
+# Phase 27: port congestion monitor
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def congestion_client(tmp_path, monkeypatch):
+    """Client seeded with anchored_episodes for congestion testing.
+
+    Zone 'singapore_west' (tanker/VLCC):
+      - 2 open episodes (current anchored vessels)
+      - 3 completed historical episodes spanning ~24h total dwell
+
+    Zone 'hormuz_wait' (tanker/VLCC):
+      - 1 open episode
+      - No history -> congestion_factor = 1.0 (no baseline)
+    """
+    import duckdb
+    from datetime import UTC, datetime, timedelta
+    from fastapi.testclient import TestClient
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+
+    ais_schema = """
+    CREATE TABLE live_positions (
+        mmsi BIGINT PRIMARY KEY, name VARCHAR, lat DOUBLE, lon DOUBLE,
+        sog DOUBLE, cog DOUBLE, heading DOUBLE, destination VARCHAR,
+        ship_type INTEGER, length_m DOUBLE, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, updated_ts TIMESTAMP,
+        imo BIGINT, draught DOUBLE, nav_status INTEGER, eta VARCHAR
+    );
+    CREATE TABLE ais_snapshots (
+        snapshot_ts TIMESTAMP, mmsi BIGINT, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, lat DOUBLE, lon DOUBLE, ship_type INTEGER, length_m DOUBLE,
+        sog DOUBLE, nav_status INTEGER, draught DOUBLE, destination VARCHAR,
+        PRIMARY KEY (snapshot_ts, mmsi)
+    );
+    """
+
+    an_schema = """
+    CREATE TABLE meta_watermark (key VARCHAR PRIMARY KEY, ts TIMESTAMP);
+    CREATE TABLE ais_events (
+        event_id VARCHAR PRIMARY KEY, type VARCHAR,
+        mmsi BIGINT, mmsi2 BIGINT,
+        start_ts TIMESTAMP, end_ts TIMESTAMP,
+        lat DOUBLE, lon DOUBLE,
+        region VARCHAR, kind VARCHAR, segment VARCHAR, details VARCHAR
+    );
+    CREATE TABLE transit_events (
+        mmsi BIGINT, chokepoint VARCHAR, entered_ts TIMESTAMP, exited_ts TIMESTAMP,
+        direction VARCHAR, kind VARCHAR, segment VARCHAR, laden BOOLEAN,
+        PRIMARY KEY (mmsi, chokepoint, entered_ts)
+    );
+    CREATE TABLE anchored_episodes (
+        mmsi BIGINT, zone VARCHAR, start_ts TIMESTAMP, end_ts TIMESTAMP,
+        kind VARCHAR, segment VARCHAR, PRIMARY KEY (mmsi, zone, start_ts)
+    );
+    CREATE TABLE fleet_density (
+        ts TIMESTAMP, region VARCHAR, kind VARCHAR, segment VARCHAR,
+        laden_count INTEGER, ballast_count INTEGER, unknown_count INTEGER,
+        PRIMARY KEY (ts, region, kind, segment)
+    );
+    CREATE TABLE vessel_state (
+        mmsi BIGINT PRIMARY KEY, max_draught_seen DOUBLE, last_draught DOUBLE,
+        laden VARCHAR, updated_ts TIMESTAMP
+    );
+    """
+
+    ais_file = tmp_path / "ais.duckdb"
+    ais_conn = duckdb.connect(str(ais_file))
+    ais_conn.execute(ais_schema)
+    # 2 vessels currently anchored at singapore_west
+    for i in range(2):
+        ais_conn.execute(
+            "INSERT INTO live_positions VALUES (?,?,1.2,103.6,0.1,0.0,NULL,NULL,80,330,'tanker','VLCC','singapore_malacca',?,NULL,NULL,1,NULL)",
+            [6100 + i, f"WAIT_{i:02d}", now],
+        )
+    # 1 vessel at hormuz_wait
+    ais_conn.execute(
+        "INSERT INTO live_positions VALUES (6200,'HORMUZ WAIT',25.5,56.0,0.0,0.0,NULL,NULL,80,330,'tanker','VLCC','hormuz',?,NULL,NULL,1,NULL)",
+        [now],
+    )
+    ais_conn.close()
+
+    an_file = tmp_path / "analytics.duckdb"
+    an_conn = duckdb.connect(str(an_file))
+    an_conn.execute(an_schema)
+
+    # Open episodes at singapore_west (these are the current 2 vessels)
+    for i in range(2):
+        an_conn.execute(
+            "INSERT INTO anchored_episodes VALUES (?,?,?,NULL,'tanker','VLCC')",
+            [6100 + i, 'singapore_west', now - timedelta(hours=8 + i * 2)],
+        )
+    # Historical completed episodes at singapore_west (past 7 days)
+    for i in range(3):
+        start = now - timedelta(days=3 + i, hours=12)
+        end = start + timedelta(hours=24)
+        an_conn.execute(
+            "INSERT INTO anchored_episodes VALUES (?,?,?,?,'tanker','VLCC')",
+            [7000 + i, 'singapore_west', start, end],
+        )
+
+    # Open episode at hormuz_wait (no history)
+    an_conn.execute(
+        "INSERT INTO anchored_episodes VALUES (6200,'hormuz_wait',?,NULL,'tanker','VLCC')",
+        [now - timedelta(hours=5)],
+    )
+
+    an_conn.close()
+
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
+    monkeypatch.setenv("ANALYTICS_DB", str(an_file))
+    from app.main import app
+    return TestClient(app)
+
+
+def test_port_congestion_structure(congestion_client):
+    r = congestion_client.get("/api/analytics/port-congestion?days=14")
+    assert r.status_code == 200
+    d = r.json()
+    assert "as_of" in d
+    assert "days_baseline" in d
+    assert "rows" in d
+    assert d["days_baseline"] == 14
+    if d["rows"]:
+        row = d["rows"][0]
+        for field in ("zone", "current_vessels", "congestion_factor"):
+            assert field in row
+
+
+def test_port_congestion_current_vessels(congestion_client):
+    r = congestion_client.get("/api/analytics/port-congestion?days=14")
+    rows = {row["zone"]: row for row in r.json()["rows"]}
+    assert "singapore_west" in rows
+    assert rows["singapore_west"]["current_vessels"] == 2
+    assert "hormuz_wait" in rows
+    assert rows["hormuz_wait"]["current_vessels"] == 1
+
+
+def test_port_congestion_no_baseline_factor(congestion_client):
+    r = congestion_client.get("/api/analytics/port-congestion?days=14")
+    rows = {row["zone"]: row for row in r.json()["rows"]}
+    # hormuz_wait has 1 vessel but no history -> factor should be 1.0
+    assert rows["hormuz_wait"]["congestion_factor"] == pytest.approx(1.0, abs=0.01)
+    assert rows["hormuz_wait"]["baseline_avg_vessels"] is None
+
+
+def test_port_congestion_sorted_by_factor(congestion_client):
+    r = congestion_client.get("/api/analytics/port-congestion?days=14")
+    rows = r.json()["rows"]
+    factors = [row["congestion_factor"] for row in rows]
+    assert factors == sorted(factors, reverse=True)
+
+
+def test_port_congestion_dwell_hours(congestion_client):
+    r = congestion_client.get("/api/analytics/port-congestion?days=14")
+    rows = {row["zone"]: row for row in r.json()["rows"]}
+    sg = rows.get("singapore_west")
+    if sg:
+        # 2 open episodes started 8h and 10h ago -> avg ~9h
+        if sg["avg_current_dwell_hours"] is not None:
+            assert 7.0 <= sg["avg_current_dwell_hours"] <= 12.0

@@ -648,3 +648,20 @@ class RiskEventsResponse(BaseModel):
     days: int
     total_high_risk_vessels: int
     rows: list[RiskEventItem]
+
+
+class PortCongestionRow(BaseModel):
+    zone: str
+    region: str | None
+    kind: str | None
+    current_vessels: int
+    avg_current_dwell_hours: float | None  # hours for open episodes
+    baseline_avg_vessels: float | None     # avg simultaneous vessels over history
+    baseline_avg_dwell_hours: float | None
+    congestion_factor: float               # current_vessels / baseline_avg (or 1.0 if no baseline)
+
+
+class PortCongestionResponse(BaseModel):
+    as_of: str
+    days_baseline: int
+    rows: list[PortCongestionRow]
