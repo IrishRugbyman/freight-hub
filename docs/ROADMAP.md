@@ -502,7 +502,7 @@ vessel_registry
 
 ---
 
-## Phase 6 - Fleet Explorer: the no-map data page
+## Phase 6 - Fleet Explorer: the no-map data page - Completed: 2026-06-12, commit ef10b5c
 
 *Goal: a `/fleet` page where the whole tracked fleet is a filterable, sortable,
 exportable table: show me every Barbados-flagged tanker, every vessel of a given owner,
@@ -544,36 +544,36 @@ detention rate.*
 
 #### API
 
-- [ ] Schemas + the three endpoints. Build the WHERE clause from params with proper
+- [x] Schemas + the three endpoints. Build the WHERE clause from params with proper
       parameter binding (no string interpolation of user input into SQL).
-- [ ] pytest: seed both temp DBs (registry + live), assert each filter narrows
+- [x] pytest: seed both temp DBs (registry + live), assert each filter narrows
       correctly, sort works, pagination math, facet counts, CSV header row.
 
 #### Frontend
 
-- [ ] New route `src/routes/fleet.tsx` (regen routeTree: `npx vite build
+- [x] New route `src/routes/fleet.tsx` (regen routeTree: `npx vite build
       --emptyOutDir=false`). Enable nav entry in `__root.tsx`.
-- [ ] Filter state in URL search params (TanStack Router `validateSearch`) so filtered
+- [x] Filter state in URL search params (TanStack Router `validateSearch`) so filtered
       views are shareable/bookmarkable.
-- [ ] Plain table (no new table library; ~20 columns max, 100 rows/page renders fine),
+- [x] Plain table (no new table library; ~20 columns max, 100 rows/page renders fine),
       sticky header, MOU colours reuse the `MouBadge` idea, detention colour-coding
       reuses the VesselDetail thresholds. Loading/empty states.
-- [ ] Facet dropdowns show counts ("Liberia (412)"). Owner field = debounced text input.
-- [ ] Summary strip + clickable top-flag/top-owner chips.
-- [ ] "Show on map" per row -> navigate to `/` with the existing focus params (only for
+- [x] Facet dropdowns show counts ("Liberia (412)"). Owner field = debounced text input.
+- [x] Summary strip + clickable top-flag/top-owner chips.
+- [x] "Show on map" per row -> navigate to `/` with the existing focus params (only for
       rows with live positions; otherwise the cell is blank).
-- [ ] Export button hits `/api/fleet/export` with current params.
+- [x] Export button hits `/api/fleet/export` with current params.
 
 #### Definition of Done
 
-- [ ] Filter flag=Barbados: table shows exactly the Barbados-flagged vessels, summary
+- [x] Filter flag=Barbados: table shows exactly the Barbados-flagged vessels, summary
       strip matches, CSV downloads the same rows.
-- [ ] Filter by a top-5 owner chip, then row-click jumps to the vessel on the map.
-- [ ] pytest + vitest green, `npm run build` clean. Commit, CHANGELOG.
+- [x] Filter by a top-5 owner chip, then row-click jumps to the vessel on the map.
+- [x] pytest + vitest green, `npm run build` clean. Commit, CHANGELOG.
 
 ---
 
-## Phase 7 - Risk scoring: shadow-fleet indicators (innovation)
+## Phase 7 - Risk scoring: shadow-fleet indicators (innovation) - Completed: 2026-06-12, commit 0c66e2d
 
 *Goal: a transparent, documented 0-100 risk score per vessel combining registry red
 flags with the Phase 3 behavioural events, surfaced on the detail panel, as a Fleet
@@ -608,15 +608,15 @@ Deliberately Not Building).
 
 ### Task Checklist
 
-- [ ] `backend/registry/risk.py`: `risk_score(registry_row, event_counts) -> (score,
+- [x] `backend/registry/risk.py`: `risk_score(registry_row, event_counts) -> (score,
       fired_indicators)` pure function + the IG P&I club list. pytest with hand-built
       cases (clean modern VLCC ~0; old tanker, no P&I, black flag, 2 gaps -> high).
-- [ ] Crawler run computes and stores `risk_score INTEGER` + `risk_indicators VARCHAR
+- [x] Crawler run computes and stores `risk_score INTEGER` + `risk_indicators VARCHAR
       (JSON)` columns on vessel_registry (ALTER TABLE ADD COLUMN IF NOT EXISTS), reading
       event counts from freight_analytics.duckdb read-only.
-- [ ] API: include score + indicators in `/api/fleet` rows and `/api/vessels/{imo}/equasis`;
+- [x] API: include score + indicators in `/api/fleet` rows and `/api/vessels/{imo}/equasis`;
       add `risk_min` filter param.
-- [ ] Frontend: score badge (green < 25, yellow < 50, red >= 50) on VesselDetail with an
+- [x] Frontend: score badge (green < 25, yellow < 50, red >= 50) on VesselDetail with an
       expandable "why" list; risk filter + sortable column in Fleet Explorer; a "High
       risk" preset link (risk_min=50, sorted desc).
 - [ ] Eyeball the top-20 list: do the flagged vessels make sense (old tankers, odd
@@ -624,7 +624,7 @@ Deliberately Not Building).
 
 #### Definition of Done
 
-- [ ] Score visible end-to-end; top-20 list is plausible; all tests green; commit.
+- [x] Score visible end-to-end; top-20 list is plausible; all tests green; commit.
 
 ---
 
