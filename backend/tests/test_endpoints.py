@@ -4353,3 +4353,50 @@ def test_chokepoint_status_transit_counts(chokepoint_status_client):
     # 2 northbound out of 3 = 66.7%
     assert suez["pct_fwd_direction"] is not None
     assert 60 <= suez["pct_fwd_direction"] <= 70
+
+
+# ---------------------------------------------------------------------------
+# fleet-trend (Phase 51)
+# ---------------------------------------------------------------------------
+
+
+def test_fleet_trend_response_shape(client):
+    r = client.get("/api/analytics/fleet-trend")
+    assert r.status_code == 200
+    d = r.json()
+    assert "series" in d
+    assert "days" in d
+    assert d["days"] == 30
+    assert isinstance(d["series"], list)
+
+
+def test_fleet_trend_with_data(analytics_client):
+    r = analytics_client.get("/api/analytics/fleet-trend?days=30")
+    assert r.status_code == 200
+    d = r.json()
+    assert "series" in d
+    assert "as_of" in d
+    assert d["days"] == 30
+    # Seed has 2 fleet_density rows for hormuz/VLCC: laden=2+2=4, ballast=1+0=1, unknown=0+1=1
+    assert len(d["series"]) == 1  # both seed rows are on the same day
+    day = d["series"][0]
+    assert day["laden"] == 4
+    assert day["ballast"] == 1
+    assert day["unknown"] == 1
+    assert day["total"] == 6
+
+
+def test_fleet_trend_region_filter(analytics_client):
+    r = analytics_client.get("/api/analytics/fleet-trend?days=30&region=hormuz")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["region"] == "hormuz"
+    assert len(d["series"]) == 1
+
+
+def test_fleet_trend_no_region_filter(analytics_client):
+    r = analytics_client.get("/api/analytics/fleet-trend?days=30&region=suez")
+    assert r.status_code == 200
+    d = r.json()
+    # No suez data in seed
+    assert d["series"] == []

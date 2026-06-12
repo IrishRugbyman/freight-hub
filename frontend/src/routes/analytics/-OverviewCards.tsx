@@ -1,13 +1,13 @@
 import React, { useState } from 'react'
 import {
-  Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer,
+  Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer,
   Tooltip, XAxis, YAxis,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
-  useMarketSummary, useCrudeOnWater, useRegionMomentum, useFleetAtTime,
+  useMarketSummary, useCrudeOnWater, useRegionMomentum, useFleetAtTime, useFleetTrend,
 } from '@/lib/api'
-import { REGION_LABELS } from './-analyticsShared'
+import { EmptyState, TOOLTIP_STYLE, REGION_LABELS } from './-analyticsShared'
 
 // ---------------------------------------------------------------------------
 // regionLabel - used only in RegionMomentumCard (Overview tab)
@@ -416,12 +416,67 @@ export function CrudeOnWaterCard() {
 }
 
 // ---------------------------------------------------------------------------
+// FleetTrendCard - daily laden/ballast trend over past 30 days
+// ---------------------------------------------------------------------------
+function FleetTrendCard() {
+  const { data, isLoading } = useFleetTrend(30)
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm">Fleet composition trend (30d daily)</CardTitle>
+        <p className="text-xs text-muted-foreground">
+          Daily laden + ballast vessel counts from fleet_density. Shows global fleet utilization trend.
+        </p>
+      </CardHeader>
+      <CardContent>
+        {isLoading && <div className="h-32 flex items-center justify-center text-xs text-muted-foreground">Loading...</div>}
+        {!isLoading && (!data?.series.length) && (
+          <EmptyState message="Fleet density data will appear here after the analytics build completes." />
+        )}
+        {data && data.series.length > 0 && (
+          <ResponsiveContainer width="100%" height={180}>
+            <AreaChart data={data.series} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <defs>
+                <linearGradient id="ladenGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.05} />
+                </linearGradient>
+                <linearGradient id="ballastGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#6b7280" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#6b7280" stopOpacity={0.05} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+              <XAxis
+                dataKey="date"
+                tick={{ fontSize: 9, fill: '#6b7280' }}
+                tickFormatter={(d: string) => d.slice(5)}
+                interval={Math.max(1, Math.floor((data.series.length - 1) / 6))}
+              />
+              <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} width={45} />
+              <Tooltip
+                contentStyle={TOOLTIP_STYLE}
+                formatter={(value, name) => [value ?? 0, name === 'laden' ? 'Laden' : name === 'ballast' ? 'Ballast' : 'Unknown']}
+              />
+              <Area type="monotone" dataKey="laden" stroke="#3b82f6" fill="url(#ladenGrad)" strokeWidth={1.5} dot={false} name="laden" />
+              <Area type="monotone" dataKey="ballast" stroke="#6b7280" fill="url(#ballastGrad)" strokeWidth={1.5} dot={false} name="ballast" />
+            </AreaChart>
+          </ResponsiveContainer>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Default export: Overview tab component
 // ---------------------------------------------------------------------------
 export default function OverviewTab() {
   return (
     <div className="space-y-6">
       <MarketSummaryCard />
+      <FleetTrendCard />
       <RegionMomentumCard />
       <FleetAtTimeCard />
       <CrudeOnWaterCard />

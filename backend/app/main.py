@@ -131,6 +131,8 @@ from .schemas import (
     CrudeOnWaterResponse,
     ChokepointStatusRow,
     ChokepointStatusResponse,
+    FleetTrendDay,
+    FleetTrendResponse,
 )
 
 _STATIC = Path(__file__).parent / "static"
@@ -2055,6 +2057,57 @@ def analytics_fleet_at_time(ts: str = "", region: str = ""):
         region=region or None,
         total_vessels=len(df),
         segments=rows,
+    )
+
+
+@app.get("/api/analytics/fleet-trend", response_model=FleetTrendResponse)
+def analytics_fleet_trend(days: int = 30, region: str = ""):
+    """Daily fleet composition trend from fleet_density table.
+
+    Aggregates laden/ballast/unknown counts per day over the last N days (clamped 7-90).
+    Optionally filter by region. Returns a time-series suitable for line/area charts.
+    """
+    days = max(7, min(90, days))
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
+    now_dt = datetime.now(UTC).replace(tzinfo=None)
+
+    region_clause = "AND region = ? " if region else ""
+    params: list = [cutoff]
+    if region:
+        params.append(region)
+
+    df = db.query(
+        f"SELECT CAST(ts AS DATE) AS day, "
+        f"       SUM(laden_count) AS laden, "
+        f"       SUM(ballast_count) AS ballast, "
+        f"       SUM(unknown_count) AS unknown "
+        f"FROM fleet_density "
+        f"WHERE ts >= ? {region_clause}"
+        f"GROUP BY day ORDER BY day",
+        params,
+        db=db.analytics_db_path(),
+    )
+
+    series: list[FleetTrendDay] = []
+    if not df.empty:
+        df["day"] = pd.to_datetime(df["day"])
+        for _, row in df.iterrows():
+            laden = int(row["laden"] or 0)
+            ballast = int(row["ballast"] or 0)
+            unknown = int(row["unknown"] or 0)
+            series.append(FleetTrendDay(
+                date=row["day"].strftime("%Y-%m-%d"),
+                laden=laden,
+                ballast=ballast,
+                unknown=unknown,
+                total=laden + ballast + unknown,
+            ))
+
+    return FleetTrendResponse(
+        as_of=now_dt.isoformat(),
+        days=days,
+        region=region or None,
+        series=series,
     )
 
 

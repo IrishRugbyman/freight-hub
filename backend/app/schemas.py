@@ -1127,3 +1127,19 @@ class ChokepointStatusResponse(BaseModel):
     as_of: str
     rows: list[ChokepointStatusRow]
 
+
+# Phase 51: Fleet trend time-series
+class FleetTrendDay(BaseModel):
+    date: str          # YYYY-MM-DD
+    laden: int
+    ballast: int
+    unknown: int
+    total: int
+
+
+class FleetTrendResponse(BaseModel):
+    as_of: str
+    days: int
+    region: str | None
+    series: list[FleetTrendDay]
+

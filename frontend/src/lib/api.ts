@@ -1879,3 +1879,31 @@ export function useChokepointStatus() {
     refetchInterval: 2 * 60 * 1000,
   })
 }
+
+// ---- Fleet trend (Phase 51) ----
+
+export interface FleetTrendDay {
+  date: string
+  laden: number
+  ballast: number
+  unknown: number
+  total: number
+}
+
+export interface FleetTrendResponse {
+  as_of: string
+  days: number
+  region: string | null
+  series: FleetTrendDay[]
+}
+
+export function useFleetTrend(days = 30, region?: string) {
+  const qs = new URLSearchParams({ days: String(days) })
+  if (region) qs.set('region', region)
+  return useQuery({
+    queryKey: ['fleet-trend', days, region ?? ''],
+    queryFn: () => getJSON<FleetTrendResponse>(`/api/analytics/fleet-trend?${qs}`),
+    staleTime: ANALYTICS_STALE,
+    refetchInterval: 5 * 60_000,
+  })
+}
