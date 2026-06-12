@@ -877,6 +877,33 @@ export function useCargoTransitions(days = 7, minChange = 2.0, segment = '') {
   })
 }
 
+export interface FleetUtilizationRow {
+  segment: string
+  kind: string
+  total: number
+  underway_count: number
+  idle_count: number
+  unknown_count: number
+  underway_pct: number
+  idle_pct: number
+  avg_sog_underway: number | null
+}
+
+export interface FleetUtilizationResponse {
+  as_of: string
+  total_fleet: number
+  rows: FleetUtilizationRow[]
+}
+
+export function useFleetUtilization() {
+  return useQuery({
+    queryKey: ['fleet-utilization'],
+    queryFn: () => getJSON<FleetUtilizationResponse>('/api/analytics/fleet-utilization'),
+    staleTime: REFETCH_MS,
+    refetchInterval: REFETCH_MS,
+  })
+}
+
 export interface SlowSteamerEvent {
   mmsi: number
   name: string | null

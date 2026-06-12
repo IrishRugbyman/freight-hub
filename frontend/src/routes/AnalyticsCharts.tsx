@@ -13,7 +13,7 @@ import {
   YAxis,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers } from '@/lib/api'
+import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization } from '@/lib/api'
 
 const CHOKEPOINTS = [
   'singapore_malacca', 'suez', 'hormuz', 'panama', 'gibraltar',
@@ -1226,6 +1226,68 @@ export function SlowSteamersCard() {
               </tbody>
             </table>
           </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+export function FleetUtilizationCard() {
+  const [kindFilter, setKindFilter] = React.useState<'' | 'tanker' | 'bulk'>('')
+  const { data, isLoading } = useFleetUtilization()
+
+  const chartData = (data?.rows ?? [])
+    .filter((r) => !kindFilter || r.kind === kindFilter)
+    .map((r) => ({
+      name: r.segment,
+      Underway: r.underway_pct,
+      Idle: r.idle_pct,
+      Unknown: parseFloat((100 - r.underway_pct - r.idle_pct).toFixed(1)),
+      total: r.total,
+      avg_sog: r.avg_sog_underway,
+    }))
+    .sort((a, b) => b.Underway - a.Underway)
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <CardTitle className="text-sm font-medium">Fleet Utilization by Segment</CardTitle>
+          <div className="flex gap-1">
+            {(['', 'tanker', 'bulk'] as const).map((k) => (
+              <button
+                key={k || 'all'}
+                onClick={() => setKindFilter(k)}
+                className={`rounded px-2 py-0.5 text-xs ${kindFilter === k ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+              >
+                {k || 'All'}
+              </button>
+            ))}
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          % of live fleet underway (SOG &gt;2 kn) vs idle (anchored/moored)
+          {data && ` — ${data.total_fleet.toLocaleString()} vessels tracked`}
+        </p>
+      </CardHeader>
+      <CardContent className="pt-0">
+        {isLoading && <p className="text-xs text-muted-foreground">Loading...</p>}
+        {!isLoading && chartData.length === 0 && (
+          <p className="text-xs text-muted-foreground">No utilization data available.</p>
+        )}
+        {!isLoading && chartData.length > 0 && (
+          <BarChart width={440} height={220} data={chartData} layout="vertical" margin={{ left: 60, right: 40, top: 4, bottom: 4 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" horizontal={false} />
+            <XAxis type="number" domain={[0, 100]} tickFormatter={(v) => `${v}%`} tick={{ fontSize: 10, fill: '#888' }} />
+            <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: '#ccc' }} width={58} />
+            <Tooltip
+              formatter={(val, name) => [`${Number(val).toFixed(1)}%`, String(name)]}
+              contentStyle={{ background: '#1a1a2e', border: '1px solid #333', fontSize: 11 }}
+            />
+            <Bar dataKey="Underway" stackId="a" fill="#22c55e" radius={[0, 0, 0, 0]} />
+            <Bar dataKey="Unknown" stackId="a" fill="#6b7280" />
+            <Bar dataKey="Idle" stackId="a" fill="#f97316" radius={[0, 4, 4, 0]} />
+          </BarChart>
         )}
       </CardContent>
     </Card>

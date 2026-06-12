@@ -65,6 +65,8 @@ from .schemas import (
     RoutesResponse,
     SlowSteamerEvent,
     SlowSteamersResponse,
+    FleetUtilizationRow,
+    FleetUtilizationResponse,
     TransitRiskEvent,
     TransitRiskResponse,
     SpeedAnalyticsResponse,
@@ -1975,6 +1977,69 @@ def analytics_slow_steamers(kind: str = "", limit: int = 50):
         ))
 
     return SlowSteamersResponse(as_of=_iso(now) or "", total_fleet_underway=total_underway, rows=rows)
+
+
+@app.get("/api/analytics/fleet-utilization", response_model=FleetUtilizationResponse)
+def analytics_fleet_utilization():
+    """Fleet utilization by segment: % underway vs idle across the live fleet.
+
+    Underway = nav_status 0 (or unknown) AND sog > 2 kn.
+    Idle = sog < 0.5 kn OR nav_status in (1=anchored, 5=moored).
+    Unknown = everything else (slow but not confirmed idle).
+    Excludes 'Small' segment (too noisy for freight signals).
+    Sorted by underway_pct ascending (most-idle segments first).
+    """
+    now = datetime.now(UTC).replace(tzinfo=None)
+    lp_df = db.query(
+        "SELECT segment, kind, sog, nav_status "
+        "FROM live_positions "
+        "WHERE segment IS NOT NULL AND segment != 'Small'"
+    )
+
+    if lp_df.empty:
+        return FleetUtilizationResponse(as_of=_iso(now) or "", total_fleet=0, rows=[])
+
+    def classify(row) -> str:
+        sog = row.get("sog")
+        ns = row.get("nav_status")
+        # Anchored or moored: explicit nav status wins
+        if (ns is not None and not pd.isna(ns) and int(ns) in (1, 5)):
+            return "idle"
+        sog_f = float(sog) if sog is not None and not pd.isna(sog) else None
+        if sog_f is None:
+            return "unknown"
+        if sog_f > 2.0:
+            return "underway"
+        if sog_f < 0.5:
+            return "idle"
+        return "unknown"
+
+    lp_df["status"] = lp_df.apply(classify, axis=1)
+    lp_df["sog_num"] = pd.to_numeric(lp_df["sog"], errors="coerce")
+
+    rows_out: list[FleetUtilizationRow] = []
+    for (segment, kind), grp in lp_df.groupby(["segment", "kind"]):
+        total = len(grp)
+        underway = int((grp["status"] == "underway").sum())
+        idle = int((grp["status"] == "idle").sum())
+        unknown = int((grp["status"] == "unknown").sum())
+        underway_sog = grp[grp["status"] == "underway"]["sog_num"]
+        avg_sog = round(float(underway_sog.mean()), 1) if not underway_sog.empty else None
+        rows_out.append(FleetUtilizationRow(
+            segment=str(segment),
+            kind=str(kind),
+            total=total,
+            underway_count=underway,
+            idle_count=idle,
+            unknown_count=unknown,
+            underway_pct=round(100.0 * underway / total, 1) if total > 0 else 0.0,
+            idle_pct=round(100.0 * idle / total, 1) if total > 0 else 0.0,
+            avg_sog_underway=avg_sog,
+        ))
+
+    rows_out.sort(key=lambda r: r.underway_pct)  # most idle first
+    total_fleet = len(lp_df)
+    return FleetUtilizationResponse(as_of=_iso(now) or "", total_fleet=total_fleet, rows=rows_out)
 
 
 @app.get("/api/fleet/export")

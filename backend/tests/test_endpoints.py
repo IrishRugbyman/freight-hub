@@ -1177,3 +1177,45 @@ def test_slow_steamers_pct_of_median(slow_client):
         assert slow_cape["pct_of_median"] < 60.0
         assert slow_cape["segment_median_sog"] > 0
         assert slow_cape["sog"] == 4.0
+
+
+# ---------------------------------------------------------------------------
+# Phase 25: fleet utilization (underway vs idle by segment)
+# ---------------------------------------------------------------------------
+
+def test_fleet_utilization_structure(slow_client):
+    """Reuse slow_client fixture which has a suitable live_positions seed."""
+    r = slow_client.get("/api/analytics/fleet-utilization")
+    assert r.status_code == 200
+    d = r.json()
+    assert "rows" in d
+    assert "total_fleet" in d
+    assert "as_of" in d
+    if d["rows"]:
+        row = d["rows"][0]
+        assert "segment" in row
+        assert "underway_pct" in row
+        assert "idle_pct" in row
+        assert "underway_count" in row
+
+
+def test_fleet_utilization_pcts_sum_to_100(slow_client):
+    r = slow_client.get("/api/analytics/fleet-utilization")
+    for row in r.json()["rows"]:
+        total = row["underway_count"] + row["idle_count"] + row["unknown_count"]
+        assert total == row["total"]
+        total_pct = round(row["underway_pct"] + row["idle_pct"], 0)
+        assert total_pct <= 100.1  # small float rounding tolerance
+
+
+def test_fleet_utilization_capesize_detected(slow_client):
+    r = slow_client.get("/api/analytics/fleet-utilization")
+    rows = r.json()["rows"]
+    cape = next((r for r in rows if r["segment"] == "Capesize"), None)
+    assert cape is not None
+    # 10 normal + 1 slow Capesize seeded; slow one (4 kn) is below threshold
+    assert cape["total"] == 11
+    # 10 vessels at 11-12 kn are underway, 1 at 4 kn is unknown (between 0.5 and 2 is
+    # unknown, but 4 kn > 2 kn so all 11 are classified as underway)
+    # Actually wait: slow Cape is at 4.0 kn > 2.0 kn threshold -> also underway!
+    assert cape["underway_count"] == 11

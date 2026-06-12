@@ -515,6 +515,24 @@ class SlowSteamersResponse(BaseModel):
     rows: list[SlowSteamerEvent]
 
 
+class FleetUtilizationRow(BaseModel):
+    segment: str
+    kind: str              # "tanker" | "bulk"
+    total: int
+    underway_count: int    # sog > 2 and nav_status = 0 or None
+    idle_count: int        # sog < 0.5 or nav_status in (1, 5)
+    unknown_count: int     # everything else (slow but not confirmed anchored)
+    underway_pct: float
+    idle_pct: float
+    avg_sog_underway: float | None
+
+
+class FleetUtilizationResponse(BaseModel):
+    as_of: str
+    total_fleet: int
+    rows: list[FleetUtilizationRow]
+
+
 class TransitRiskEvent(BaseModel):
     mmsi: int
     name: str | None
