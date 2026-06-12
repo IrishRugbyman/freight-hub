@@ -35,6 +35,7 @@ const EventRateTimelineCard = lazy(() => import('./AnalyticsCharts').then((m) =>
 const TransitRateTimelineCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.TransitRateTimelineCard })))
 const AnchorageOccupancyCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.AnchorageOccupancyCard })))
 const StsOffendersCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.StsOffendersCard })))
+const FleetAtTimeCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.FleetAtTimeCard })))
 
 function ChartSkeleton() {
   return <div className="h-[300px] animate-pulse rounded-lg bg-muted/40" />
@@ -55,6 +56,7 @@ function AnalyticsPage() {
         <h2 className="text-base font-semibold text-foreground">Market State</h2>
         <Suspense fallback={<ChartSkeleton />}><MarketSummaryCard /></Suspense>
         <Suspense fallback={<ChartSkeleton />}><RegionMomentumCard /></Suspense>
+        <Suspense fallback={<ChartSkeleton />}><FleetAtTimeCard /></Suspense>
 
         <h2 className="text-base font-semibold text-foreground">Chokepoint Traffic</h2>
         <Suspense fallback={<ChartSkeleton />}><ChokepointHeatmapCard /></Suspense>

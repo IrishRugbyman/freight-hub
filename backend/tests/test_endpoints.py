@@ -3248,3 +3248,141 @@ def test_sts_offenders_sorted_desc(risk_leaderboard_client):
     d = r.json()
     events = [row["sts_events"] for row in d["rows"]]
     assert events == sorted(events, reverse=True)
+
+
+# ---------------------------------------------------------------------------
+# Phase 41: Fleet Historical Query (fleet-at-time)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def fleet_history_client(tmp_path, monkeypatch):
+    """Fixture for fleet-at-time endpoint.
+
+    ais_snapshots has 3 vessels at a known timestamp.
+    """
+    import duckdb
+    from fastapi.testclient import TestClient
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+    snap_ts = now - timedelta(hours=23)  # within 30min of 24h ago query
+
+    ais_schema = """
+    CREATE TABLE live_positions (
+        mmsi BIGINT PRIMARY KEY, name VARCHAR, lat DOUBLE, lon DOUBLE,
+        sog DOUBLE, cog DOUBLE, heading DOUBLE, destination VARCHAR,
+        ship_type INTEGER, length_m DOUBLE, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, updated_ts TIMESTAMP,
+        imo BIGINT, draught DOUBLE, nav_status INTEGER, eta VARCHAR
+    );
+    CREATE TABLE ais_snapshots (
+        snapshot_ts TIMESTAMP, mmsi BIGINT, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, lat DOUBLE, lon DOUBLE, ship_type INTEGER, length_m DOUBLE,
+        sog DOUBLE, nav_status INTEGER, draught DOUBLE, destination VARCHAR,
+        PRIMARY KEY (snapshot_ts, mmsi)
+    );
+    CREATE TABLE vessels (
+        mmsi BIGINT PRIMARY KEY, imo BIGINT, name VARCHAR, flag VARCHAR,
+        flag_iso2 VARCHAR, mid INTEGER, call_sign VARCHAR, vessel_type VARCHAR,
+        dwt INTEGER, grt INTEGER, build_year INTEGER, length_m DOUBLE, beam_m DOUBLE,
+        owner VARCHAR, manager VARCHAR, class_society VARCHAR, enriched_at TIMESTAMP, equasis_ok BOOLEAN
+    );
+    """
+    ais_file = tmp_path / "ais_fh.duckdb"
+    ais_conn = duckdb.connect(str(ais_file))
+    ais_conn.execute(ais_schema)
+    ais_conn.executemany(
+        "INSERT INTO ais_snapshots VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            (snap_ts, 9601, "tanker", "VLCC",     "hormuz",    25.0, 56.0, 80, 330, 12.0, 0, 18.0, "CNSHA"),
+            (snap_ts, 9602, "bulk",   "Capesize",  "ara",       3.5,  5.0, 74, 300,  8.0, 0,  7.0, "NLRTM"),
+            (snap_ts, 9603, "tanker", "VLCC",     "hormuz",    25.1, 56.1, 80, 330,  0.5, 5,  4.0, None),
+        ],
+    )
+    ais_conn.close()
+
+    an_file = tmp_path / "analytics_fh.duckdb"
+    an_conn = duckdb.connect(str(an_file))
+    an_conn.execute("""
+    CREATE TABLE meta_watermark (key VARCHAR PRIMARY KEY, ts TIMESTAMP);
+    CREATE TABLE ais_events (
+        event_id VARCHAR PRIMARY KEY, type VARCHAR, mmsi BIGINT, mmsi2 BIGINT,
+        start_ts TIMESTAMP, end_ts TIMESTAMP, lat DOUBLE, lon DOUBLE,
+        region VARCHAR, kind VARCHAR, segment VARCHAR, details VARCHAR
+    );
+    CREATE TABLE transit_events (
+        mmsi BIGINT, chokepoint VARCHAR, entered_ts TIMESTAMP, exited_ts TIMESTAMP,
+        direction VARCHAR, kind VARCHAR, segment VARCHAR, laden BOOLEAN,
+        PRIMARY KEY (mmsi, chokepoint, entered_ts)
+    );
+    CREATE TABLE anchored_episodes (
+        mmsi BIGINT, zone VARCHAR, start_ts TIMESTAMP, end_ts TIMESTAMP,
+        kind VARCHAR, segment VARCHAR, PRIMARY KEY (mmsi, zone, start_ts)
+    );
+    CREATE TABLE fleet_density (
+        ts TIMESTAMP, region VARCHAR, kind VARCHAR, segment VARCHAR,
+        laden_count INTEGER, ballast_count INTEGER, unknown_count INTEGER,
+        PRIMARY KEY (ts, region, kind, segment)
+    );
+    CREATE TABLE vessel_state (
+        mmsi BIGINT PRIMARY KEY, max_draught_seen DOUBLE, last_draught DOUBLE,
+        laden VARCHAR, updated_ts TIMESTAMP
+    );
+    """)
+    an_conn.close()
+
+    reg_file = tmp_path / "reg_fh.duckdb"
+    duckdb.connect(str(reg_file)).execute("""
+    CREATE TABLE vessel_registry (
+        imo BIGINT PRIMARY KEY, ship_name VARCHAR, flag VARCHAR, flag_code VARCHAR,
+        call_sign VARCHAR, gross_tonnage INTEGER, dwt INTEGER, ship_type VARCHAR,
+        year_built INTEGER, ship_status VARCHAR, owner VARCHAR, ism_manager VARCHAR,
+        ship_manager VARCHAR, class_society VARCHAR, pi_club VARCHAR,
+        detention_rate_pct DOUBLE, paris_mou VARCHAR, tokyo_mou VARCHAR,
+        uscg_targeting VARCHAR, fetched_ts TIMESTAMP, fetch_ok BOOLEAN,
+        risk_score INTEGER, risk_indicators VARCHAR, ofac_sanctioned BOOLEAN
+    );
+    """).close()
+
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
+    monkeypatch.setenv("ANALYTICS_DB", str(an_file))
+    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
+
+    from app.main import app as freight_app
+    return TestClient(freight_app)
+
+
+def test_fleet_history_structure(fleet_history_client):
+    r = fleet_history_client.get("/api/analytics/fleet-at-time")
+    assert r.status_code == 200
+    d = r.json()
+    assert "queried_ts" in d and "actual_ts" in d and "total_vessels" in d and "segments" in d
+    for seg in d["segments"]:
+        assert "kind" in seg and "segment" in seg and "count" in seg
+
+
+def test_fleet_history_finds_snapshots(fleet_history_client):
+    from datetime import datetime, timedelta, UTC
+    target_ts = (datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=23)).isoformat()
+    r = fleet_history_client.get(f"/api/analytics/fleet-at-time?ts={target_ts}")
+    d = r.json()
+    assert d["total_vessels"] == 3
+
+
+def test_fleet_history_region_filter(fleet_history_client):
+    from datetime import datetime, timedelta, UTC
+    target_ts = (datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=23)).isoformat()
+    r = fleet_history_client.get(f"/api/analytics/fleet-at-time?ts={target_ts}&region=hormuz")
+    d = r.json()
+    assert d["total_vessels"] == 2
+    assert d["region"] == "hormuz"
+
+
+def test_fleet_history_segment_breakdown(fleet_history_client):
+    from datetime import datetime, timedelta, UTC
+    target_ts = (datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=23)).isoformat()
+    r = fleet_history_client.get(f"/api/analytics/fleet-at-time?ts={target_ts}")
+    d = r.json()
+    vlcc = next((s for s in d["segments"] if s["segment"] == "VLCC"), None)
+    assert vlcc is not None
+    assert vlcc["count"] == 2

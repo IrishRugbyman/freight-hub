@@ -928,3 +928,21 @@ class StsOffendersResponse(BaseModel):
     days: int
     total_vessels: int
     rows: list[StsOffenderRow]
+
+
+class FleetHistorySegmentRow(BaseModel):
+    kind: str
+    segment: str
+    count: int
+    laden_count: int
+    ballast_count: int
+    underway_count: int
+    avg_sog: float | None
+
+
+class FleetHistoryResponse(BaseModel):
+    queried_ts: str
+    actual_ts: str
+    region: str | None
+    total_vessels: int
+    segments: list[FleetHistorySegmentRow]

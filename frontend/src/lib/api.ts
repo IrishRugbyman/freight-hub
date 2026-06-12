@@ -1547,3 +1547,33 @@ export function useStsOffenders(days = 30, limit = 50) {
     refetchInterval: 5 * 60 * 1000,
   })
 }
+
+export interface FleetHistorySegmentRow {
+  kind: string
+  segment: string
+  count: number
+  laden: number
+  ballast: number
+  underway: number
+  avg_sog: number | null
+}
+
+export interface FleetHistoryResponse {
+  queried_ts: string
+  actual_ts: string
+  region: string | null
+  total_vessels: number
+  segments: FleetHistorySegmentRow[]
+}
+
+export function useFleetAtTime(ts = '', region = '') {
+  return useQuery({
+    queryKey: ['fleet-at-time', ts, region],
+    queryFn: () =>
+      getJSON<FleetHistoryResponse>(
+        `/api/analytics/fleet-at-time?ts=${encodeURIComponent(ts)}&region=${encodeURIComponent(region)}`,
+      ),
+    staleTime: 10 * 60 * 1000,
+    refetchInterval: false,
+  })
+}

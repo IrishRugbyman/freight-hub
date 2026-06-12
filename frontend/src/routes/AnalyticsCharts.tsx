@@ -14,7 +14,7 @@ import {
   YAxis,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion, useDestinationFlows, useMarketSummary, useVesselRiskScores, useChokepointHeatmap, useTradeLaneMatrix, useAnomalyWatchlist, useStsProximity, useRegionMomentum, useEventRateTimeline, useTransitRateTimeline, useAnchorageOccupancy, useStsOffenders } from '@/lib/api'
+import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion, useDestinationFlows, useMarketSummary, useVesselRiskScores, useChokepointHeatmap, useTradeLaneMatrix, useAnomalyWatchlist, useStsProximity, useRegionMomentum, useEventRateTimeline, useTransitRateTimeline, useAnchorageOccupancy, useStsOffenders, useFleetAtTime } from '@/lib/api'
 import type { RiskEventItem } from '@/lib/api'
 
 const CHOKEPOINTS = [
@@ -2804,6 +2804,139 @@ export function StsOffendersCard() {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Phase 41: Fleet Historical Snapshot (fleet-at-time)
+// ---------------------------------------------------------------------------
+
+const SEG_ORDER = [
+  'VLCC', 'Suezmax', 'Aframax', 'Panamax', 'MR2', 'MR1', 'Handy',
+  'Capesize', 'Panamax', 'Supramax', 'Handysize', 'ULCS', 'VLCS',
+  'Large', 'Medium', 'Small',
+]
+
+function segSort(a: string, b: string): number {
+  const ia = SEG_ORDER.indexOf(a)
+  const ib = SEG_ORDER.indexOf(b)
+  if (ia === -1 && ib === -1) return a.localeCompare(b)
+  if (ia === -1) return 1
+  if (ib === -1) return -1
+  return ia - ib
+}
+
+export function FleetAtTimeCard() {
+  const [inputTs, setInputTs] = useState('')
+  const [region, setRegion] = useState('')
+  const [submittedTs, setSubmittedTs] = useState('')
+  const [submittedRegion, setSubmittedRegion] = useState('')
+  const { data, isLoading, isFetching } = useFleetAtTime(submittedTs, submittedRegion)
+
+  const handleQuery = () => {
+    setSubmittedTs(inputTs)
+    setSubmittedRegion(region)
+  }
+
+  const tankers = (data?.segments ?? []).filter(r => r.kind === 'tanker').sort((a, b) => segSort(a.segment, b.segment))
+  const bulkers = (data?.segments ?? []).filter(r => r.kind === 'bulk').sort((a, b) => segSort(a.segment, b.segment))
+  const others  = (data?.segments ?? []).filter(r => r.kind !== 'tanker' && r.kind !== 'bulk').sort((a, b) => a.kind.localeCompare(b.kind) || segSort(a.segment, b.segment))
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Fleet Snapshot at Time</CardTitle>
+        <p className="text-xs text-muted-foreground">
+          Query the vessel composition at any point in the last 30 days.
+          Finds the nearest 30-min snapshot window.
+        </p>
+        <div className="flex flex-wrap gap-2 pt-1">
+          <input
+            type="datetime-local"
+            className="rounded border border-border bg-background px-2 py-1 text-xs"
+            value={inputTs}
+            onChange={e => setInputTs(e.target.value)}
+            placeholder="e.g. 2026-06-10T12:00"
+          />
+          <select
+            className="rounded border border-border bg-background px-2 py-1 text-xs"
+            value={region}
+            onChange={e => setRegion(e.target.value)}
+          >
+            <option value="">All regions</option>
+            <option value="hormuz">Strait of Hormuz</option>
+            <option value="malacca">Malacca</option>
+            <option value="suez">Suez</option>
+            <option value="bab_el_mandeb">Bab el-Mandeb</option>
+            <option value="singapore">Singapore</option>
+            <option value="taiwan_strait">Taiwan Strait</option>
+            <option value="danish_straits">Danish Straits</option>
+            <option value="dover">Dover</option>
+            <option value="ara">ARA</option>
+            <option value="med">Mediterranean</option>
+            <option value="black_sea">Black Sea</option>
+          </select>
+          <button
+            className="rounded bg-primary px-3 py-1 text-xs font-medium text-primary-foreground"
+            onClick={handleQuery}
+            disabled={isFetching}
+          >
+            {isFetching ? 'Loading...' : 'Query'}
+          </button>
+          {!submittedTs && !submittedRegion && (
+            <span className="text-xs text-muted-foreground self-center">Showing 24h ago by default</span>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent>
+        {isLoading || isFetching ? (
+          <div className="h-40 animate-pulse rounded bg-muted/40" />
+        ) : !data ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">Select a timestamp and click Query.</p>
+        ) : data.total_vessels === 0 ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">No snapshot data near that timestamp.</p>
+        ) : (
+          <div className="space-y-3">
+            <div className="flex flex-wrap gap-4 text-sm">
+              <div>
+                <span className="text-muted-foreground">Queried: </span>
+                <span className="font-medium">{new Date(data.queried_ts).toLocaleString()}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Snapshot: </span>
+                <span className="font-medium">{new Date(data.actual_ts).toLocaleString()}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Vessels: </span>
+                <span className="font-semibold text-primary">{data.total_vessels.toLocaleString()}</span>
+                {data.region && <span className="ml-1 text-muted-foreground">in {data.region.replace(/_/g, ' ')}</span>}
+              </div>
+            </div>
+            {[{ label: 'Tankers', rows: tankers }, { label: 'Bulkers', rows: bulkers }, { label: 'Other', rows: others }]
+              .filter(g => g.rows.length > 0)
+              .map(group => (
+                <div key={group.label}>
+                  <div className="mb-1 text-xs font-semibold text-muted-foreground uppercase tracking-wide">{group.label}</div>
+                  <div className="grid gap-0.5">
+                    {group.rows.map(row => (
+                      <div key={`${row.kind}-${row.segment}`} className="flex items-center gap-2 rounded bg-muted/15 px-2 py-1 text-xs hover:bg-muted/30">
+                        <span className="w-28 shrink-0 font-medium">{row.segment}</span>
+                        <span className="w-12 shrink-0 tabular-nums text-primary font-semibold">{row.count}</span>
+                        <div className="flex min-w-0 gap-2 text-muted-foreground">
+                          <span>L: {row.laden}</span>
+                          <span>B: {row.ballast}</span>
+                          <span>U/W: {row.underway}</span>
+                          {row.avg_sog != null && <span>avg {row.avg_sog}kn</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
           </div>
         )}
       </CardContent>

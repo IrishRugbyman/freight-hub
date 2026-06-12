@@ -89,6 +89,8 @@ from .schemas import (
     SpeedAnalyticsResponse,
     AnchorageOccupancyPoint,
     AnchorageOccupancyResponse,
+    FleetHistorySegmentRow,
+    FleetHistoryResponse,
     StsOffenderRow,
     StsOffendersResponse,
     EventRatePoint,
@@ -1917,6 +1919,79 @@ def analytics_region_momentum(hours_back: int = 24):
         for region, r in merged.iterrows()
     ]
     return RegionMomentumResponse(as_of=as_of, hours_back=h, rows=rows)
+
+
+@app.get("/api/analytics/fleet-at-time", response_model=FleetHistoryResponse)
+def analytics_fleet_at_time(ts: str = "", region: str = ""):
+    """Fleet composition at a historical timestamp from ais_snapshots.
+
+    ts: ISO 8601 datetime string (e.g. 2026-06-10T12:00:00). Defaults to 24h ago.
+    Finds the snapshot closest to the requested timestamp (within 30 minutes).
+    Returns segment breakdown with laden/ballast/underway counts and avg SOG.
+    """
+    now_dt = datetime.now(UTC).replace(tzinfo=None)
+    if ts:
+        try:
+            queried_dt = datetime.fromisoformat(ts.replace("Z", "+00:00")).replace(tzinfo=None)
+        except ValueError:
+            queried_dt = now_dt - timedelta(hours=24)
+    else:
+        queried_dt = now_dt - timedelta(hours=24)
+
+    queried_dt = max(queried_dt, now_dt - timedelta(days=30))  # cap 30d lookback
+
+    region_clause = ""
+    if region:
+        region_clause = "AND region = ? "
+        params: list = [queried_dt, region, queried_dt]
+    else:
+        params = [queried_dt, queried_dt]
+
+    df = db.query(
+        f"SELECT snapshot_ts, mmsi, kind, segment, sog, nav_status, draught, destination "
+        f"FROM ais_snapshots "
+        f"WHERE ABS(EPOCH(snapshot_ts) - EPOCH(?)) <= 1800 "
+        f"{region_clause}"
+        f"ORDER BY ABS(EPOCH(snapshot_ts) - EPOCH(?)) LIMIT 10000",
+        params,
+    )
+    if df.empty:
+        return FleetHistoryResponse(
+            queried_ts=queried_dt.isoformat(),
+            actual_ts=queried_dt.isoformat(),
+            region=region or None,
+            total_vessels=0,
+            segments=[],
+        )
+
+    actual_ts = pd.to_datetime(df["snapshot_ts"]).mode().iloc[0].to_pydatetime()
+    df = df[pd.to_datetime(df["snapshot_ts"]) == actual_ts]
+
+    rows: list[FleetHistorySegmentRow] = []
+    for (kind_val, seg_val), grp in df.groupby(["kind", "segment"]):
+        laden = int((grp["draught"] > 5).sum()) if "draught" in grp else 0
+        ballast = int((grp["draught"] <= 5).sum()) if "draught" in grp else 0
+        underway = int((grp["sog"].fillna(0) > 2).sum())
+        avg_sog = round(float(grp["sog"].dropna().mean()), 1) if len(grp["sog"].dropna()) > 0 else None
+        rows.append(
+            FleetHistorySegmentRow(
+                kind=str(kind_val),
+                segment=str(seg_val),
+                count=len(grp),
+                laden_count=laden,
+                ballast_count=ballast,
+                underway_count=underway,
+                avg_sog=avg_sog,
+            )
+        )
+    rows.sort(key=lambda r: r.count, reverse=True)
+    return FleetHistoryResponse(
+        queried_ts=queried_dt.isoformat(),
+        actual_ts=actual_ts.isoformat(),
+        region=region or None,
+        total_vessels=len(df),
+        segments=rows,
+    )
 
 
 @app.get("/api/analytics/laden", response_model=LadenResponse)
