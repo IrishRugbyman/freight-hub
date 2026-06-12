@@ -744,3 +744,153 @@ def test_transit_risk_days_clamped(analytics_client):
     r = analytics_client.get("/api/analytics/transit-risk?days=200")
     assert r.status_code == 200
     assert r.json()["days"] == 90
+
+
+# ---- /api/analytics/anchorage-dwell -----------------------------------------
+
+
+@pytest.fixture
+def dwell_client(tmp_path, monkeypatch):
+    """Client with an open anchored episode at singapore_west."""
+    import duckdb
+    from datetime import UTC, datetime, timedelta
+    from fastapi.testclient import TestClient
+
+    _now = datetime.now(UTC).replace(tzinfo=None)
+
+    ais_schema = """
+    CREATE TABLE live_positions (
+        mmsi BIGINT PRIMARY KEY, name VARCHAR, lat DOUBLE, lon DOUBLE,
+        sog DOUBLE, cog DOUBLE, heading DOUBLE, destination VARCHAR,
+        ship_type INTEGER, length_m DOUBLE, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, updated_ts TIMESTAMP,
+        imo BIGINT, draught DOUBLE, nav_status INTEGER, eta VARCHAR
+    );
+    CREATE TABLE vessels (
+        mmsi BIGINT PRIMARY KEY, imo BIGINT, name VARCHAR, flag VARCHAR,
+        flag_iso2 VARCHAR, mid INTEGER, call_sign VARCHAR, vessel_type VARCHAR,
+        dwt DOUBLE, grt DOUBLE, build_year INTEGER, length_m DOUBLE, beam_m DOUBLE,
+        owner VARCHAR, manager VARCHAR, class_society VARCHAR, enriched_at TIMESTAMP,
+        equasis_ok BOOLEAN
+    );
+    CREATE TABLE ais_snapshots (
+        snapshot_ts TIMESTAMP, mmsi BIGINT,
+        kind VARCHAR, segment VARCHAR, region VARCHAR,
+        lat DOUBLE, lon DOUBLE, ship_type INTEGER, length_m DOUBLE,
+        sog DOUBLE, nav_status INTEGER, draught DOUBLE, destination VARCHAR,
+        PRIMARY KEY (snapshot_ts, mmsi)
+    );
+    """
+
+    an_schema = """
+    CREATE TABLE meta_watermark (key VARCHAR PRIMARY KEY, ts TIMESTAMP);
+    CREATE TABLE ais_events (
+        event_id VARCHAR PRIMARY KEY, type VARCHAR,
+        mmsi BIGINT, mmsi2 BIGINT,
+        start_ts TIMESTAMP, end_ts TIMESTAMP,
+        lat DOUBLE, lon DOUBLE,
+        region VARCHAR, kind VARCHAR, segment VARCHAR, details VARCHAR
+    );
+    CREATE TABLE transit_events (
+        mmsi BIGINT, chokepoint VARCHAR, entered_ts TIMESTAMP, exited_ts TIMESTAMP,
+        direction VARCHAR, kind VARCHAR, segment VARCHAR, laden BOOLEAN,
+        PRIMARY KEY (mmsi, chokepoint, entered_ts)
+    );
+    CREATE TABLE anchored_episodes (
+        mmsi BIGINT, zone VARCHAR, start_ts TIMESTAMP, end_ts TIMESTAMP,
+        kind VARCHAR, segment VARCHAR, PRIMARY KEY (mmsi, zone, start_ts)
+    );
+    CREATE TABLE fleet_density (
+        ts TIMESTAMP, region VARCHAR, kind VARCHAR, segment VARCHAR,
+        laden_count INTEGER, ballast_count INTEGER, unknown_count INTEGER,
+        PRIMARY KEY (ts, region, kind, segment)
+    );
+    CREATE TABLE vessel_state (
+        mmsi BIGINT PRIMARY KEY, max_draught_seen DOUBLE, last_draught DOUBLE,
+        laden VARCHAR, updated_ts TIMESTAMP
+    );
+    """
+
+    ais_file = tmp_path / "ais.duckdb"
+    ais_conn = duckdb.connect(str(ais_file))
+    ais_conn.execute(ais_schema)
+    ais_conn.execute(
+        "INSERT INTO live_positions VALUES (6001,'VLCC ANCHOR',1.2,103.6,0.0,0.0,NULL,NULL,80,330,'tanker','VLCC','singapore_malacca',?,9002001,20.0,1,NULL)",
+        [_now],
+    )
+    ais_conn.close()
+
+    an_file = tmp_path / "analytics.duckdb"
+    an_conn = duckdb.connect(str(an_file))
+    an_conn.execute(an_schema)
+    # Open episode (end_ts IS NULL) - 12 hours ago
+    an_conn.execute(
+        "INSERT INTO anchored_episodes VALUES (6001,'singapore_west',?,NULL,'tanker','VLCC')",
+        [_now - timedelta(hours=12)],
+    )
+    # Also a shorter one (4h ago)
+    an_conn.execute(
+        "INSERT INTO anchored_episodes VALUES (6002,'singapore_west',?,NULL,'bulk','Capesize')",
+        [_now - timedelta(hours=4)],
+    )
+    # Closed episode - should NOT appear
+    an_conn.execute(
+        "INSERT INTO anchored_episodes VALUES (6003,'singapore_west',?,?,'tanker','Aframax')",
+        [_now - timedelta(hours=20), _now - timedelta(hours=5)],
+    )
+    an_conn.execute("INSERT INTO vessel_state VALUES (6001, 22.0, 20.0, 'laden', ?)", [_now])
+    an_conn.close()
+
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
+    monkeypatch.setenv("ANALYTICS_DB", str(an_file))
+    from app.main import app
+    return TestClient(app)
+
+
+def test_anchorage_dwell_structure(dwell_client):
+    r = dwell_client.get("/api/analytics/anchorage-dwell?zone=singapore_west")
+    assert r.status_code == 200
+    d = r.json()
+    assert "as_of" in d
+    assert "zone" in d
+    assert d["zone"] == "singapore_west"
+    assert "rows" in d
+    for row in d["rows"]:
+        for key in ("mmsi", "name", "zone", "kind", "segment", "start_ts",
+                    "dwell_hours", "laden", "risk_score", "ofac"):
+            assert key in row
+
+
+def test_anchorage_dwell_only_open_episodes(dwell_client):
+    """Only episodes with end_ts IS NULL appear; closed episode (6003) excluded."""
+    r = dwell_client.get("/api/analytics/anchorage-dwell?zone=singapore_west")
+    d = r.json()
+    mmsis = {row["mmsi"] for row in d["rows"]}
+    assert 6003 not in mmsis
+    assert 6001 in mmsis or 6002 in mmsis
+
+
+def test_anchorage_dwell_sorted_longest_first(dwell_client):
+    """Rows sorted by dwell_hours descending."""
+    r = dwell_client.get("/api/analytics/anchorage-dwell?zone=singapore_west")
+    rows = r.json()["rows"]
+    if len(rows) >= 2:
+        assert rows[0]["dwell_hours"] >= rows[1]["dwell_hours"]
+    # VLCC (6001, 12h) should be before bulker (6002, 4h)
+    mmsi_order = [row["mmsi"] for row in rows]
+    if 6001 in mmsi_order and 6002 in mmsi_order:
+        assert mmsi_order.index(6001) < mmsi_order.index(6002)
+
+
+def test_anchorage_dwell_laden_state(dwell_client):
+    r = dwell_client.get("/api/analytics/anchorage-dwell?zone=singapore_west")
+    vlcc = next((r for r in r.json()["rows"] if r["mmsi"] == 6001), None)
+    if vlcc:
+        assert vlcc["laden"] == "laden"
+        assert vlcc["name"] == "VLCC ANCHOR"
+
+
+def test_anchorage_dwell_wrong_zone(dwell_client):
+    r = dwell_client.get("/api/analytics/anchorage-dwell?zone=galveston_ltg")
+    assert r.status_code == 200
+    assert r.json()["rows"] == []

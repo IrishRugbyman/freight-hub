@@ -54,6 +54,8 @@ from .schemas import (
     PortDestItem,
     RegionUtilResponse,
     RegionUtilRow,
+    AnchorageDwellResponse,
+    AnchoredVessel,
     FleetAgeBand,
     FleetAgeResponse,
     RerouteRiskEvent,
@@ -1109,6 +1111,104 @@ def analytics_congestion(zone: str = "singapore_west", days: int = 30):
             )
         series.sort(key=lambda r: r.date)
     return CongestionResponse(zone=zone, days=d, series=series)
+
+
+@app.get("/api/analytics/anchorage-dwell", response_model=AnchorageDwellResponse)
+def analytics_anchorage_dwell(zone: str = "singapore_west", limit: int = 50):
+    """Vessels currently anchored at a zone, ranked by dwell time (longest first).
+
+    Joins anchored_episodes (open end_ts) + vessel_state + live_positions + registry.
+    Long dwell vessels are likely ready to depart - a freight market timing signal.
+    """
+    limit = max(5, min(200, limit))
+    now = datetime.now(UTC).replace(tzinfo=None)
+
+    # Open episodes (end_ts IS NULL) at the requested zone
+    ep_df = db.query(
+        "SELECT mmsi, zone, start_ts, kind, segment "
+        "FROM anchored_episodes WHERE zone = ? AND end_ts IS NULL "
+        "ORDER BY start_ts ASC LIMIT ?",
+        [zone, limit],
+        db=db.analytics_db_path(),
+    )
+    if ep_df.empty:
+        return AnchorageDwellResponse(
+            as_of=_iso(now) or "", zone=zone, rows=[]
+        )
+
+    all_mmsis = list(set(int(m) for m in ep_df["mmsi"].dropna().tolist()))
+    ph = ",".join("?" * len(all_mmsis))
+
+    # Vessel names
+    mmsi_name: dict[int, str | None] = {}
+    lp_df = db.query(f"SELECT mmsi, name FROM live_positions WHERE mmsi IN ({ph})", all_mmsis)
+    for _, r in lp_df.iterrows():
+        mmsi_name[int(r["mmsi"])] = _str_or_none(r.get("name"))
+    missing = [m for m in all_mmsis if m not in mmsi_name]
+    if missing:
+        ph2 = ",".join("?" * len(missing))
+        v_df = db.query(f"SELECT mmsi, name FROM vessels WHERE mmsi IN ({ph2})", missing)
+        for _, r in v_df.iterrows():
+            mmsi_name[int(r["mmsi"])] = _str_or_none(r.get("name"))
+
+    # Laden state from vessel_state
+    mmsi_laden: dict[int, str | None] = {}
+    vs_df = db.query(
+        f"SELECT mmsi, laden FROM vessel_state WHERE mmsi IN ({ph})", all_mmsis,
+        db=db.analytics_db_path(),
+    )
+    for _, r in vs_df.iterrows():
+        mmsi_laden[int(r["mmsi"])] = _str_or_none(r.get("laden"))
+
+    # MMSI -> IMO from live_positions / vessels
+    mmsi_imo: dict[int, int | None] = {}
+    lp2 = db.query(f"SELECT mmsi, imo FROM live_positions WHERE mmsi IN ({ph})", all_mmsis)
+    for _, r in lp2.iterrows():
+        mmsi_imo[int(r["mmsi"])] = _valid_imo(r.get("imo"))
+    for m in all_mmsis:
+        if m not in mmsi_imo:
+            mmsi_imo[m] = None
+
+    known_imos = list(set(i for i in mmsi_imo.values() if i))
+    imo_risk: dict[int, dict] = {}
+    if known_imos:
+        ph3 = ",".join("?" * len(known_imos))
+        reg_df = db.query(
+            f"SELECT imo, risk_score, COALESCE(ofac_sanctioned, false) AS ofac_sanctioned "
+            f"FROM vessel_registry WHERE imo IN ({ph3}) AND fetch_ok = true",
+            known_imos, db=db.registry_db_path(),
+        )
+        for _, r in reg_df.iterrows():
+            imo_risk[int(r["imo"])] = {
+                "risk_score": int(r["risk_score"]) if r["risk_score"] is not None else None,
+                "ofac": bool(r["ofac_sanctioned"]),
+            }
+
+    rows = []
+    for _, ep in ep_df.iterrows():
+        mmsi_val = int(ep["mmsi"])
+        start = pd.Timestamp(ep["start_ts"])
+        dwell_h = round((pd.Timestamp(now) - start).total_seconds() / 3600, 1)
+
+        imo_val = mmsi_imo.get(mmsi_val)
+        risk_info = imo_risk.get(imo_val, {}) if imo_val else {}
+        rs = risk_info.get("risk_score")
+
+        rows.append(AnchoredVessel(
+            mmsi=mmsi_val,
+            name=mmsi_name.get(mmsi_val),
+            zone=str(ep["zone"]),
+            kind=_str_or_none(ep.get("kind")),
+            segment=_str_or_none(ep.get("segment")),
+            start_ts=_iso(ep["start_ts"]) or "",
+            dwell_hours=dwell_h,
+            laden=mmsi_laden.get(mmsi_val),
+            risk_score=rs,
+            ofac=bool(risk_info.get("ofac", False)),
+        ))
+
+    rows.sort(key=lambda r: r.dwell_hours, reverse=True)
+    return AnchorageDwellResponse(as_of=_iso(now) or "", zone=zone, rows=rows)
 
 
 @app.get("/api/analytics/density", response_model=DensityResponse)

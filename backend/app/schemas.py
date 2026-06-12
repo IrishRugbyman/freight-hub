@@ -432,6 +432,25 @@ class FleetResponse(BaseModel):
     rows: list[FleetRow]
 
 
+class AnchoredVessel(BaseModel):
+    mmsi: int
+    name: str | None
+    zone: str
+    kind: str | None
+    segment: str | None
+    start_ts: str
+    dwell_hours: float       # time anchored so far
+    laden: str | None        # laden / ballast / unknown from vessel_state
+    risk_score: int | None
+    ofac: bool
+
+
+class AnchorageDwellResponse(BaseModel):
+    as_of: str
+    zone: str
+    rows: list[AnchoredVessel]
+
+
 class FleetAgeBand(BaseModel):
     age_band: str            # "0-4", "5-9", "10-14", "15-19", "20-24", "25+"
     vessel_count: int

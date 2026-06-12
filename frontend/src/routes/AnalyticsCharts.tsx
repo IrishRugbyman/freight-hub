@@ -13,7 +13,7 @@ import {
   YAxis,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge } from '@/lib/api'
+import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell } from '@/lib/api'
 
 const CHOKEPOINTS = [
   'singapore_malacca', 'suez', 'hormuz', 'panama', 'gibraltar',
@@ -972,6 +972,83 @@ export function FleetAgeCard() {
               />
             </ComposedChart>
           </ResponsiveContainer>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+const ANCHORAGE_DWELL_ZONES = [
+  'singapore_west', 'singapore_east', 'fujairah', 'suez_roads', 'port_said',
+  'rotterdam', 'galveston_ltg', 'arab_gulf_north',
+]
+
+export function AnchorageDwellCard() {
+  const [zone, setZone] = useState('singapore_west')
+  const { data, isLoading } = useAnchorageDwell(zone, 20)
+  const rows = data?.rows ?? []
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm flex flex-wrap items-center gap-2">
+          Longest Anchored
+          <select
+            value={zone}
+            onChange={(e) => setZone(e.target.value)}
+            className="rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] focus:outline-none"
+          >
+            {ANCHORAGE_DWELL_ZONES.map((z) => (
+              <option key={z} value={z}>{fmt(z)}</option>
+            ))}
+          </select>
+          {data && rows.length > 0 && (
+            <span className="ml-auto text-xs font-normal text-muted-foreground">
+              {rows.length} open episodes
+            </span>
+          )}
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {isLoading && <div className="h-48 animate-pulse rounded bg-muted/40" />}
+        {!isLoading && rows.length === 0 && (
+          <EmptyState message={`No open anchor episodes at ${fmt(zone)}`} />
+        )}
+        {!isLoading && rows.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-muted-foreground">
+                  <th className="pb-1 pr-2 font-normal">Vessel</th>
+                  <th className="pb-1 pr-2 font-normal">Segment</th>
+                  <th className="pb-1 pr-2 font-normal">Dwell</th>
+                  <th className="pb-1 pr-2 font-normal">State</th>
+                  <th className="pb-1 font-normal">Risk</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((v, i) => (
+                  <tr key={`${v.mmsi}-${i}`} className="border-t border-border/30">
+                    <td className="max-w-[9rem] truncate py-0.5 pr-2">{v.name ?? v.mmsi}</td>
+                    <td className="py-0.5 pr-2 text-muted-foreground">{v.segment ?? v.kind ?? '-'}</td>
+                    <td className="py-0.5 pr-2 tabular-nums">
+                      {v.dwell_hours >= 24
+                        ? <span className="text-orange-400">{(v.dwell_hours / 24).toFixed(1)}d</span>
+                        : `${v.dwell_hours.toFixed(1)}h`}
+                    </td>
+                    <td className="py-0.5 pr-2">
+                      {v.laden === 'laden'
+                        ? <span className="text-blue-400">L</span>
+                        : v.laden === 'ballast'
+                          ? <span className="text-muted-foreground">B</span>
+                          : <span className="text-muted-foreground">?</span>}
+                    </td>
+                    <td className="py-0.5">{riskBadge(v.risk_score, v.ofac)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </CardContent>
     </Card>

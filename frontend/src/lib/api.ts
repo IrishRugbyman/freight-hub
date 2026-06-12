@@ -808,6 +808,34 @@ export function useEvents(params?: { type?: string; days?: number; limit?: numbe
   })
 }
 
+export interface AnchoredVessel {
+  mmsi: number
+  name: string | null
+  zone: string
+  kind: string | null
+  segment: string | null
+  start_ts: string
+  dwell_hours: number
+  laden: string | null
+  risk_score: number | null
+  ofac: boolean
+}
+
+export interface AnchorageDwellResponse {
+  as_of: string
+  zone: string
+  rows: AnchoredVessel[]
+}
+
+export function useAnchorageDwell(zone = 'singapore_west', limit = 50) {
+  return useQuery({
+    queryKey: ['anchorage-dwell', zone, limit],
+    queryFn: () => getJSON<AnchorageDwellResponse>(`/api/analytics/anchorage-dwell?zone=${zone}&limit=${limit}`),
+    staleTime: REFETCH_MS,
+    refetchInterval: REFETCH_MS,
+  })
+}
+
 export interface FleetAgeBand {
   age_band: string
   vessel_count: number
