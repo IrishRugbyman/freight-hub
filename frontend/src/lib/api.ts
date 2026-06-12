@@ -808,6 +808,75 @@ export function useEvents(params?: { type?: string; days?: number; limit?: numbe
   })
 }
 
+export interface StsRiskEvent {
+  event_id: string
+  start_ts: string
+  region: string | null
+  kind: string | null
+  segment: string | null
+  mmsi: number
+  mmsi2: number | null
+  name: string | null
+  name2: string | null
+  duration_hours: number | null
+  co_location_fixes: number | null
+  risk_score: number | null
+  risk_score2: number | null
+  ofac: boolean
+  ofac2: boolean
+  max_risk: number
+}
+
+export interface StsRiskResponse {
+  as_of: string
+  days: number
+  total_events: number
+  enriched_events: number
+  rows: StsRiskEvent[]
+}
+
+export function useStsRisk(days = 30, minRisk = 0) {
+  return useQuery({
+    queryKey: ['sts-risk', days, minRisk],
+    queryFn: () => getJSON<StsRiskResponse>(`/api/analytics/sts-risk?days=${days}&min_risk=${minRisk}`),
+    staleTime: ANALYTICS_STALE,
+    refetchInterval: REFETCH_MS,
+  })
+}
+
+export interface RerouteRiskEvent {
+  event_id: string
+  start_ts: string
+  region: string | null
+  kind: string | null
+  segment: string | null
+  mmsi: number
+  name: string | null
+  old_destination: string | null
+  new_destination: string | null
+  fixes_at_old: number | null
+  risk_score: number | null
+  ofac: boolean
+}
+
+export interface RerouteRiskResponse {
+  as_of: string
+  days: number
+  total_events: number
+  rows: RerouteRiskEvent[]
+}
+
+export function useReroutes(days = 7, minRisk = 0, segment?: string) {
+  const qs = new URLSearchParams({ days: String(days), min_risk: String(minRisk) })
+  if (segment) qs.set('segment', segment)
+  return useQuery({
+    queryKey: ['reroutes', days, minRisk, segment ?? ''],
+    queryFn: () => getJSON<RerouteRiskResponse>(`/api/analytics/reroutes?${qs}`),
+    staleTime: ANALYTICS_STALE,
+    refetchInterval: REFETCH_MS,
+  })
+}
+
 export interface FleetKPIs {
   as_of: string
   total_registry: number

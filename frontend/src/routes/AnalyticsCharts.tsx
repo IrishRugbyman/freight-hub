@@ -12,7 +12,7 @@ import {
   YAxis,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend } from '@/lib/api'
+import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes } from '@/lib/api'
 
 const CHOKEPOINTS = [
   'singapore_malacca', 'suez', 'hormuz', 'panama', 'gibraltar',
@@ -679,6 +679,150 @@ export function SpeedTrendCard() {
               />
             </LineChart>
           </ResponsiveContainer>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+function riskBadge(score: number | null, ofac: boolean) {
+  if (ofac) return <span className="rounded bg-red-500/20 px-1 text-[10px] font-semibold text-red-400">OFAC</span>
+  if (score == null) return null
+  if (score >= 75) return <span className="rounded bg-red-400/20 px-1 text-[10px] font-semibold text-red-400">{score}</span>
+  if (score >= 50) return <span className="rounded bg-orange-400/20 px-1 text-[10px] font-semibold text-orange-400">{score}</span>
+  if (score >= 25) return <span className="rounded bg-yellow-400/20 px-1 text-[10px] font-semibold text-yellow-400">{score}</span>
+  return <span className="rounded bg-muted px-1 text-[10px] text-muted-foreground">{score}</span>
+}
+
+export function StsRiskCard() {
+  const { data, isLoading } = useStsRisk(30, 0)
+  const rows = data?.rows ?? []
+  const showing = rows.slice(0, 15)
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm">
+          STS Events
+          {data && (
+            <span className="ml-2 text-xs font-normal text-muted-foreground">
+              {data.total_events.toLocaleString()} events / 30d
+              {data.enriched_events > 0 && ` - ${data.enriched_events} risk-scored`}
+            </span>
+          )}
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {isLoading && <div className="h-48 animate-pulse rounded bg-muted/40" />}
+        {!isLoading && rows.length === 0 && <EmptyState message="No STS events in last 30 days" />}
+        {!isLoading && rows.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-muted-foreground">
+                  <th className="pb-1 pr-2 font-normal">Time</th>
+                  <th className="pb-1 pr-2 font-normal">Region</th>
+                  <th className="pb-1 pr-2 font-normal">Vessel 1</th>
+                  <th className="pb-1 pr-2 font-normal">Vessel 2</th>
+                  <th className="pb-1 pr-2 font-normal">Dur.</th>
+                  <th className="pb-1 font-normal">Risk</th>
+                </tr>
+              </thead>
+              <tbody>
+                {showing.map((ev) => (
+                  <tr key={ev.event_id} className="border-t border-border/30">
+                    <td className="py-0.5 pr-2 text-muted-foreground">{ev.start_ts.slice(5, 16).replace('T', ' ')}</td>
+                    <td className="py-0.5 pr-2">{ev.region ? fmt(ev.region) : '-'}</td>
+                    <td className="max-w-[8rem] truncate py-0.5 pr-2">{ev.name ?? ev.mmsi}</td>
+                    <td className="max-w-[8rem] truncate py-0.5 pr-2">{ev.name2 ?? (ev.mmsi2 ?? '-')}</td>
+                    <td className="py-0.5 pr-2 tabular-nums text-muted-foreground">
+                      {ev.duration_hours != null ? `${ev.duration_hours.toFixed(1)}h` : '-'}
+                    </td>
+                    <td className="py-0.5">
+                      <div className="flex gap-1">
+                        {riskBadge(ev.risk_score, ev.ofac)}
+                        {riskBadge(ev.risk_score2, ev.ofac2)}
+                        {ev.max_risk === 0 && ev.risk_score == null && ev.risk_score2 == null && (
+                          <span className="text-muted-foreground/40">-</span>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {rows.length > 15 && (
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                Showing 15 of {rows.length.toLocaleString()} events (sorted by max risk)
+              </p>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+export function ReroutesCard() {
+  const [days, setDays] = useState(7)
+  const { data, isLoading } = useReroutes(days, 0)
+  const rows = data?.rows ?? []
+  const showing = rows.slice(0, 15)
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm flex items-center gap-2">
+          Destination Changes
+          <div className="ml-auto flex gap-1">
+            {[3, 7, 14].map((d) => (
+              <button
+                key={d}
+                onClick={() => setDays(d)}
+                className={`rounded px-1.5 py-0.5 text-[10px] ${days === d ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'}`}
+              >
+                {d}d
+              </button>
+            ))}
+          </div>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {isLoading && <div className="h-48 animate-pulse rounded bg-muted/40" />}
+        {!isLoading && rows.length === 0 && <EmptyState message={`No destination changes in last ${days} days`} />}
+        {!isLoading && rows.length > 0 && (
+          <div className="overflow-x-auto">
+            <p className="mb-1 text-[10px] text-muted-foreground">
+              {data?.total_events.toLocaleString()} changes total - sorted by risk
+            </p>
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-muted-foreground">
+                  <th className="pb-1 pr-2 font-normal">Time</th>
+                  <th className="pb-1 pr-2 font-normal">Vessel</th>
+                  <th className="pb-1 pr-2 font-normal">From</th>
+                  <th className="pb-1 pr-2 font-normal">To</th>
+                  <th className="pb-1 font-normal">Risk</th>
+                </tr>
+              </thead>
+              <tbody>
+                {showing.map((ev) => (
+                  <tr key={ev.event_id} className="border-t border-border/30">
+                    <td className="py-0.5 pr-2 text-muted-foreground">{ev.start_ts.slice(5, 16).replace('T', ' ')}</td>
+                    <td className="max-w-[8rem] truncate py-0.5 pr-2">{ev.name ?? ev.mmsi}</td>
+                    <td className="max-w-[8rem] truncate py-0.5 pr-2 text-muted-foreground">{ev.old_destination ?? '-'}</td>
+                    <td className="max-w-[8rem] truncate py-0.5 pr-2">{ev.new_destination ?? '-'}</td>
+                    <td className="py-0.5">{riskBadge(ev.risk_score, ev.ofac)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {rows.length > 15 && (
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                Showing 15 of {rows.length.toLocaleString()} (risk-sorted)
+              </p>
+            )}
+          </div>
         )}
       </CardContent>
     </Card>

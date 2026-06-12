@@ -54,8 +54,12 @@ from .schemas import (
     PortDestItem,
     RegionUtilResponse,
     RegionUtilRow,
+    RerouteRiskEvent,
+    RerouteRiskResponse,
     RoutesResponse,
     SpeedAnalyticsResponse,
+    StsRiskEvent,
+    StsRiskResponse,
     SpeedSegmentRow,
     SpeedTrendPoint,
     SpeedTrendResponse,
@@ -114,6 +118,27 @@ def _rate_limited():
 
 def _fresh_cutoff() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=db.STALE_HOURS)
+
+
+def _valid_imo(v) -> int | None:
+    """Return int IMO if valid, else None. Handles pandas NA/NaN/None."""
+    if v is None:
+        return None
+    s = str(v)
+    if s in ("nan", "None", "NA", "<NA>", ""):
+        return None
+    try:
+        return int(float(s))
+    except (ValueError, TypeError):
+        return None
+
+
+def _str_or_none(v) -> str | None:
+    """Return string value or None, treating NaN/NA/None as None."""
+    if v is None:
+        return None
+    s = str(v)
+    return None if s in ("nan", "None", "NA", "<NA>", "") else s
 
 
 def _live(where: str = "", params: list | None = None):
@@ -571,6 +596,245 @@ def analytics_region_util():
     rows.sort(key=lambda r: r.total, reverse=True)
     return RegionUtilResponse(
         as_of=_iso(datetime.now(UTC).replace(tzinfo=None)) or "",
+        rows=rows,
+    )
+
+
+@app.get("/api/analytics/sts-risk", response_model=StsRiskResponse)
+def analytics_sts_risk(days: int = 30, min_risk: int = 0):
+    """Recent STS (ship-to-ship) events enriched with vessel risk scores.
+
+    Three-database merge: analytics (events) + AIS (MMSI->IMO) + registry (risk scores).
+    Sorted by max risk score descending. Use min_risk=25 for intelligence-relevant events.
+    """
+    import json as _json
+
+    days = max(1, min(90, days))
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
+
+    events_df = db.query(
+        "SELECT event_id, mmsi, mmsi2, start_ts, region, kind, segment, details "
+        "FROM ais_events "
+        "WHERE type = 'sts' AND start_ts >= ?",
+        [cutoff],
+        db=db.analytics_db_path(),
+    )
+    if events_df.empty:
+        return StsRiskResponse(
+            as_of=_iso(datetime.now(UTC).replace(tzinfo=None)) or "",
+            days=days, total_events=0, enriched_events=0, rows=[],
+        )
+
+    # Collect unique MMSIs
+    all_mmsis = set(events_df["mmsi"].dropna().tolist())
+    mmsi2s = events_df["mmsi2"].dropna().tolist()
+    all_mmsis.update(int(m) for m in mmsi2s)
+
+    # MMSI -> name + IMO from live_positions (fresh only) and vessels table
+    mmsi_info: dict[int, dict] = {}
+    if all_mmsis:
+        mmsi_list = list(all_mmsis)
+        placeholders = ",".join("?" * len(mmsi_list))
+        lp_df = db.query(
+            f"SELECT mmsi, name, imo FROM live_positions WHERE mmsi IN ({placeholders})",
+            mmsi_list,
+        )
+        for _, r in lp_df.iterrows():
+            mmsi_info[int(r["mmsi"])] = {"name": r.get("name"), "imo": r.get("imo")}
+        # Fill gaps from vessels table
+        missing = [m for m in mmsi_list if m not in mmsi_info]
+        if missing:
+            ph2 = ",".join("?" * len(missing))
+            v_df = db.query(
+                f"SELECT mmsi, name, imo FROM vessels WHERE mmsi IN ({ph2})",
+                missing,
+            )
+            for _, r in v_df.iterrows():
+                mmsi_info[int(r["mmsi"])] = {"name": r.get("name"), "imo": r.get("imo")}
+
+    # IMO -> risk_score + ofac from registry
+    imo_risk: dict[int, dict] = {}
+    known_imos = [_valid_imo(v.get("imo")) for v in mmsi_info.values()]
+    known_imos = [i for i in known_imos if i is not None]
+    if known_imos:
+        imo_list = list(set(known_imos))
+        ph3 = ",".join("?" * len(imo_list))
+        reg_df = db.query(
+            f"SELECT imo, risk_score, COALESCE(ofac_sanctioned, false) AS ofac_sanctioned "
+            f"FROM vessel_registry WHERE imo IN ({ph3}) AND fetch_ok = true",
+            imo_list,
+            db=db.registry_db_path(),
+        )
+        for _, r in reg_df.iterrows():
+            imo_risk[int(r["imo"])] = {
+                "risk_score": int(r["risk_score"]) if r["risk_score"] is not None else None,
+                "ofac": bool(r["ofac_sanctioned"]),
+            }
+
+    def _vessel_risk(mmsi_val):
+        info = mmsi_info.get(int(mmsi_val), {})
+        imo_val = _valid_imo(info.get("imo"))
+        if imo_val:
+            return imo_risk.get(imo_val, {})
+        return {}
+
+    rows = []
+    enriched = 0
+    for _, ev in events_df.iterrows():
+        det = {}
+        if ev.get("details"):
+            try:
+                det = _json.loads(ev["details"])
+            except Exception:
+                pass
+
+        mmsi_val = int(ev["mmsi"])
+        mmsi2_val = int(ev["mmsi2"]) if ev.get("mmsi2") and str(ev["mmsi2"]) != "nan" else None
+
+        r1 = _vessel_risk(mmsi_val)
+        r2 = _vessel_risk(mmsi2_val) if mmsi2_val else {}
+
+        rs1 = r1.get("risk_score")
+        rs2 = r2.get("risk_score")
+        max_risk = max(rs1 or 0, rs2 or 0)
+
+        if max_risk < min_risk:
+            continue
+        if rs1 is not None or rs2 is not None:
+            enriched += 1
+
+        rows.append(StsRiskEvent(
+            event_id=str(ev["event_id"]),
+            start_ts=_iso(ev["start_ts"]) or "",
+            region=_str_or_none(ev.get("region")),
+            kind=_str_or_none(ev.get("kind")),
+            segment=_str_or_none(ev.get("segment")),
+            mmsi=mmsi_val,
+            mmsi2=mmsi2_val,
+            name=_str_or_none(mmsi_info.get(mmsi_val, {}).get("name")),
+            name2=_str_or_none(mmsi_info.get(mmsi2_val, {}).get("name")) if mmsi2_val else None,
+            duration_hours=det.get("duration_hours"),
+            co_location_fixes=det.get("co_location_fixes"),
+            risk_score=rs1,
+            risk_score2=rs2,
+            ofac=bool(r1.get("ofac", False)),
+            ofac2=bool(r2.get("ofac", False)),
+            max_risk=max_risk,
+        ))
+
+    rows.sort(key=lambda r: r.max_risk, reverse=True)
+    return StsRiskResponse(
+        as_of=_iso(datetime.now(UTC).replace(tzinfo=None)) or "",
+        days=days,
+        total_events=len(events_df),
+        enriched_events=enriched,
+        rows=rows,
+    )
+
+
+@app.get("/api/analytics/reroutes", response_model=RerouteRiskResponse)
+def analytics_reroutes(days: int = 7, min_risk: int = 0, segment: str | None = None):
+    """Recent destination-change events enriched with vessel risk scores.
+
+    Sorted by risk_score descending (reroutes by high-risk vessels first).
+    Use min_risk=25 to filter to intelligence-relevant changes.
+    """
+    import json as _json
+
+    days = max(1, min(90, days))
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
+
+    seg_clause = " AND segment = ?" if segment else ""
+    seg_params = [segment] if segment else []
+
+    events_df = db.query(
+        "SELECT event_id, mmsi, start_ts, region, kind, segment, details "
+        f"FROM ais_events WHERE type = 'reroute' AND start_ts >= ?{seg_clause} "
+        "ORDER BY start_ts DESC",
+        [cutoff, *seg_params],
+        db=db.analytics_db_path(),
+    )
+    if events_df.empty:
+        return RerouteRiskResponse(
+            as_of=_iso(datetime.now(UTC).replace(tzinfo=None)) or "",
+            days=days, total_events=0, rows=[],
+        )
+
+    # MMSI -> name + risk from live_positions then vessels
+    all_mmsis = list(set(int(m) for m in events_df["mmsi"].dropna().tolist()))
+    mmsi_info: dict[int, dict] = {}
+    if all_mmsis:
+        ph = ",".join("?" * len(all_mmsis))
+        lp_df = db.query(
+            f"SELECT mmsi, name, imo FROM live_positions WHERE mmsi IN ({ph})",
+            all_mmsis,
+        )
+        for _, r in lp_df.iterrows():
+            mmsi_info[int(r["mmsi"])] = {"name": r.get("name"), "imo": r.get("imo")}
+        missing = [m for m in all_mmsis if m not in mmsi_info]
+        if missing:
+            ph2 = ",".join("?" * len(missing))
+            v_df = db.query(
+                f"SELECT mmsi, name, imo FROM vessels WHERE mmsi IN ({ph2})", missing
+            )
+            for _, r in v_df.iterrows():
+                mmsi_info[int(r["mmsi"])] = {"name": r.get("name"), "imo": r.get("imo")}
+
+    imo_risk: dict[int, dict] = {}
+    _rr_imos = [_valid_imo(v.get("imo")) for v in mmsi_info.values()]
+    known_imos = list(set(i for i in _rr_imos if i is not None))
+    if known_imos:
+        ph3 = ",".join("?" * len(known_imos))
+        reg_df = db.query(
+            f"SELECT imo, risk_score, COALESCE(ofac_sanctioned, false) AS ofac_sanctioned "
+            f"FROM vessel_registry WHERE imo IN ({ph3}) AND fetch_ok = true",
+            known_imos,
+            db=db.registry_db_path(),
+        )
+        for _, r in reg_df.iterrows():
+            imo_risk[int(r["imo"])] = {
+                "risk_score": int(r["risk_score"]) if r["risk_score"] is not None else None,
+                "ofac": bool(r["ofac_sanctioned"]),
+            }
+
+    rows = []
+    for _, ev in events_df.iterrows():
+        det = {}
+        if ev.get("details"):
+            try:
+                det = _json.loads(ev["details"])
+            except Exception:
+                pass
+
+        mmsi_val = int(ev["mmsi"])
+        info = mmsi_info.get(mmsi_val, {})
+        imo_val = _valid_imo(info.get("imo"))
+        risk_info = imo_risk.get(imo_val, {}) if imo_val else {}
+
+        rs = risk_info.get("risk_score")
+        if (rs or 0) < min_risk:
+            continue
+
+        rows.append(RerouteRiskEvent(
+            event_id=str(ev["event_id"]),
+            start_ts=_iso(ev["start_ts"]) or "",
+            region=_str_or_none(ev.get("region")),
+            kind=_str_or_none(ev.get("kind")),
+            segment=_str_or_none(ev.get("segment")),
+            mmsi=mmsi_val,
+            name=_str_or_none(info.get("name")),
+            old_destination=_str_or_none(det.get("old_destination")),
+            new_destination=_str_or_none(det.get("new_destination")),
+            fixes_at_old=det.get("fixes_at_old"),
+            risk_score=rs,
+            ofac=bool(risk_info.get("ofac", False)),
+        ))
+
+    rows.sort(key=lambda r: (r.risk_score or 0), reverse=True)
+    return RerouteRiskResponse(
+        as_of=_iso(datetime.now(UTC).replace(tzinfo=None)) or "",
+        days=days,
+        total_events=len(events_df),
         rows=rows,
     )
 

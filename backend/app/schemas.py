@@ -432,6 +432,55 @@ class FleetResponse(BaseModel):
     rows: list[FleetRow]
 
 
+class StsRiskEvent(BaseModel):
+    event_id: str
+    start_ts: str
+    region: str | None
+    kind: str | None
+    segment: str | None
+    mmsi: int
+    mmsi2: int | None
+    name: str | None
+    name2: str | None
+    duration_hours: float | None
+    co_location_fixes: int | None
+    risk_score: int | None       # mmsi vessel
+    risk_score2: int | None      # mmsi2 vessel
+    ofac: bool
+    ofac2: bool
+    max_risk: int                # max(risk_score, risk_score2, 0)
+
+
+class StsRiskResponse(BaseModel):
+    as_of: str
+    days: int
+    total_events: int
+    enriched_events: int         # events where at least one party has a risk score
+    rows: list[StsRiskEvent]
+
+
+class RerouteRiskEvent(BaseModel):
+    event_id: str
+    start_ts: str
+    region: str | None
+    kind: str | None
+    segment: str | None
+    mmsi: int
+    name: str | None
+    old_destination: str | None
+    new_destination: str | None
+    fixes_at_old: int | None
+    risk_score: int | None
+    ofac: bool
+
+
+class RerouteRiskResponse(BaseModel):
+    as_of: str
+    days: int
+    total_events: int
+    rows: list[RerouteRiskEvent]
+
+
 class FleetKPIs(BaseModel):
     as_of: str
     total_registry: int          # all fetch_ok vessels

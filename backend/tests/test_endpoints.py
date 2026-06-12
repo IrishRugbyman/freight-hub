@@ -519,3 +519,183 @@ def test_speed_trend_days_clamped(analytics_client):
     assert r.status_code == 200
     # days clamped to 90
     assert r.json()["days"] == 90
+
+
+# ---- /api/analytics/sts-risk ------------------------------------------------
+
+
+def test_sts_risk_structure(analytics_client):
+    r = analytics_client.get("/api/analytics/sts-risk?days=30")
+    assert r.status_code == 200
+    d = r.json()
+    for key in ("as_of", "days", "total_events", "enriched_events", "rows"):
+        assert key in d
+    # conftest seeds one STS event (sts0000001)
+    assert d["total_events"] >= 1
+
+
+def test_sts_risk_event_fields(analytics_client):
+    r = analytics_client.get("/api/analytics/sts-risk?days=30")
+    d = r.json()
+    assert len(d["rows"]) >= 1
+    row = next(r for r in d["rows"] if r["event_id"] == "sts0000001")
+    assert row["mmsi"] == 1003
+    assert row["mmsi2"] == 1004
+    assert row["region"] == "hormuz"
+    assert row["kind"] == "tanker"
+    assert row["duration_hours"] == pytest.approx(2.0, abs=0.1)
+    assert row["co_location_fixes"] == 12
+    assert row["max_risk"] >= 0
+
+
+def test_sts_risk_sorted_by_max_risk(analytics_client):
+    r = analytics_client.get("/api/analytics/sts-risk?days=30")
+    rows = r.json()["rows"]
+    risks = [row["max_risk"] for row in rows]
+    assert risks == sorted(risks, reverse=True)
+
+
+def test_sts_risk_days_clamped(analytics_client):
+    r = analytics_client.get("/api/analytics/sts-risk?days=200")
+    assert r.status_code == 200
+    assert r.json()["days"] == 90
+
+
+def test_sts_risk_min_risk_filter(analytics_client):
+    r = analytics_client.get("/api/analytics/sts-risk?days=30&min_risk=999")
+    assert r.status_code == 200
+    # No vessel has risk_score >= 999 -> no rows
+    assert r.json()["rows"] == []
+
+
+# ---- /api/analytics/reroutes ------------------------------------------------
+
+
+@pytest.fixture
+def reroute_client(tmp_path, monkeypatch):
+    """Client with AIS DB + analytics DB seeded with reroute events."""
+    import duckdb
+    from datetime import UTC, datetime, timedelta
+    from fastapi.testclient import TestClient
+
+    _now = datetime.now(UTC).replace(tzinfo=None)
+
+    ais_schema = """
+    CREATE TABLE live_positions (
+        mmsi BIGINT PRIMARY KEY, name VARCHAR, lat DOUBLE, lon DOUBLE,
+        sog DOUBLE, cog DOUBLE, heading DOUBLE, destination VARCHAR,
+        ship_type INTEGER, length_m DOUBLE, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, updated_ts TIMESTAMP,
+        imo BIGINT, draught DOUBLE, nav_status INTEGER, eta VARCHAR
+    );
+    CREATE TABLE vessels (
+        mmsi BIGINT PRIMARY KEY, imo BIGINT, name VARCHAR, flag VARCHAR,
+        flag_iso2 VARCHAR, mid INTEGER, call_sign VARCHAR, vessel_type VARCHAR,
+        dwt DOUBLE, grt DOUBLE, build_year INTEGER, length_m DOUBLE, beam_m DOUBLE,
+        owner VARCHAR, manager VARCHAR, class_society VARCHAR, enriched_at TIMESTAMP,
+        equasis_ok BOOLEAN
+    );
+    CREATE TABLE ais_snapshots (
+        snapshot_ts TIMESTAMP, mmsi BIGINT,
+        kind VARCHAR, segment VARCHAR, region VARCHAR,
+        lat DOUBLE, lon DOUBLE, ship_type INTEGER, length_m DOUBLE,
+        sog DOUBLE, nav_status INTEGER, draught DOUBLE, destination VARCHAR,
+        PRIMARY KEY (snapshot_ts, mmsi)
+    );
+    """
+
+    an_schema = """
+    CREATE TABLE meta_watermark (key VARCHAR PRIMARY KEY, ts TIMESTAMP);
+    CREATE TABLE ais_events (
+        event_id VARCHAR PRIMARY KEY, type VARCHAR,
+        mmsi BIGINT, mmsi2 BIGINT,
+        start_ts TIMESTAMP, end_ts TIMESTAMP,
+        lat DOUBLE, lon DOUBLE,
+        region VARCHAR, kind VARCHAR, segment VARCHAR, details VARCHAR
+    );
+    CREATE TABLE transit_events (
+        mmsi BIGINT, chokepoint VARCHAR, entered_ts TIMESTAMP, exited_ts TIMESTAMP,
+        direction VARCHAR, kind VARCHAR, segment VARCHAR, laden BOOLEAN,
+        PRIMARY KEY (mmsi, chokepoint, entered_ts)
+    );
+    CREATE TABLE anchored_episodes (
+        mmsi BIGINT, zone VARCHAR, start_ts TIMESTAMP, end_ts TIMESTAMP,
+        kind VARCHAR, segment VARCHAR, PRIMARY KEY (mmsi, zone, start_ts)
+    );
+    CREATE TABLE fleet_density (
+        ts TIMESTAMP, region VARCHAR, kind VARCHAR, segment VARCHAR,
+        laden_count INTEGER, ballast_count INTEGER, unknown_count INTEGER,
+        PRIMARY KEY (ts, region, kind, segment)
+    );
+    CREATE TABLE vessel_state (
+        mmsi BIGINT PRIMARY KEY, max_draught_seen DOUBLE, last_draught DOUBLE,
+        laden VARCHAR, updated_ts TIMESTAMP
+    );
+    """
+
+    ais_file = tmp_path / "ais.duckdb"
+    ais_conn = duckdb.connect(str(ais_file))
+    ais_conn.execute(ais_schema)
+    ais_conn.execute(
+        "INSERT INTO live_positions VALUES (5001,'TANKER X',25.0,56.0,14.0,270.0,271.0,'AEFJR',80,330,'tanker','VLCC','hormuz',?,9001001,20.0,0,NULL)",
+        [_now],
+    )
+    ais_conn.close()
+
+    an_file = tmp_path / "analytics.duckdb"
+    an_conn = duckdb.connect(str(an_file))
+    an_conn.execute(an_schema)
+    an_conn.execute(
+        "INSERT INTO ais_events VALUES ('rr0000001','reroute',5001,NULL,?,?,25.0,56.0,'hormuz','tanker','VLCC',?)",
+        [_now - timedelta(hours=5), _now - timedelta(hours=5),
+         '{"old_destination":"AEFJR","new_destination":"PKQCT","fixes_at_old":40}'],
+    )
+    an_conn.execute(
+        "INSERT INTO ais_events VALUES ('rr0000002','reroute',5001,NULL,?,?,25.1,56.1,'hormuz','tanker','VLCC',?)",
+        [_now - timedelta(hours=2), _now - timedelta(hours=2),
+         '{"old_destination":"PKQCT","new_destination":"IRBIK","fixes_at_old":25}'],
+    )
+    an_conn.close()
+
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
+    monkeypatch.setenv("ANALYTICS_DB", str(an_file))
+    from app.main import app
+    return TestClient(app)
+
+
+def test_reroutes_structure(reroute_client):
+    r = reroute_client.get("/api/analytics/reroutes?days=7")
+    assert r.status_code == 200
+    d = r.json()
+    for key in ("as_of", "days", "total_events", "rows"):
+        assert key in d
+    assert d["total_events"] == 2
+
+
+def test_reroutes_event_fields(reroute_client):
+    r = reroute_client.get("/api/analytics/reroutes?days=7")
+    rows = {row["event_id"]: row for row in r.json()["rows"]}
+    assert "rr0000001" in rows
+    row = rows["rr0000001"]
+    assert row["mmsi"] == 5001
+    assert row["old_destination"] == "AEFJR"
+    assert row["new_destination"] == "PKQCT"
+    assert row["fixes_at_old"] == 40
+    assert row["region"] == "hormuz"
+    assert row["kind"] == "tanker"
+
+
+def test_reroutes_segment_filter(reroute_client):
+    r = reroute_client.get("/api/analytics/reroutes?days=7&segment=VLCC")
+    assert r.status_code == 200
+    assert r.json()["total_events"] == 2
+
+    r2 = reroute_client.get("/api/analytics/reroutes?days=7&segment=Capesize")
+    assert r2.status_code == 200
+    assert r2.json()["total_events"] == 0
+
+
+def test_reroutes_days_clamped(reroute_client):
+    r = reroute_client.get("/api/analytics/reroutes?days=200")
+    assert r.status_code == 200
+    assert r.json()["days"] == 90
