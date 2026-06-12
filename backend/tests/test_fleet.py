@@ -682,3 +682,98 @@ def test_fleet_kpis_empty_registry(tmp_path, monkeypatch):
     assert d["total_registry"] == 0
     assert d["scored"] == 0
     assert d["avg_risk_score"] is None
+
+
+# ---- /api/fleet/age ----
+
+
+def _make_age_client(tmp_path, monkeypatch) -> TestClient:
+    """Registry with year_built and risk_score for age distribution tests."""
+    ais_file = tmp_path / "ais.duckdb"
+    duckdb.connect(str(ais_file)).execute(_AIS_SCHEMA)
+
+    reg_file = tmp_path / "registry.duckdb"
+    reg_conn = duckdb.connect(str(reg_file))
+    reg_conn.execute(_REG_SCHEMA)
+    # year 2026 reference: age = 2026 - year_built
+    # 2 new (age 2, band "0-4"), 2 mid-aged (age 8, band "5-9"), 1 old (age 30, band "25+")
+    reg_conn.executemany(
+        "INSERT INTO vessel_registry (imo, ship_name, flag, year_built, dwt, risk_score, fetch_ok, fetched_ts) VALUES (?,?,?,?,?,?,true,?)",
+        [
+            (9910001, "NEW1", "Malta", 2024, 300000, 10, _NOW),
+            (9910002, "NEW2", "Malta", 2024, 280000, 15, _NOW),
+            (9910003, "MID1", "Panama", 2018, 80000, 40, _NOW),
+            (9910004, "MID2", "Panama", 2018, 75000, 55, _NOW),  # high risk
+            (9910005, "OLD1", "Iran", 1996, 150000, 80, _NOW),   # old + high risk
+        ],
+    )
+    # fetch_ok=false vessel should be excluded
+    reg_conn.execute(
+        "INSERT INTO vessel_registry (imo, ship_name, flag, year_built, fetch_ok, fetched_ts) VALUES (9910006, 'EXCLUDED', 'Cuba', 2000, false, ?)",
+        [_NOW],
+    )
+    reg_conn.close()
+
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
+    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
+    from app.main import app
+    return TestClient(app)
+
+
+def test_fleet_age_structure(tmp_path, monkeypatch):
+    client = _make_age_client(tmp_path, monkeypatch)
+    r = client.get("/api/fleet/age")
+    assert r.status_code == 200
+    d = r.json()
+    assert "as_of" in d
+    assert "reference_year" in d
+    assert "bands" in d
+    assert isinstance(d["bands"], list)
+    for b in d["bands"]:
+        for key in ("age_band", "vessel_count", "avg_risk_score", "high_risk_count", "avg_dwt"):
+            assert key in b
+
+
+def test_fleet_age_band_counts(tmp_path, monkeypatch):
+    """2 vessels in 0-4, 2 in 5-9, 1 in 25+ (fetch_ok=false excluded)."""
+    client = _make_age_client(tmp_path, monkeypatch)
+    d = client.get("/api/fleet/age").json()
+    bands = {b["age_band"]: b for b in d["bands"]}
+    assert "0-4" in bands
+    assert bands["0-4"]["vessel_count"] == 2
+    assert "5-9" in bands
+    assert bands["5-9"]["vessel_count"] == 2
+    assert "25+" in bands
+    assert bands["25+"]["vessel_count"] == 1
+
+
+def test_fleet_age_risk_by_band(tmp_path, monkeypatch):
+    """New vessels have lower avg risk, old vessels have higher."""
+    client = _make_age_client(tmp_path, monkeypatch)
+    d = client.get("/api/fleet/age").json()
+    bands = {b["age_band"]: b for b in d["bands"]}
+    # 0-4 band avg = (10+15)/2 = 12.5
+    assert bands["0-4"]["avg_risk_score"] == pytest.approx(12.5, abs=0.5)
+    # 25+ band only OLD1 with score=80 -> high_risk_count=1
+    assert bands["25+"]["high_risk_count"] == 1
+    assert bands["25+"]["avg_risk_score"] == pytest.approx(80.0, abs=0.5)
+
+
+def test_fleet_age_excludes_no_year_built(tmp_path, monkeypatch):
+    """Vessels without year_built are excluded from bands."""
+    ais_file = tmp_path / "ais.duckdb"
+    duckdb.connect(str(ais_file)).execute(_AIS_SCHEMA)
+    reg_file = tmp_path / "registry.duckdb"
+    reg_conn = duckdb.connect(str(reg_file))
+    reg_conn.execute(_REG_SCHEMA)
+    # Only vessel with no year_built
+    reg_conn.execute(
+        "INSERT INTO vessel_registry (imo, ship_name, flag, fetch_ok, fetched_ts) VALUES (9920001, 'NOYR', 'Malta', true, ?)",
+        [_NOW],
+    )
+    reg_conn.close()
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
+    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
+    from app.main import app
+    d = TestClient(app).get("/api/fleet/age").json()
+    assert d["bands"] == []

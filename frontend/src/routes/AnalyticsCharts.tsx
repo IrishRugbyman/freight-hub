@@ -3,6 +3,7 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  ComposedChart,
   Legend,
   Line,
   LineChart,
@@ -12,7 +13,7 @@ import {
   YAxis,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk } from '@/lib/api'
+import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge } from '@/lib/api'
 
 const CHOKEPOINTS = [
   'singapore_malacca', 'suez', 'hormuz', 'panama', 'gibraltar',
@@ -915,6 +916,62 @@ export function TransitRiskCard() {
               </p>
             )}
           </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+
+export function FleetAgeCard() {
+  const { data, isLoading } = useFleetAge()
+  const bands = data?.bands ?? []
+
+  const chartData = bands.map((b) => ({
+    band: b.age_band,
+    vessels: b.vessel_count,
+    avg_risk: b.avg_risk_score,
+    high_risk: b.high_risk_count,
+  }))
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm">
+          Fleet Age Distribution
+          {data && (
+            <span className="ml-2 text-xs font-normal text-muted-foreground">
+              by 5-year bands (ref {data.reference_year})
+            </span>
+          )}
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {isLoading && <div className="h-48 animate-pulse rounded bg-muted/40" />}
+        {!isLoading && bands.length === 0 && <EmptyState message="No year_built data in registry yet" />}
+        {!isLoading && bands.length > 0 && (
+          <ResponsiveContainer width="100%" height={220}>
+            <ComposedChart data={chartData} margin={{ top: 4, right: 24, left: -16, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+              <XAxis dataKey="band" tick={{ fontSize: 10 }} />
+              <YAxis yAxisId="left" tick={{ fontSize: 10 }} allowDecimals={false} />
+              <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10 }} domain={[0, 100]} />
+              <Tooltip contentStyle={TOOLTIP_STYLE} />
+              <Legend wrapperStyle={LEGEND_STYLE} />
+              <Bar yAxisId="left" dataKey="vessels" fill="#3b82f6" name="Vessel count" opacity={0.7} />
+              <Bar yAxisId="left" dataKey="high_risk" fill="#f97316" name="High risk (>=50)" opacity={0.85} />
+              <Line
+                yAxisId="right"
+                type="monotone"
+                dataKey="avg_risk"
+                stroke="#ef4444"
+                strokeWidth={2}
+                dot={{ r: 3 }}
+                name="Avg risk score"
+                connectNulls
+              />
+            </ComposedChart>
+          </ResponsiveContainer>
         )}
       </CardContent>
     </Card>

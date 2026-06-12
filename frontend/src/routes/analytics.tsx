@@ -16,6 +16,7 @@ const SpeedTrendCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ def
 const StsRiskCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.StsRiskCard })))
 const ReroutesCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.ReroutesCard })))
 const TransitRiskCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.TransitRiskCard })))
+const FleetAgeCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.FleetAgeCard })))
 
 function ChartSkeleton() {
   return <div className="h-[300px] animate-pulse rounded-lg bg-muted/40" />
@@ -47,6 +48,9 @@ function AnalyticsPage() {
 
         <h2 className="text-base font-semibold text-foreground">Port Flow</h2>
         <Suspense fallback={<ChartSkeleton />}><PortFlowCard /></Suspense>
+
+        <h2 className="text-base font-semibold text-foreground">Fleet Age &amp; Risk Profile</h2>
+        <Suspense fallback={<ChartSkeleton />}><FleetAgeCard /></Suspense>
 
         <h2 className="text-base font-semibold text-foreground">Owner &amp; Flag Risk</h2>
         <div className="grid gap-4 lg:grid-cols-2">

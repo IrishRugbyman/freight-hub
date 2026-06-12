@@ -432,6 +432,20 @@ class FleetResponse(BaseModel):
     rows: list[FleetRow]
 
 
+class FleetAgeBand(BaseModel):
+    age_band: str            # "0-4", "5-9", "10-14", "15-19", "20-24", "25+"
+    vessel_count: int
+    avg_risk_score: float | None
+    high_risk_count: int    # score >= 50
+    avg_dwt: float | None
+
+
+class FleetAgeResponse(BaseModel):
+    as_of: str
+    reference_year: int
+    bands: list[FleetAgeBand]
+
+
 class TransitRiskEvent(BaseModel):
     mmsi: int
     name: str | None

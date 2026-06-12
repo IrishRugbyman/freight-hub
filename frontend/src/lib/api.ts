@@ -808,6 +808,29 @@ export function useEvents(params?: { type?: string; days?: number; limit?: numbe
   })
 }
 
+export interface FleetAgeBand {
+  age_band: string
+  vessel_count: number
+  avg_risk_score: number | null
+  high_risk_count: number
+  avg_dwt: number | null
+}
+
+export interface FleetAgeResponse {
+  as_of: string
+  reference_year: number
+  bands: FleetAgeBand[]
+}
+
+export function useFleetAge() {
+  return useQuery({
+    queryKey: ['fleet-age'],
+    queryFn: () => getJSON<FleetAgeResponse>('/api/fleet/age'),
+    staleTime: 10 * 60 * 1000,
+    refetchInterval: 10 * 60 * 1000,
+  })
+}
+
 export interface TransitRiskEvent {
   mmsi: number
   name: string | null

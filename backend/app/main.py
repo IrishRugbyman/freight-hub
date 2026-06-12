@@ -54,6 +54,8 @@ from .schemas import (
     PortDestItem,
     RegionUtilResponse,
     RegionUtilRow,
+    FleetAgeBand,
+    FleetAgeResponse,
     RerouteRiskEvent,
     RerouteRiskResponse,
     RoutesResponse,
@@ -1469,6 +1471,59 @@ def fleet_kpis():
         ofac_count=ofac_count,
         avg_risk_score=avg_risk,
         pct_scored=pct_scored,
+    )
+
+
+@app.get("/api/fleet/age", response_model=FleetAgeResponse)
+def fleet_age():
+    """Fleet age distribution by 5-year bands from vessel registry.
+
+    Includes avg risk score and high-risk count per band. Shows how vessel age
+    correlates with risk profile across the registry.
+    """
+    ref_year = datetime.now(UTC).year
+    df = db.query(
+        "SELECT year_built, risk_score, COALESCE(ofac_sanctioned, false) AS ofac_sanctioned, dwt "
+        "FROM vessel_registry WHERE fetch_ok = true AND year_built IS NOT NULL",
+        db=db.registry_db_path(),
+    )
+    if df.empty:
+        return FleetAgeResponse(
+            as_of=_iso(datetime.now(UTC).replace(tzinfo=None)) or "",
+            reference_year=ref_year,
+            bands=[],
+        )
+
+    df["age"] = ref_year - df["year_built"].astype(int)
+    df["band"] = pd.cut(
+        df["age"],
+        bins=[0, 5, 10, 15, 20, 25, 200],
+        labels=["0-4", "5-9", "10-14", "15-19", "20-24", "25+"],
+        right=False,
+    )
+
+    bands = []
+    for band_label in ["0-4", "5-9", "10-14", "15-19", "20-24", "25+"]:
+        grp = df[df["band"] == band_label]
+        if grp.empty:
+            continue
+        scored = grp[grp["risk_score"].notna()]
+        avg_risk = round(float(scored["risk_score"].mean()), 1) if not scored.empty else None
+        high_risk = int((scored["risk_score"] >= 50).sum()) if not scored.empty else 0
+        dwt_vals = grp["dwt"].dropna()
+        avg_dwt = round(float(dwt_vals.mean()), 0) if not dwt_vals.empty else None
+        bands.append(FleetAgeBand(
+            age_band=band_label,
+            vessel_count=len(grp),
+            avg_risk_score=avg_risk,
+            high_risk_count=high_risk,
+            avg_dwt=avg_dwt,
+        ))
+
+    return FleetAgeResponse(
+        as_of=_iso(datetime.now(UTC).replace(tzinfo=None)) or "",
+        reference_year=ref_year,
+        bands=bands,
     )
 
 
