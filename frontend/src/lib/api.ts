@@ -1120,6 +1120,39 @@ export function useRiskEvents(minRisk = 25, days = 2) {
   })
 }
 
+export interface MarketSegmentSummary {
+  segment: string
+  kind: string
+  total: number
+  laden: number
+  ballast: number
+  unknown: number
+  laden_pct: number
+  underway_pct: number
+}
+
+export interface MarketSummaryResponse {
+  as_of: string
+  total_fleet: number
+  total_laden: number
+  total_ballast: number
+  laden_pct: number
+  transits_24h: number
+  reroutes_24h: number
+  sts_24h: number
+  gaps_24h: number
+  by_segment: MarketSegmentSummary[]
+}
+
+export function useMarketSummary() {
+  return useQuery({
+    queryKey: ['market-summary'],
+    queryFn: () => getJSON<MarketSummaryResponse>('/api/analytics/market-summary'),
+    staleTime: REFETCH_MS,
+    refetchInterval: REFETCH_MS,
+  })
+}
+
 export interface DestinationFlowRow {
   origin_region: string
   destination: string

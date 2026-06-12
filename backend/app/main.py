@@ -64,6 +64,8 @@ from .schemas import (
     RerouteRiskResponse,
     DestinationFlowRow,
     DestinationFlowsResponse,
+    MarketSegmentSummary,
+    MarketSummaryResponse,
     RiskEventItem,
     RiskEventsResponse,
     PortCongestionRow,
@@ -1983,6 +1985,102 @@ def analytics_slow_steamers(kind: str = "", limit: int = 50):
         ))
 
     return SlowSteamersResponse(as_of=_iso(now) or "", total_fleet_underway=total_underway, rows=rows)
+
+
+@app.get("/api/analytics/market-summary", response_model=MarketSummaryResponse)
+def analytics_market_summary():
+    """Current market state: fleet laden/ballast split, 24h event counts, per-segment breakdown.
+
+    Three-DB fan-out: analytics (vessel_state + event counts + transits),
+    AIS (live_positions for segment/underway classification).
+    """
+    now_ts = datetime.now(UTC).replace(tzinfo=None)
+    since_24h = now_ts - timedelta(hours=24)
+
+    # Event counts from analytics DB
+    ev_df = db.query(
+        "SELECT type, COUNT(*) AS cnt FROM ais_events WHERE start_ts >= ? GROUP BY type",
+        [since_24h],
+        db=db.analytics_db_path(),
+    )
+    ev_counts: dict[str, int] = {}
+    if not ev_df.empty:
+        for _, r in ev_df.iterrows():
+            ev_counts[str(r["type"])] = int(r["cnt"])
+
+    tr_df = db.query(
+        "SELECT COUNT(*) AS cnt FROM transit_events WHERE entered_ts >= ?",
+        [since_24h],
+        db=db.analytics_db_path(),
+    )
+    transits_24h = int(tr_df.iloc[0]["cnt"]) if not tr_df.empty else 0
+
+    # Vessel laden/ballast state from analytics DB
+    vs_df = db.query(
+        "SELECT mmsi, laden FROM vessel_state",
+        db=db.analytics_db_path(),
+    )
+    laden_mmsi: set[int] = set()
+    ballast_mmsi: set[int] = set()
+    if not vs_df.empty:
+        for _, r in vs_df.iterrows():
+            m = int(r["mmsi"])
+            if r["laden"] == "laden":
+                laden_mmsi.add(m)
+            elif r["laden"] == "ballast":
+                ballast_mmsi.add(m)
+
+    # Live fleet from AIS DB (segment/kind/nav_status)
+    lp_df = db.query(
+        "SELECT mmsi, segment, kind, nav_status, sog FROM live_positions WHERE segment != 'Small'",
+    )
+
+    total_fleet = len(lp_df) if not lp_df.empty else 0
+    # Restrict laden/ballast counts to non-Small fleet for consistency with by_segment
+    fleet_mmsis: set[int] = {int(m) for m in lp_df["mmsi"]} if not lp_df.empty else set()
+    total_laden = len(laden_mmsi & fleet_mmsis)
+    total_ballast = len(ballast_mmsi & fleet_mmsis)
+    laden_pct = round(total_laden / max(total_laden + total_ballast, 1) * 100, 1)
+
+    # Per-segment breakdown
+    seg_rows: list[MarketSegmentSummary] = []
+    if not lp_df.empty:
+        for (segment, kind), grp in lp_df.groupby(["segment", "kind"]):
+            seg_total = len(grp)
+            seg_mmsis = set(int(m) for m in grp["mmsi"])
+            seg_laden = len(seg_mmsis & laden_mmsi)
+            seg_ballast = len(seg_mmsis & ballast_mmsi)
+            seg_unknown = seg_total - seg_laden - seg_ballast
+
+            nav_grp = grp["nav_status"]
+            sog_grp = grp["sog"]
+            underway = int(((nav_grp == 0) | (pd.to_numeric(sog_grp, errors="coerce") > 2.0)).sum())
+
+            seg_rows.append(MarketSegmentSummary(
+                segment=str(segment),
+                kind=str(kind),
+                total=seg_total,
+                laden=seg_laden,
+                ballast=seg_ballast,
+                unknown=seg_unknown,
+                laden_pct=round(seg_laden / max(seg_laden + seg_ballast, 1) * 100, 1),
+                underway_pct=round(underway / max(seg_total, 1) * 100, 1),
+            ))
+
+        seg_rows.sort(key=lambda r: r.total, reverse=True)
+
+    return MarketSummaryResponse(
+        as_of=_iso(now_ts) or "",
+        total_fleet=total_fleet,
+        total_laden=total_laden,
+        total_ballast=total_ballast,
+        laden_pct=laden_pct,
+        transits_24h=transits_24h,
+        reroutes_24h=ev_counts.get("reroute", 0),
+        sts_24h=ev_counts.get("sts", 0),
+        gaps_24h=ev_counts.get("gap", 0),
+        by_segment=seg_rows,
+    )
 
 
 @app.get("/api/analytics/fleet-utilization", response_model=FleetUtilizationResponse)

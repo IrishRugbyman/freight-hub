@@ -24,6 +24,7 @@ const FleetUtilizationCard = lazy(() => import('./AnalyticsCharts').then((m) => 
 const RiskEventsCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.RiskEventsCard })))
 const PortCongestionCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.PortCongestionCard })))
 const DestinationFlowCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.DestinationFlowCard })))
+const MarketSummaryCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.MarketSummaryCard })))
 
 function ChartSkeleton() {
   return <div className="h-[300px] animate-pulse rounded-lg bg-muted/40" />
@@ -40,6 +41,9 @@ function AnalyticsPage() {
             Charts fill in as history grows.
           </p>
         </div>
+
+        <h2 className="text-base font-semibold text-foreground">Market State</h2>
+        <Suspense fallback={<ChartSkeleton />}><MarketSummaryCard /></Suspense>
 
         <h2 className="text-base font-semibold text-foreground">Chokepoint Traffic</h2>
         <div className="grid gap-4 lg:grid-cols-2">

@@ -1751,3 +1751,48 @@ def test_destination_flows_sorted_by_count(flow_client):
         krpus = next((r for r in rows if r["destination"] == "KRPUS"), None)
         if cnsha and krpus:
             assert cnsha["vessel_count"] >= krpus["vessel_count"]
+
+
+# ---------------------------------------------------------------------------
+# Phase 29: market summary KPI card
+# ---------------------------------------------------------------------------
+
+def test_market_summary_structure(flow_client):
+    """Reuse flow_client fixture: 3 laden + 1 ballast vessel."""
+    r = flow_client.get("/api/analytics/market-summary")
+    assert r.status_code == 200
+    d = r.json()
+    for key in ("as_of", "total_fleet", "total_laden", "total_ballast",
+                "laden_pct", "transits_24h", "reroutes_24h", "sts_24h",
+                "gaps_24h", "by_segment"):
+        assert key in d
+
+
+def test_market_summary_laden_count(flow_client):
+    r = flow_client.get("/api/analytics/market-summary")
+    d = r.json()
+    assert d["total_laden"] == 3    # 8001, 8002, 8003 seeded as laden
+    assert d["total_ballast"] == 1  # 8004 seeded as ballast
+    assert d["laden_pct"] == pytest.approx(75.0, abs=1.0)
+
+
+def test_market_summary_by_segment(flow_client):
+    r = flow_client.get("/api/analytics/market-summary")
+    d = r.json()
+    by_seg = {f'{row["kind"]}-{row["segment"]}': row for row in d["by_segment"]}
+    # 2 laden VLCCs + 1 ballast VLCC = 3 total in VLCC tanker segment
+    vlcc = by_seg.get("tanker-VLCC")
+    assert vlcc is not None
+    assert vlcc["total"] == 3
+    assert vlcc["laden"] == 2
+    assert vlcc["ballast"] == 1
+
+
+def test_market_summary_zero_events(flow_client):
+    # flow_client has no ais_events seeded -> all event counts = 0
+    r = flow_client.get("/api/analytics/market-summary")
+    d = r.json()
+    assert d["transits_24h"] == 0
+    assert d["reroutes_24h"] == 0
+    assert d["sts_24h"] == 0
+    assert d["gaps_24h"] == 0

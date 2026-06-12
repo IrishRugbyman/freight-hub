@@ -650,6 +650,30 @@ class RiskEventsResponse(BaseModel):
     rows: list[RiskEventItem]
 
 
+class MarketSegmentSummary(BaseModel):
+    segment: str
+    kind: str
+    total: int
+    laden: int
+    ballast: int
+    unknown: int
+    laden_pct: float
+    underway_pct: float
+
+
+class MarketSummaryResponse(BaseModel):
+    as_of: str
+    total_fleet: int
+    total_laden: int
+    total_ballast: int
+    laden_pct: float
+    transits_24h: int
+    reroutes_24h: int
+    sts_24h: int
+    gaps_24h: int
+    by_segment: list[MarketSegmentSummary]
+
+
 class DestinationFlowRow(BaseModel):
     origin_region: str
     destination: str

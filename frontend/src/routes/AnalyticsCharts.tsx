@@ -13,7 +13,7 @@ import {
   YAxis,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion, useDestinationFlows } from '@/lib/api'
+import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion, useDestinationFlows, useMarketSummary } from '@/lib/api'
 import type { RiskEventItem } from '@/lib/api'
 
 const CHOKEPOINTS = [
@@ -49,6 +49,79 @@ function EmptyState({ message }: { message: string }) {
 
 const TOOLTIP_STYLE = { background: 'var(--card)', border: '1px solid var(--border)', fontSize: 12 }
 const LEGEND_STYLE = { fontSize: 11 }
+
+// ---------------------------------------------------------------------------
+// Phase 29: Market Summary KPI Card
+// ---------------------------------------------------------------------------
+
+export function MarketSummaryCard() {
+  const { data, isLoading } = useMarketSummary()
+
+  const kpis = data ? [
+    { label: 'Laden vessels', value: data.total_laden.toLocaleString(), sub: `${data.laden_pct}% of fleet` },
+    { label: 'Transits 24h', value: data.transits_24h.toLocaleString(), sub: 'chokepoint crossings' },
+    { label: 'Reroutes 24h', value: data.reroutes_24h.toLocaleString(), sub: 'destination changes' },
+    { label: 'STS 24h', value: data.sts_24h.toLocaleString(), sub: 'ship-to-ship transfers' },
+  ] : []
+
+  const topSegments = (data?.by_segment ?? []).slice(0, 6)
+
+  return (
+    <Card className="bg-card/60 backdrop-blur border-border/40">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-medium">Market State</CardTitle>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          Live fleet snapshot{data && ` — ${data.total_fleet.toLocaleString()} vessels tracked`}
+        </p>
+      </CardHeader>
+      <CardContent className="pt-0 space-y-4">
+        {isLoading && <p className="text-xs text-muted-foreground">Loading...</p>}
+        {!isLoading && data && (
+          <>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {kpis.map(kpi => (
+                <div key={kpi.label} className="rounded border border-border/30 bg-muted/20 px-3 py-2">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide">{kpi.label}</p>
+                  <p className="text-xl font-semibold tabular-nums">{kpi.value}</p>
+                  <p className="text-[10px] text-muted-foreground">{kpi.sub}</p>
+                </div>
+              ))}
+            </div>
+            {topSegments.length > 0 && (
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border/40 text-muted-foreground">
+                    <th className="text-left py-1 pr-3 font-medium">Segment</th>
+                    <th className="text-right pr-3 font-medium">Fleet</th>
+                    <th className="text-right pr-3 font-medium">Laden%</th>
+                    <th className="text-right font-medium">Underway%</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {topSegments.map(s => (
+                    <tr key={`${s.segment}-${s.kind}`} className="border-b border-border/20">
+                      <td className="py-1 pr-3">
+                        <span className="font-medium">{s.segment}</span>
+                        <span className="ml-1 text-muted-foreground/60 text-[10px]">{s.kind}</span>
+                      </td>
+                      <td className="text-right pr-3 tabular-nums text-muted-foreground">{s.total}</td>
+                      <td className={`text-right pr-3 tabular-nums font-medium ${s.laden_pct >= 60 ? 'text-green-400' : s.laden_pct >= 40 ? 'text-yellow-400' : 'text-muted-foreground'}`}>
+                        {s.laden_pct.toFixed(0)}%
+                      </td>
+                      <td className={`text-right tabular-nums ${s.underway_pct >= 70 ? 'text-green-400' : s.underway_pct >= 50 ? 'text-yellow-400' : 'text-muted-foreground'}`}>
+                        {s.underway_pct.toFixed(0)}%
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
 
 export function TransitsCard() {
   const [chokepoint, setChokepoint] = useState('suez')
