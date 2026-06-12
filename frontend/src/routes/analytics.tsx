@@ -34,6 +34,7 @@ const RegionMomentumCard = lazy(() => import('./AnalyticsCharts').then((m) => ({
 const EventRateTimelineCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.EventRateTimelineCard })))
 const TransitRateTimelineCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.TransitRateTimelineCard })))
 const AnchorageOccupancyCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.AnchorageOccupancyCard })))
+const StsOffendersCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.StsOffendersCard })))
 
 function ChartSkeleton() {
   return <div className="h-[300px] animate-pulse rounded-lg bg-muted/40" />
@@ -99,6 +100,7 @@ function AnalyticsPage() {
         <Suspense fallback={<ChartSkeleton />}><RiskEventsCard /></Suspense>
 
         <h2 className="text-base font-semibold text-foreground">Event Intelligence</h2>
+        <Suspense fallback={<ChartSkeleton />}><StsOffendersCard /></Suspense>
         <div className="grid gap-4 lg:grid-cols-2">
           <Suspense fallback={<ChartSkeleton />}><TransitRiskCard /></Suspense>
           <Suspense fallback={<ChartSkeleton />}><AnchorageDwellCard /></Suspense>

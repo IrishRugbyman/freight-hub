@@ -3207,3 +3207,44 @@ def test_anchorage_occupancy_nonzero_counts(anchorage_occ_client):
     r = anchorage_occ_client.get("/api/analytics/anchorage-occupancy?hours=72&zones_csv=singapore_west")
     d = r.json()
     assert all(p["vessel_count"] > 0 for p in d["points"])
+
+
+# ---------------------------------------------------------------------------
+# Phase 40: STS Offenders
+# ---------------------------------------------------------------------------
+
+def test_sts_offenders_structure(risk_leaderboard_client):
+    """STS offenders uses risk_leaderboard_client which has STS events."""
+    r = risk_leaderboard_client.get("/api/analytics/sts-offenders?days=30&limit=50")
+    assert r.status_code == 200
+    d = r.json()
+    assert "as_of" in d and "days" in d and "total_vessels" in d and "rows" in d
+    for row in d["rows"]:
+        assert "mmsi" in row and "sts_events" in row
+        assert "as_initiator" in row and "as_counterpart" in row
+        assert row["sts_events"] == row["as_initiator"] + row["as_counterpart"]
+
+
+def test_sts_offenders_counts(risk_leaderboard_client):
+    """Vessel 9001 has 3 STS events as mmsi, vessel 9003 has 1 as mmsi2."""
+    r = risk_leaderboard_client.get("/api/analytics/sts-offenders?days=30&limit=50")
+    d = r.json()
+    mmsi_map = {row["mmsi"]: row for row in d["rows"]}
+    if 9001 in mmsi_map:
+        assert mmsi_map[9001]["as_initiator"] == 3
+    if 9003 in mmsi_map:
+        assert mmsi_map[9003]["as_counterpart"] >= 1
+
+
+def test_sts_offenders_excludes_small(risk_leaderboard_client):
+    r = risk_leaderboard_client.get("/api/analytics/sts-offenders?days=30&limit=50")
+    d = r.json()
+    for row in d["rows"]:
+        assert row.get("segment") != "Small"
+
+
+def test_sts_offenders_sorted_desc(risk_leaderboard_client):
+    r = risk_leaderboard_client.get("/api/analytics/sts-offenders?days=30&limit=50")
+    d = r.json()
+    events = [row["sts_events"] for row in d["rows"]]
+    assert events == sorted(events, reverse=True)

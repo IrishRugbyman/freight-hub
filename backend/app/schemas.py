@@ -904,3 +904,27 @@ class AnchorageOccupancyResponse(BaseModel):
     hours: int
     zones: list[str]
     points: list[AnchorageOccupancyPoint]
+
+
+class StsOffenderRow(BaseModel):
+    mmsi: int
+    name: str | None
+    imo: int | None
+    kind: str | None
+    segment: str | None
+    region: str | None
+    lat: float | None
+    lon: float | None
+    sog: float | None
+    sts_events: int
+    as_initiator: int
+    as_counterpart: int
+    registry_risk: int | None
+    ofac: bool
+
+
+class StsOffendersResponse(BaseModel):
+    as_of: str
+    days: int
+    total_vessels: int
+    rows: list[StsOffenderRow]

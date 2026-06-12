@@ -1513,3 +1513,37 @@ export function useAnchorageOccupancy(hours = 72, zonesCSV = '') {
     refetchInterval: 5 * 60 * 1000,
   })
 }
+
+export interface StsOffenderRow {
+  mmsi: number
+  name: string | null
+  imo: number | null
+  kind: string | null
+  segment: string | null
+  region: string | null
+  lat: number | null
+  lon: number | null
+  sog: number | null
+  sts_events: number
+  as_initiator: number
+  as_counterpart: number
+  registry_risk: number | null
+  ofac: boolean
+}
+
+export interface StsOffendersResponse {
+  as_of: string
+  days: number
+  total_vessels: number
+  rows: StsOffenderRow[]
+}
+
+export function useStsOffenders(days = 30, limit = 50) {
+  return useQuery({
+    queryKey: ['sts-offenders', days, limit],
+    queryFn: () =>
+      getJSON<StsOffendersResponse>(`/api/analytics/sts-offenders?days=${days}&limit=${limit}`),
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+  })
+}

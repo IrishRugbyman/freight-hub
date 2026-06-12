@@ -14,7 +14,7 @@ import {
   YAxis,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion, useDestinationFlows, useMarketSummary, useVesselRiskScores, useChokepointHeatmap, useTradeLaneMatrix, useAnomalyWatchlist, useStsProximity, useRegionMomentum, useEventRateTimeline, useTransitRateTimeline, useAnchorageOccupancy } from '@/lib/api'
+import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion, useDestinationFlows, useMarketSummary, useVesselRiskScores, useChokepointHeatmap, useTradeLaneMatrix, useAnomalyWatchlist, useStsProximity, useRegionMomentum, useEventRateTimeline, useTransitRateTimeline, useAnchorageOccupancy, useStsOffenders } from '@/lib/api'
 import type { RiskEventItem } from '@/lib/api'
 
 const CHOKEPOINTS = [
@@ -2728,6 +2728,83 @@ export function AnchorageOccupancyCard() {
               ))}
             </LineChart>
           </ResponsiveContainer>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Phase 40: Serial STS Offenders
+// ---------------------------------------------------------------------------
+
+export function StsOffendersCard() {
+  const [days, setDays] = useState(30)
+  const [limit, setLimit] = useState(30)
+  const { data, isLoading } = useStsOffenders(days, limit)
+  const rows = data?.rows ?? []
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex flex-wrap items-center justify-between gap-2">
+          <span>Serial STS Participants</span>
+          <div className="flex flex-wrap gap-2 text-sm font-normal">
+            <select
+              className="rounded border border-border bg-background px-2 py-1 text-xs"
+              value={days}
+              onChange={e => setDays(Number(e.target.value))}
+            >
+              <option value={7}>Last 7d</option>
+              <option value={14}>Last 14d</option>
+              <option value={30}>Last 30d</option>
+            </select>
+            <select
+              className="rounded border border-border bg-background px-2 py-1 text-xs"
+              value={limit}
+              onChange={e => setLimit(Number(e.target.value))}
+            >
+              <option value={20}>Top 20</option>
+              <option value={30}>Top 30</option>
+              <option value={50}>Top 50</option>
+            </select>
+          </div>
+        </CardTitle>
+        {data && (
+          <p className="text-xs text-muted-foreground">
+            {data.total_vessels} vessels appeared in STS events in the last {data.days}d.
+            Ranked by total event appearances (both parties combined).
+          </p>
+        )}
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="h-64 animate-pulse rounded bg-muted/40" />
+        ) : rows.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">No STS events in window.</p>
+        ) : (
+          <div className="space-y-0.5">
+            {rows.map((row, i) => (
+              <div
+                key={row.mmsi}
+                className={`flex items-center gap-2 rounded px-2 py-1 text-xs ${row.ofac ? 'bg-red-500/10 border-l-2 border-red-500/50' : 'bg-muted/15 hover:bg-muted/30'}`}
+              >
+                <span className="w-5 shrink-0 text-muted-foreground/60 tabular-nums">{i + 1}</span>
+                <div className="min-w-0 flex-1">
+                  <span className="font-medium">{row.name ?? `MMSI ${row.mmsi}`}</span>
+                  {row.ofac && <span className="ml-1 rounded bg-red-500/20 px-1 text-[9px] font-bold text-red-400 uppercase">OFAC</span>}
+                  {row.segment && <span className="ml-1 text-muted-foreground">{row.segment}</span>}
+                  {row.region && <span className="ml-1 text-muted-foreground/60">{row.region.replace(/_/g, ' ')}</span>}
+                </div>
+                <div className="shrink-0 text-right tabular-nums">
+                  <span className="font-semibold text-orange-400">{row.sts_events}</span>
+                  <span className="ml-1 text-muted-foreground/60">
+                    ({row.as_initiator}+{row.as_counterpart})
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
         )}
       </CardContent>
     </Card>

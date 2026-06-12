@@ -89,6 +89,8 @@ from .schemas import (
     SpeedAnalyticsResponse,
     AnchorageOccupancyPoint,
     AnchorageOccupancyResponse,
+    StsOffenderRow,
+    StsOffendersResponse,
     EventRatePoint,
     EventRateTimelineResponse,
     TransitRatePoint,
@@ -946,6 +948,96 @@ def analytics_sts_risk(days: int = 30, min_risk: int = 0):
         enriched_events=enriched,
         rows=rows,
     )
+
+
+@app.get("/api/analytics/sts-offenders", response_model=StsOffendersResponse)
+def analytics_sts_offenders(days: int = 30, limit: int = 50):
+    """Vessels ranked by STS event frequency over the last N days.
+
+    Counts appearances as either primary (mmsi) or secondary (mmsi2) party.
+    Enriched with current live position and Equasis registry risk.
+    Excludes 'Small' segment noise.
+    """
+    d = max(1, min(days, 90))
+    lim = max(10, min(200, limit))
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=d)
+
+    ev_df = db.query(
+        "SELECT mmsi, mmsi2 FROM ais_events WHERE type = 'sts' AND start_ts >= ?",
+        [cutoff],
+        db=db.analytics_db_path(),
+    )
+    now = datetime.now(UTC)
+    as_of = _iso(now) or ""
+    if ev_df.empty:
+        return StsOffendersResponse(as_of=as_of, days=d, total_vessels=0, rows=[])
+
+    init_counts = ev_df.groupby("mmsi").size().rename("as_initiator")
+    # mmsi2 may be null
+    ev_df_m2 = ev_df.dropna(subset=["mmsi2"]).copy()
+    ev_df_m2["mmsi2"] = ev_df_m2["mmsi2"].astype(int)
+    cp_counts = ev_df_m2.groupby("mmsi2").size().rename("as_counterpart")
+
+    all_mmsis = pd.concat([
+        init_counts.rename("n"),
+        cp_counts.rename("n"),
+    ]).groupby(level=0).sum()
+    initiator_map: dict[int, int] = init_counts.to_dict()
+    counterpart_map: dict[int, int] = cp_counts.to_dict()
+
+    all_mmsis = all_mmsis.sort_values(ascending=False).head(lim * 2)
+    mmsi_list = [int(m) for m in all_mmsis.index.tolist()]
+
+    lp_df = db.query(
+        "SELECT mmsi, name, imo, kind, segment, region, lat, lon, sog "
+        "FROM live_positions WHERE mmsi = ANY(?)",
+        [mmsi_list],
+    )
+    lp_map: dict[int, dict] = {}
+    if not lp_df.empty:
+        for _, row in lp_df.iterrows():
+            lp_map[int(row["mmsi"])] = row.to_dict()
+
+    reg_df = db.query(
+        "SELECT imo, risk_score, ofac_sanctioned FROM vessel_registry "
+        "WHERE fetch_ok = TRUE AND imo = ANY(?)",
+        [list({lp_map[m]["imo"] for m in mmsi_list if m in lp_map and lp_map[m].get("imo")})],
+        db=db.registry_db_path(),
+    )
+    reg_map: dict[int, dict] = {}
+    if not reg_df.empty:
+        for _, row in reg_df.iterrows():
+            reg_map[int(row["imo"])] = row.to_dict()
+
+    rows: list[StsOffenderRow] = []
+    for mmsi_int, total in all_mmsis.items():
+        live = lp_map.get(int(mmsi_int), {})
+        if live.get("segment") == "Small":
+            continue
+        imo_val = _valid_imo(live.get("imo"))
+        reg = reg_map.get(imo_val) if imo_val else None
+        rows.append(
+            StsOffenderRow(
+                mmsi=int(mmsi_int),
+                name=_str_or_none(live.get("name")),
+                imo=imo_val,
+                kind=_str_or_none(live.get("kind")),
+                segment=_str_or_none(live.get("segment")),
+                region=_str_or_none(live.get("region")),
+                lat=round(float(live["lat"]), 4) if live.get("lat") is not None else None,
+                lon=round(float(live["lon"]), 4) if live.get("lon") is not None else None,
+                sog=round(float(live["sog"]), 1) if live.get("sog") is not None else None,
+                sts_events=int(total),
+                as_initiator=initiator_map.get(int(mmsi_int), 0),
+                as_counterpart=counterpart_map.get(int(mmsi_int), 0),
+                registry_risk=int(reg["risk_score"]) if reg and reg.get("risk_score") is not None else None,
+                ofac=bool(reg["ofac_sanctioned"]) if reg and reg.get("ofac_sanctioned") is not None else False,
+            )
+        )
+        if len(rows) >= lim:
+            break
+    rows.sort(key=lambda r: r.sts_events, reverse=True)
+    return StsOffendersResponse(as_of=as_of, days=d, total_vessels=len(all_mmsis), rows=rows)
 
 
 @app.get("/api/analytics/reroutes", response_model=RerouteRiskResponse)
