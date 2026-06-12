@@ -13,7 +13,8 @@ import {
   YAxis,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization } from '@/lib/api'
+import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents } from '@/lib/api'
+import type { RiskEventItem } from '@/lib/api'
 
 const CHOKEPOINTS = [
   'singapore_malacca', 'suez', 'hormuz', 'panama', 'gibraltar',
@@ -1288,6 +1289,129 @@ export function FleetUtilizationCard() {
             <Bar dataKey="Unknown" stackId="a" fill="#6b7280" />
             <Bar dataKey="Idle" stackId="a" fill="#f97316" radius={[0, 4, 4, 0]} />
           </BarChart>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Phase 26: High-Risk Vessel Alert Feed
+// ---------------------------------------------------------------------------
+
+function alertColor(score: number): string {
+  if (score >= 75) return 'text-red-400'
+  if (score >= 50) return 'text-orange-400'
+  return 'text-yellow-400'
+}
+
+function alertBg(score: number): string {
+  if (score >= 75) return 'bg-red-900/40 border-red-700/40'
+  if (score >= 50) return 'bg-orange-900/30 border-orange-700/40'
+  return 'bg-yellow-900/20 border-yellow-700/30'
+}
+
+function RiskRow({ ev }: { ev: RiskEventItem }) {
+  const ts = new Date(ev.event_ts).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  const isReroute = ev.event_type === 'reroute'
+  const isSts = ev.event_type === 'sts'
+
+  return (
+    <div className={`rounded border px-3 py-2 text-xs space-y-1 ${alertBg(ev.max_risk)}`}>
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className={`font-semibold shrink-0 ${alertColor(ev.max_risk)}`}>
+            {ev.max_risk}
+          </span>
+          <span className="font-medium truncate text-foreground/90">
+            {ev.name ?? `MMSI ${ev.mmsi}`}
+          </span>
+          {ev.ofac && (
+            <span className="rounded bg-red-700 px-1 py-0.5 text-[10px] font-bold text-white shrink-0">OFAC</span>
+          )}
+          {ev.segment && <span className="text-muted-foreground shrink-0">{ev.segment}</span>}
+        </div>
+        <div className="flex items-center gap-2 shrink-0 text-muted-foreground">
+          <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${isReroute ? 'bg-blue-900/50 text-blue-300' : 'bg-purple-900/50 text-purple-300'}`}>
+            {isReroute ? 'REROUTE' : 'STS'}
+          </span>
+          <span>{ts}</span>
+        </div>
+      </div>
+
+      {isReroute && ev.old_destination && ev.new_destination && (
+        <div className="text-muted-foreground">
+          <span className="text-foreground/60">{ev.old_destination}</span>
+          <span className="mx-1">{'->'}</span>
+          <span className="font-medium text-foreground/80">{ev.new_destination}</span>
+          {ev.region && <span className="ml-2 text-muted-foreground/60">({ev.region})</span>}
+        </div>
+      )}
+
+      {isSts && ev.mmsi2 != null && (
+        <div className="text-muted-foreground">
+          {'with '}
+          <span className={`font-medium ${ev.risk_score2 != null ? alertColor(ev.risk_score2) : 'text-foreground/70'}`}>
+            {ev.name2 ?? `MMSI ${ev.mmsi2}`}
+          </span>
+          {ev.risk_score2 != null && (
+            <span className="ml-1 text-muted-foreground/70">(score {ev.risk_score2})</span>
+          )}
+          {ev.ofac2 && (
+            <span className="ml-1 rounded bg-red-700 px-1 py-0.5 text-[10px] font-bold text-white">OFAC</span>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+export function RiskEventsCard() {
+  const [minRisk, setMinRisk] = React.useState(25)
+  const [days, setDays] = React.useState(2)
+  const { data, isLoading } = useRiskEvents(minRisk, days)
+  const rows = data?.rows ?? []
+
+  return (
+    <Card className="bg-card/60 backdrop-blur border-border/40">
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <CardTitle className="text-sm font-medium">High-Risk Vessel Alerts</CardTitle>
+          <div className="flex gap-2">
+            <div className="flex gap-1">
+              {([25, 50, 75] as const).map(r => (
+                <button key={r} onClick={() => setMinRisk(r)}
+                  className={`rounded px-2 py-0.5 text-xs ${minRisk === r ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+                  {r === 25 ? 'Elevated' : r === 50 ? 'High' : 'Critical'}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-1">
+              {([1, 2, 7] as const).map(d => (
+                <button key={d} onClick={() => setDays(d)}
+                  className={`rounded px-2 py-0.5 text-xs ${days === d ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+                  {d}d
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          STS transfers and destination changes involving registry risk score &ge;{minRisk}
+          {data && ` — ${data.total_high_risk_vessels} vessels tracked`}
+        </p>
+      </CardHeader>
+      <CardContent className="pt-0">
+        {isLoading && <p className="text-xs text-muted-foreground">Loading...</p>}
+        {!isLoading && rows.length === 0 && (
+          <p className="text-xs text-muted-foreground">
+            No high-risk vessel events in the last {days}d window.
+          </p>
+        )}
+        {rows.length > 0 && (
+          <div className="space-y-2 max-h-[480px] overflow-y-auto pr-1">
+            {rows.map(ev => <RiskRow key={ev.event_id} ev={ev} />)}
+          </div>
         )}
       </CardContent>
     </Card>

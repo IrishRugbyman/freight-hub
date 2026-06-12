@@ -21,6 +21,7 @@ const AnchorageDwellCard = lazy(() => import('./AnalyticsCharts').then((m) => ({
 const CargoTransitionsCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.CargoTransitionsCard })))
 const SlowSteamersCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.SlowSteamersCard })))
 const FleetUtilizationCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.FleetUtilizationCard })))
+const RiskEventsCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.RiskEventsCard })))
 
 function ChartSkeleton() {
   return <div className="h-[300px] animate-pulse rounded-lg bg-muted/40" />
@@ -61,6 +62,9 @@ function AnalyticsPage() {
           <Suspense fallback={<ChartSkeleton />}><OwnerRiskCard /></Suspense>
           <Suspense fallback={<ChartSkeleton />}><FlagRiskCard /></Suspense>
         </div>
+
+        <h2 className="text-base font-semibold text-foreground">Intelligence Alerts</h2>
+        <Suspense fallback={<ChartSkeleton />}><RiskEventsCard /></Suspense>
 
         <h2 className="text-base font-semibold text-foreground">Event Intelligence</h2>
         <div className="grid gap-4 lg:grid-cols-2">

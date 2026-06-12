@@ -1219,3 +1219,207 @@ def test_fleet_utilization_capesize_detected(slow_client):
     # unknown, but 4 kn > 2 kn so all 11 are classified as underway)
     # Actually wait: slow Cape is at 4.0 kn > 2.0 kn threshold -> also underway!
     assert cape["underway_count"] == 11
+
+
+# ---------------------------------------------------------------------------
+# Phase 26: high-risk vessel alert feed
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def risk_events_client(tmp_path, monkeypatch):
+    """Three-DB fixture for /api/analytics/risk-events.
+
+    Registry:
+      IMO 2000001 -> risk_score=80, ofac=false  (MMSI 9801)
+      IMO 2000002 -> risk_score=60, ofac=true   (MMSI 9802)
+      IMO 2000003 -> risk_score=10, ofac=false  (MMSI 9803)  <- below min_risk=25
+
+    Analytics events (last 24h):
+      - STS between 9801 and 9803 (high + low risk)
+      - Reroute for 9802 (high risk, OFAC)
+      - Reroute for 9803 alone (low risk -> excluded at min_risk=25)
+    """
+    import duckdb
+    from datetime import UTC, datetime, timedelta
+    from fastapi.testclient import TestClient
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+
+    ais_schema = """
+    CREATE TABLE live_positions (
+        mmsi BIGINT PRIMARY KEY, name VARCHAR, lat DOUBLE, lon DOUBLE,
+        sog DOUBLE, cog DOUBLE, heading DOUBLE, destination VARCHAR,
+        ship_type INTEGER, length_m DOUBLE, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, updated_ts TIMESTAMP,
+        imo BIGINT, draught DOUBLE, nav_status INTEGER, eta VARCHAR
+    );
+    CREATE TABLE ais_snapshots (
+        snapshot_ts TIMESTAMP, mmsi BIGINT, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, lat DOUBLE, lon DOUBLE, ship_type INTEGER, length_m DOUBLE,
+        sog DOUBLE, nav_status INTEGER, draught DOUBLE, destination VARCHAR,
+        PRIMARY KEY (snapshot_ts, mmsi)
+    );
+    """
+
+    reg_schema = """
+    CREATE TABLE vessel_registry (
+        imo BIGINT PRIMARY KEY, name VARCHAR, flag VARCHAR, owner VARCHAR,
+        class_society VARCHAR, pi_club VARCHAR, gross_tonnage INTEGER, dwt INTEGER,
+        year_built INTEGER, risk_score INTEGER, ofac_sanctioned BOOLEAN,
+        risk_indicators VARCHAR, paris_mou_detentions DOUBLE, tokyo_mou_detentions DOUBLE,
+        paris_mou_status VARCHAR, tokyo_mou_status VARCHAR,
+        fetched_ts TIMESTAMP, fetch_ok BOOLEAN
+    );
+    """
+
+    an_schema = """
+    CREATE TABLE meta_watermark (key VARCHAR PRIMARY KEY, ts TIMESTAMP);
+    CREATE TABLE ais_events (
+        event_id VARCHAR PRIMARY KEY, type VARCHAR,
+        mmsi BIGINT, mmsi2 BIGINT,
+        start_ts TIMESTAMP, end_ts TIMESTAMP,
+        lat DOUBLE, lon DOUBLE,
+        region VARCHAR, kind VARCHAR, segment VARCHAR, details VARCHAR
+    );
+    CREATE TABLE transit_events (
+        mmsi BIGINT, chokepoint VARCHAR, entered_ts TIMESTAMP, exited_ts TIMESTAMP,
+        direction VARCHAR, kind VARCHAR, segment VARCHAR, laden BOOLEAN,
+        PRIMARY KEY (mmsi, chokepoint, entered_ts)
+    );
+    CREATE TABLE anchored_episodes (
+        mmsi BIGINT, zone VARCHAR, start_ts TIMESTAMP, end_ts TIMESTAMP,
+        kind VARCHAR, segment VARCHAR, PRIMARY KEY (mmsi, zone, start_ts)
+    );
+    CREATE TABLE fleet_density (
+        ts TIMESTAMP, region VARCHAR, kind VARCHAR, segment VARCHAR,
+        laden_count INTEGER, ballast_count INTEGER, unknown_count INTEGER,
+        PRIMARY KEY (ts, region, kind, segment)
+    );
+    CREATE TABLE vessel_state (
+        mmsi BIGINT PRIMARY KEY, max_draught_seen DOUBLE, last_draught DOUBLE,
+        laden VARCHAR, updated_ts TIMESTAMP
+    );
+    """
+
+    ais_file = tmp_path / "ais.duckdb"
+    ais_conn = duckdb.connect(str(ais_file))
+    ais_conn.execute(ais_schema)
+    ais_conn.execute(
+        "INSERT INTO live_positions VALUES (9801,'HIGH RISK ALPHA',25.0,56.0,14.0,270.0,NULL,'AEFJR',80,330,'tanker','VLCC','hormuz',?,2000001,20.0,0,NULL)",
+        [now],
+    )
+    ais_conn.execute(
+        "INSERT INTO live_positions VALUES (9802,'HIGH RISK BETA',1.2,103.6,0.5,90.0,NULL,'CNSHA',74,200,'bulk','Capesize','singapore_malacca',?,2000002,12.0,1,NULL)",
+        [now],
+    )
+    ais_conn.execute(
+        "INSERT INTO live_positions VALUES (9803,'LOW RISK GAMMA',26.0,56.5,13.0,270.0,NULL,'PKQCT',80,320,'tanker','VLCC','hormuz',?,2000003,18.0,0,NULL)",
+        [now],
+    )
+    ais_conn.close()
+
+    reg_file = tmp_path / "registry.duckdb"
+    reg_conn = duckdb.connect(str(reg_file))
+    reg_conn.execute(reg_schema)
+    reg_conn.execute(
+        "INSERT INTO vessel_registry (imo, risk_score, ofac_sanctioned, fetch_ok) VALUES (2000001, 80, false, true)",
+    )
+    reg_conn.execute(
+        "INSERT INTO vessel_registry (imo, risk_score, ofac_sanctioned, fetch_ok) VALUES (2000002, 60, true, true)",
+    )
+    reg_conn.execute(
+        "INSERT INTO vessel_registry (imo, risk_score, ofac_sanctioned, fetch_ok) VALUES (2000003, 10, false, true)",
+    )
+    reg_conn.close()
+
+    an_file = tmp_path / "analytics.duckdb"
+    an_conn = duckdb.connect(str(an_file))
+    an_conn.execute(an_schema)
+    # STS: high-risk vessel 9801 with low-risk 9803
+    an_conn.execute(
+        "INSERT INTO ais_events VALUES ('re_sts001','sts',9801,9803,?,?,25.1,56.1,'hormuz','tanker','VLCC',?)",
+        [now - timedelta(hours=12), now - timedelta(hours=10),
+         '{"duration_hours":2,"co_location_fixes":8}'],
+    )
+    # Reroute for high-risk OFAC vessel 9802
+    an_conn.execute(
+        "INSERT INTO ais_events VALUES ('re_rr001','reroute',9802,NULL,?,?,1.3,103.7,'singapore_malacca','bulk','Capesize',?)",
+        [now - timedelta(hours=6), now - timedelta(hours=6),
+         '{"old_destination":"CNSHA","new_destination":"IRBIK","fixes_at_old":15}'],
+    )
+    # Reroute for low-risk vessel only (score=10, below min_risk=25)
+    an_conn.execute(
+        "INSERT INTO ais_events VALUES ('re_rr002','reroute',9803,NULL,?,?,26.1,56.6,'hormuz','tanker','VLCC',?)",
+        [now - timedelta(hours=3), now - timedelta(hours=3),
+         '{"old_destination":"AEFJR","new_destination":"CNSHA","fixes_at_old":5}'],
+    )
+    an_conn.close()
+
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
+    monkeypatch.setenv("ANALYTICS_DB", str(an_file))
+    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
+    from app.main import app
+    return TestClient(app)
+
+
+def test_risk_events_structure(risk_events_client):
+    r = risk_events_client.get("/api/analytics/risk-events?min_risk=25&days=2")
+    assert r.status_code == 200
+    d = r.json()
+    for key in ("as_of", "min_risk", "days", "total_high_risk_vessels", "rows"):
+        assert key in d
+    assert d["min_risk"] == 25
+    assert d["days"] == 2
+    assert d["total_high_risk_vessels"] == 2  # IMO 2000001 + 2000002 have score >= 25
+    if d["rows"]:
+        row = d["rows"][0]
+        for field in ("event_id", "event_type", "event_ts", "mmsi", "max_risk"):
+            assert field in row
+
+
+def test_risk_events_detects_sts(risk_events_client):
+    r = risk_events_client.get("/api/analytics/risk-events?min_risk=25&days=2")
+    rows = {row["event_id"]: row for row in r.json()["rows"]}
+    assert "re_sts001" in rows
+    ev = rows["re_sts001"]
+    assert ev["event_type"] == "sts"
+    assert ev["mmsi"] == 9801
+    assert ev["mmsi2"] == 9803
+    assert ev["risk_score"] == 80
+    assert ev["max_risk"] == 80
+    assert ev["ofac"] is False
+
+
+def test_risk_events_detects_reroute(risk_events_client):
+    r = risk_events_client.get("/api/analytics/risk-events?min_risk=25&days=2")
+    rows = {row["event_id"]: row for row in r.json()["rows"]}
+    assert "re_rr001" in rows
+    ev = rows["re_rr001"]
+    assert ev["event_type"] == "reroute"
+    assert ev["mmsi"] == 9802
+    assert ev["risk_score"] == 60
+    assert ev["ofac"] is True
+    assert ev["old_destination"] == "CNSHA"
+    assert ev["new_destination"] == "IRBIK"
+
+
+def test_risk_events_excludes_low_risk(risk_events_client):
+    r = risk_events_client.get("/api/analytics/risk-events?min_risk=25&days=2")
+    event_ids = {row["event_id"] for row in r.json()["rows"]}
+    # re_rr002 belongs to low-risk vessel only (score=10), must be excluded
+    assert "re_rr002" not in event_ids
+
+
+def test_risk_events_min_risk_filter(risk_events_client):
+    # min_risk=70: only vessel 9801 (score=80) qualifies -> only re_sts001
+    r = risk_events_client.get("/api/analytics/risk-events?min_risk=70&days=2")
+    rows = r.json()["rows"]
+    for row in rows:
+        assert row["max_risk"] >= 70
+
+
+def test_risk_events_sorted_by_max_risk(risk_events_client):
+    r = risk_events_client.get("/api/analytics/risk-events?min_risk=25&days=2")
+    rows = r.json()["rows"]
+    max_risks = [row["max_risk"] for row in rows]
+    assert max_risks == sorted(max_risks, reverse=True)

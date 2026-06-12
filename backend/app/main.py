@@ -62,6 +62,8 @@ from .schemas import (
     FleetAgeResponse,
     RerouteRiskEvent,
     RerouteRiskResponse,
+    RiskEventItem,
+    RiskEventsResponse,
     RoutesResponse,
     SlowSteamerEvent,
     SlowSteamersResponse,
@@ -2040,6 +2042,166 @@ def analytics_fleet_utilization():
     rows_out.sort(key=lambda r: r.underway_pct)  # most idle first
     total_fleet = len(lp_df)
     return FleetUtilizationResponse(as_of=_iso(now) or "", total_fleet=total_fleet, rows=rows_out)
+
+
+@app.get("/api/analytics/risk-events", response_model=RiskEventsResponse)
+def analytics_risk_events(min_risk: int = 25, days: int = 2, limit: int = 50):
+    """High-risk vessel intelligence feed: STS + reroute events where at least one party
+    carries a registry risk score >= min_risk. Three-DB join: registry (IMO->score),
+    AIS (IMO->MMSI), analytics (events). Sorted by max_risk descending then most recent.
+
+    Use min_risk=50 for critical-only alerts (dark fleet / shadow tanker monitoring).
+    """
+    min_risk = max(0, min(100, min_risk))
+    days = max(1, min(30, days))
+    since = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
+    now_ts = datetime.now(UTC).replace(tzinfo=None)
+
+    # Step 1: high-risk IMOs from registry
+    reg_df = db.query(
+        "SELECT imo, risk_score, COALESCE(ofac_sanctioned, false) AS ofac "
+        "FROM vessel_registry WHERE risk_score >= ? AND fetch_ok = true",
+        [min_risk],
+        db=db.registry_db_path(),
+    )
+    if reg_df.empty:
+        return RiskEventsResponse(
+            as_of=_iso(now_ts) or "", min_risk=min_risk, days=days,
+            total_high_risk_vessels=0, rows=[],
+        )
+
+    imo_risk: dict[int, dict] = {}
+    for _, r in reg_df.iterrows():
+        imo_risk[int(r["imo"])] = {"risk_score": int(r["risk_score"]), "ofac": bool(r["ofac"])}
+
+    known_imos = [int(i) for i in imo_risk.keys()]
+    ph_imos = ",".join("?" * len(known_imos))
+
+    # Step 2: IMO -> MMSI + name via live_positions
+    lp_df = db.query(
+        f"SELECT mmsi, imo, name FROM live_positions WHERE imo IN ({ph_imos})",
+        known_imos,
+    )
+    mmsi_imo: dict[int, int] = {}
+    mmsi_name: dict[int, str | None] = {}
+    for _, r in lp_df.iterrows():
+        imo_val = _valid_imo(r.get("imo"))
+        if imo_val:
+            m = int(r["mmsi"])
+            mmsi_imo[m] = imo_val
+            mmsi_name[m] = _str_or_none(r.get("name"))
+
+    all_mmsis = list(mmsi_imo.keys())
+    if not all_mmsis:
+        return RiskEventsResponse(
+            as_of=_iso(now_ts) or "", min_risk=min_risk, days=days,
+            total_high_risk_vessels=len(known_imos), rows=[],
+        )
+
+    # Step 3: recent STS + reroute events for these MMSIs (either party)
+    ph_m = ",".join("?" * len(all_mmsis))
+    events_df = db.query(
+        f"SELECT event_id, type, mmsi, mmsi2, start_ts, lat, lon, "
+        f"       region, kind, segment, details "
+        f"FROM ais_events "
+        f"WHERE (mmsi IN ({ph_m}) OR mmsi2 IN ({ph_m})) "
+        f"  AND type IN ('sts', 'reroute') "
+        f"  AND start_ts >= ? "
+        f"ORDER BY start_ts DESC",
+        [int(m) for m in all_mmsis] + [int(m) for m in all_mmsis] + [since],
+        db=db.analytics_db_path(),
+    )
+    if events_df.empty:
+        return RiskEventsResponse(
+            as_of=_iso(now_ts) or "", min_risk=min_risk, days=days,
+            total_high_risk_vessels=len(known_imos), rows=[],
+        )
+
+    # Gather all MMSIs from events to look up names for non-high-risk counterparties
+    extra_mmsis = []
+    for _, r in events_df.iterrows():
+        m2 = r.get("mmsi2")
+        if m2 is not None and not pd.isna(m2) and int(m2) not in mmsi_name:
+            extra_mmsis.append(int(m2))
+    if extra_mmsis:
+        ph_ex = ",".join("?" * len(extra_mmsis))
+        ex_df = db.query(
+            f"SELECT mmsi, imo, name FROM live_positions WHERE mmsi IN ({ph_ex})",
+            extra_mmsis,
+        )
+        for _, r in ex_df.iterrows():
+            m_val = int(r["mmsi"])
+            mmsi_name.setdefault(m_val, _str_or_none(r.get("name")))
+            if m_val not in mmsi_imo:
+                imo_val = _valid_imo(r.get("imo"))
+                if imo_val:
+                    mmsi_imo[m_val] = imo_val
+
+    risk_rows: list[RiskEventItem] = []
+    for _, ev in events_df.iterrows():
+        mmsi_val = int(ev["mmsi"])
+        mmsi2_val: int | None = None
+        if ev.get("mmsi2") is not None and not pd.isna(ev.get("mmsi2")):
+            mmsi2_val = int(ev["mmsi2"])
+
+        imo_val = mmsi_imo.get(mmsi_val)
+        imo2_val = mmsi_imo.get(mmsi2_val) if mmsi2_val is not None else None
+
+        ri = imo_risk.get(imo_val, {}) if imo_val else {}
+        ri2 = imo_risk.get(imo2_val, {}) if imo2_val else {}
+
+        rs = ri.get("risk_score")
+        rs2 = ri2.get("risk_score")
+        max_risk = max(rs or 0, rs2 or 0)
+        if max_risk < min_risk:
+            continue  # neither party qualifies - can happen if mmsi2 was the trigger
+
+        det: dict = {}
+        if ev.get("details"):
+            try:
+                det = _json.loads(ev["details"])
+            except Exception:
+                pass
+
+        lat_val: float | None = None
+        lon_val: float | None = None
+        if ev.get("lat") is not None and not pd.isna(ev.get("lat")):
+            lat_val = round(float(ev["lat"]), 5)
+        if ev.get("lon") is not None and not pd.isna(ev.get("lon")):
+            lon_val = round(float(ev["lon"]), 5)
+
+        risk_rows.append(RiskEventItem(
+            event_id=str(ev["event_id"]),
+            event_type=str(ev["type"]),
+            event_ts=_iso(ev["start_ts"]) or "",
+            mmsi=mmsi_val,
+            name=mmsi_name.get(mmsi_val),
+            imo=imo_val,
+            risk_score=rs,
+            ofac=bool(ri.get("ofac", False)),
+            mmsi2=mmsi2_val,
+            name2=mmsi_name.get(mmsi2_val) if mmsi2_val is not None else None,
+            imo2=imo2_val,
+            risk_score2=rs2,
+            ofac2=bool(ri2.get("ofac", False)),
+            max_risk=max_risk,
+            region=_str_or_none(ev.get("region")),
+            kind=_str_or_none(ev.get("kind")),
+            segment=_str_or_none(ev.get("segment")),
+            lat=lat_val,
+            lon=lon_val,
+            old_destination=_str_or_none(det.get("old_destination")) if isinstance(det, dict) else None,
+            new_destination=_str_or_none(det.get("new_destination")) if isinstance(det, dict) else None,
+        ))
+
+    risk_rows.sort(key=lambda r: (-r.max_risk, r.event_ts))
+    return RiskEventsResponse(
+        as_of=_iso(now_ts) or "",
+        min_risk=min_risk,
+        days=days,
+        total_high_risk_vessels=len(known_imos),
+        rows=risk_rows[:limit],
+    )
 
 
 @app.get("/api/fleet/export")

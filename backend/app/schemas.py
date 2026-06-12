@@ -616,3 +616,35 @@ class FleetKPIs(BaseModel):
     ofac_count: int
     avg_risk_score: float | None  # among scored vessels
     pct_scored: float            # scored / total_registry
+
+
+class RiskEventItem(BaseModel):
+    event_id: str
+    event_type: str              # "sts" | "reroute"
+    event_ts: str
+    mmsi: int
+    name: str | None
+    imo: int | None
+    risk_score: int | None
+    ofac: bool
+    mmsi2: int | None
+    name2: str | None
+    imo2: int | None
+    risk_score2: int | None
+    ofac2: bool
+    max_risk: int
+    region: str | None
+    kind: str | None
+    segment: str | None
+    lat: float | None
+    lon: float | None
+    old_destination: str | None
+    new_destination: str | None
+
+
+class RiskEventsResponse(BaseModel):
+    as_of: str
+    min_risk: int
+    days: int
+    total_high_risk_vessels: int
+    rows: list[RiskEventItem]

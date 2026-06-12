@@ -1074,8 +1074,49 @@ export function useFleetKPIs() {
   return useQuery({
     queryKey: ['fleet-kpis'],
     queryFn: () => getJSON<FleetKPIs>('/api/fleet/kpis'),
-    staleTime: 5 * 60 * 1000,   // KPIs change slowly, 5 min stale
+    staleTime: 5 * 60 * 1000,
     refetchInterval: 5 * 60 * 1000,
+  })
+}
+
+export interface RiskEventItem {
+  event_id: string
+  event_type: string
+  event_ts: string
+  mmsi: number
+  name: string | null
+  imo: number | null
+  risk_score: number | null
+  ofac: boolean
+  mmsi2: number | null
+  name2: string | null
+  imo2: number | null
+  risk_score2: number | null
+  ofac2: boolean
+  max_risk: number
+  region: string | null
+  kind: string | null
+  segment: string | null
+  lat: number | null
+  lon: number | null
+  old_destination: string | null
+  new_destination: string | null
+}
+
+export interface RiskEventsResponse {
+  as_of: string
+  min_risk: number
+  days: number
+  total_high_risk_vessels: number
+  rows: RiskEventItem[]
+}
+
+export function useRiskEvents(minRisk = 25, days = 2) {
+  return useQuery({
+    queryKey: ['risk-events', minRisk, days],
+    queryFn: () => getJSON<RiskEventsResponse>(`/api/analytics/risk-events?min_risk=${minRisk}&days=${days}&limit=100`),
+    staleTime: REFETCH_MS,
+    refetchInterval: REFETCH_MS,
   })
 }
 
