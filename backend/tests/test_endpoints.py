@@ -2775,3 +2775,148 @@ def test_region_momentum_laden_ratio(region_momentum_client):
     ara = next(row for row in d["rows"] if row["region"] == "ara")
     # laden=300 out of 500 total -> 60%
     assert ara["laden_ratio_pct"] == 60.0
+
+
+# ---------------------------------------------------------------------------
+# Phase 37: Event Rate Timeline
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def event_rate_client(tmp_path, monkeypatch):
+    """Fixture for event-rate-timeline endpoint.
+
+    ais_events has:
+      - 3 reroutes at hour H and 2 reroutes at hour H-1
+      - 1 STS at hour H
+    """
+    import duckdb
+    from fastapi.testclient import TestClient
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+    h0 = now.replace(minute=0, second=0, microsecond=0)
+    h1 = h0 - timedelta(hours=1)
+
+    ais_schema = """
+    CREATE TABLE live_positions (
+        mmsi BIGINT PRIMARY KEY, name VARCHAR, lat DOUBLE, lon DOUBLE,
+        sog DOUBLE, cog DOUBLE, heading DOUBLE, destination VARCHAR,
+        ship_type INTEGER, length_m DOUBLE, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, updated_ts TIMESTAMP,
+        imo BIGINT, draught DOUBLE, nav_status INTEGER, eta VARCHAR
+    );
+    CREATE TABLE ais_snapshots (
+        snapshot_ts TIMESTAMP, mmsi BIGINT, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, lat DOUBLE, lon DOUBLE, ship_type INTEGER, length_m DOUBLE,
+        sog DOUBLE, nav_status INTEGER, draught DOUBLE, destination VARCHAR,
+        PRIMARY KEY (snapshot_ts, mmsi)
+    );
+    CREATE TABLE vessels (
+        mmsi BIGINT PRIMARY KEY, imo BIGINT, name VARCHAR, flag VARCHAR,
+        flag_iso2 VARCHAR, mid INTEGER, call_sign VARCHAR, vessel_type VARCHAR,
+        dwt INTEGER, grt INTEGER, build_year INTEGER, length_m DOUBLE, beam_m DOUBLE,
+        owner VARCHAR, manager VARCHAR, class_society VARCHAR, enriched_at TIMESTAMP, equasis_ok BOOLEAN
+    );
+    """
+    ais_file = tmp_path / "ais_er.duckdb"
+    ais_conn = duckdb.connect(str(ais_file))
+    ais_conn.execute(ais_schema)
+    ais_conn.close()
+
+    an_schema = """
+    CREATE TABLE meta_watermark (key VARCHAR PRIMARY KEY, ts TIMESTAMP);
+    CREATE TABLE ais_events (
+        event_id VARCHAR PRIMARY KEY, type VARCHAR, mmsi BIGINT, mmsi2 BIGINT,
+        start_ts TIMESTAMP, end_ts TIMESTAMP, lat DOUBLE, lon DOUBLE,
+        region VARCHAR, kind VARCHAR, segment VARCHAR, details VARCHAR
+    );
+    CREATE TABLE transit_events (
+        mmsi BIGINT, chokepoint VARCHAR, entered_ts TIMESTAMP, exited_ts TIMESTAMP,
+        direction VARCHAR, kind VARCHAR, segment VARCHAR, laden BOOLEAN,
+        PRIMARY KEY (mmsi, chokepoint, entered_ts)
+    );
+    CREATE TABLE anchored_episodes (
+        mmsi BIGINT, zone VARCHAR, start_ts TIMESTAMP, end_ts TIMESTAMP,
+        kind VARCHAR, segment VARCHAR, PRIMARY KEY (mmsi, zone, start_ts)
+    );
+    CREATE TABLE fleet_density (
+        ts TIMESTAMP, region VARCHAR, kind VARCHAR, segment VARCHAR,
+        laden_count INTEGER, ballast_count INTEGER, unknown_count INTEGER,
+        PRIMARY KEY (ts, region, kind, segment)
+    );
+    CREATE TABLE vessel_state (
+        mmsi BIGINT PRIMARY KEY, max_draught_seen DOUBLE, last_draught DOUBLE,
+        laden VARCHAR, updated_ts TIMESTAMP
+    );
+    """
+    an_file = tmp_path / "analytics_er.duckdb"
+    an_conn = duckdb.connect(str(an_file))
+    an_conn.execute(an_schema)
+    an_conn.executemany(
+        "INSERT INTO ais_events VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            ("er-1", "reroute", 9301, None, h0, None, 25.0, 56.0, "hormuz", "tanker", "VLCC", "{}"),
+            ("er-2", "reroute", 9302, None, h0, None, 25.0, 56.0, "hormuz", "tanker", "VLCC", "{}"),
+            ("er-3", "reroute", 9303, None, h0, None, 25.0, 56.0, "hormuz", "tanker", "VLCC", "{}"),
+            ("er-4", "reroute", 9304, None, h1, None, 3.5,  5.0,  "ara",    "bulk",   "Capesize", "{}"),
+            ("er-5", "reroute", 9305, None, h1, None, 3.5,  5.0,  "ara",    "bulk",   "Capesize", "{}"),
+            ("er-6", "sts",     9301, 9306, h0, None, 25.0, 56.0, "hormuz", "tanker", "VLCC", "{}"),
+        ],
+    )
+    an_conn.close()
+
+    reg_file = tmp_path / "reg_er.duckdb"
+    reg_conn = duckdb.connect(str(reg_file))
+    reg_conn.execute("""
+    CREATE TABLE vessel_registry (
+        imo BIGINT PRIMARY KEY, ship_name VARCHAR, flag VARCHAR, flag_code VARCHAR,
+        call_sign VARCHAR, gross_tonnage INTEGER, dwt INTEGER, ship_type VARCHAR,
+        year_built INTEGER, ship_status VARCHAR, owner VARCHAR, ism_manager VARCHAR,
+        ship_manager VARCHAR, class_society VARCHAR, pi_club VARCHAR,
+        detention_rate_pct DOUBLE, paris_mou VARCHAR, tokyo_mou VARCHAR,
+        uscg_targeting VARCHAR, fetched_ts TIMESTAMP, fetch_ok BOOLEAN,
+        risk_score INTEGER, risk_indicators VARCHAR, ofac_sanctioned BOOLEAN
+    );
+    """)
+    reg_conn.close()
+
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
+    monkeypatch.setenv("ANALYTICS_DB", str(an_file))
+    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
+
+    from app.main import app as freight_app
+    return TestClient(freight_app)
+
+
+def test_event_rate_timeline_structure(event_rate_client):
+    r = event_rate_client.get("/api/analytics/event-rate-timeline")
+    assert r.status_code == 200
+    d = r.json()
+    assert "as_of" in d and "hours" in d and "points" in d
+    for pt in d["points"]:
+        assert "hour" in pt and "reroute_count" in pt and "sts_count" in pt and "total_count" in pt
+
+
+def test_event_rate_timeline_counts(event_rate_client):
+    r = event_rate_client.get("/api/analytics/event-rate-timeline?hours=72")
+    d = r.json()
+    h0_pts = [p for p in d["points"] if p["reroute_count"] > 0 and p["sts_count"] > 0]
+    assert h0_pts, "Expected an hour with both reroutes and STS"
+    pt = h0_pts[0]
+    assert pt["reroute_count"] == 3
+    assert pt["sts_count"] == 1
+    assert pt["total_count"] == 4
+
+
+def test_event_rate_timeline_prev_hour(event_rate_client):
+    r = event_rate_client.get("/api/analytics/event-rate-timeline?hours=72")
+    d = r.json()
+    reroute_only = [p for p in d["points"] if p["reroute_count"] > 0 and p["sts_count"] == 0]
+    assert reroute_only
+    assert reroute_only[0]["reroute_count"] == 2
+
+
+def test_event_rate_timeline_hours_clamp(event_rate_client):
+    r = event_rate_client.get("/api/analytics/event-rate-timeline?hours=6")
+    d = r.json()
+    assert d["hours"] == 6

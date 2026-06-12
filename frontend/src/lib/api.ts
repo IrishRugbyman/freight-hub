@@ -1439,3 +1439,26 @@ export function useRegionMomentum(hoursBack = 24) {
     refetchInterval: 5 * 60 * 1000,
   })
 }
+
+export interface EventRatePoint {
+  hour: string
+  reroute_count: number
+  sts_count: number
+  total_count: number
+}
+
+export interface EventRateTimelineResponse {
+  as_of: string
+  hours: number
+  points: EventRatePoint[]
+}
+
+export function useEventRateTimeline(hours = 72) {
+  return useQuery({
+    queryKey: ['event-rate-timeline', hours],
+    queryFn: () =>
+      getJSON<EventRateTimelineResponse>(`/api/analytics/event-rate-timeline?hours=${hours}`),
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+  })
+}

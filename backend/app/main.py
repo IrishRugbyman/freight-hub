@@ -87,6 +87,8 @@ from .schemas import (
     TransitRiskEvent,
     TransitRiskResponse,
     SpeedAnalyticsResponse,
+    EventRatePoint,
+    EventRateTimelineResponse,
     RegionMomentumRow,
     RegionMomentumResponse,
     StsProximityPair,
@@ -1622,6 +1624,47 @@ def analytics_density(region: str = "singapore_malacca", days: int = 30):
             )
         series.sort(key=lambda r: r.date)
     return DensityResponse(region=region, days=d, series=series)
+
+
+@app.get("/api/analytics/event-rate-timeline", response_model=EventRateTimelineResponse)
+def analytics_event_rate_timeline(hours: int = 72):
+    """Hourly count of reroute and STS events over the last N hours.
+
+    Shows whether AIS anomaly event rates are accelerating or decelerating -
+    a proxy for route disruption intensity.
+    """
+    h = max(6, min(hours, 336))
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=h)
+    df = db.query(
+        "SELECT start_ts, type FROM ais_events "
+        "WHERE type IN ('reroute', 'sts') AND start_ts >= ? ORDER BY start_ts",
+        [cutoff],
+        db=db.analytics_db_path(),
+    )
+    now = datetime.now(UTC)
+    as_of = _iso(now) or ""
+    if df.empty:
+        return EventRateTimelineResponse(as_of=as_of, hours=h, points=[])
+
+    df["start_ts"] = pd.to_datetime(df["start_ts"])
+    df["hour"] = df["start_ts"].dt.floor("h")
+    pivot = (
+        df.groupby(["hour", "type"])
+        .size()
+        .unstack(fill_value=0)
+        .reindex(columns=["reroute", "sts"], fill_value=0)
+        .reset_index()
+    )
+    points = [
+        EventRatePoint(
+            hour=_iso(r["hour"]) or str(r["hour"]),
+            reroute_count=int(r["reroute"]),
+            sts_count=int(r["sts"]),
+            total_count=int(r["reroute"]) + int(r["sts"]),
+        )
+        for _, r in pivot.iterrows()
+    ]
+    return EventRateTimelineResponse(as_of=as_of, hours=h, points=points)
 
 
 @app.get("/api/analytics/region-momentum", response_model=RegionMomentumResponse)

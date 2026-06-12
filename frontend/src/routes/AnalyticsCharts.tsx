@@ -14,7 +14,7 @@ import {
   YAxis,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion, useDestinationFlows, useMarketSummary, useVesselRiskScores, useChokepointHeatmap, useTradeLaneMatrix, useAnomalyWatchlist, useStsProximity, useRegionMomentum } from '@/lib/api'
+import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion, useDestinationFlows, useMarketSummary, useVesselRiskScores, useChokepointHeatmap, useTradeLaneMatrix, useAnomalyWatchlist, useStsProximity, useRegionMomentum, useEventRateTimeline } from '@/lib/api'
 import type { RiskEventItem } from '@/lib/api'
 
 const CHOKEPOINTS = [
@@ -2404,6 +2404,83 @@ export function RegionMomentumCard() {
               ))}
             </div>
           </>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Phase 37: AIS Event Rate Timeline
+// ---------------------------------------------------------------------------
+
+export function EventRateTimelineCard() {
+  const [hours, setHours] = useState(72)
+  const { data, isLoading } = useEventRateTimeline(hours)
+  const points = data?.points ?? []
+
+  const chartData = React.useMemo(
+    () =>
+      points.map(p => ({
+        hour: new Date(p.hour).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit' }),
+        Reroutes: p.reroute_count,
+        STS: p.sts_count,
+        Total: p.total_count,
+      })),
+    [points],
+  )
+
+  const totalReroutes = points.reduce((s, p) => s + p.reroute_count, 0)
+  const totalSts = points.reduce((s, p) => s + p.sts_count, 0)
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex flex-wrap items-center justify-between gap-2">
+          <span>AIS Anomaly Event Rate</span>
+          <select
+            className="rounded border border-border bg-background px-2 py-1 text-xs font-normal"
+            value={hours}
+            onChange={e => setHours(Number(e.target.value))}
+          >
+            <option value={24}>Last 24h</option>
+            <option value={48}>Last 48h</option>
+            <option value={72}>Last 72h</option>
+            <option value={168}>Last 7d</option>
+          </select>
+        </CardTitle>
+        {data && (
+          <p className="text-xs text-muted-foreground">
+            {totalReroutes} reroutes + {totalSts} STS events in the last {data.hours}h.
+            Trend indicates route disruption intensity.
+          </p>
+        )}
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="h-64 animate-pulse rounded bg-muted/40" />
+        ) : chartData.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">No event data in window.</p>
+        ) : (
+          <ResponsiveContainer width="100%" height={240}>
+            <ComposedChart data={chartData} margin={{ left: -10 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+              <XAxis
+                dataKey="hour"
+                tick={{ fontSize: 9 }}
+                interval={Math.max(0, Math.floor(chartData.length / 10) - 1)}
+                angle={-25}
+                textAnchor="end"
+                height={40}
+              />
+              <YAxis tick={{ fontSize: 10 }} />
+              <Tooltip />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              <Bar dataKey="Reroutes" fill="#f97316" opacity={0.8} />
+              <Bar dataKey="STS" fill="#a855f7" opacity={0.8} />
+              <Line type="monotone" dataKey="Total" stroke="#facc15" dot={false} strokeWidth={1.5} />
+            </ComposedChart>
+          </ResponsiveContainer>
         )}
       </CardContent>
     </Card>

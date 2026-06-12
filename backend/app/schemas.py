@@ -864,3 +864,16 @@ class RegionMomentumResponse(BaseModel):
     as_of: str
     hours_back: int
     rows: list[RegionMomentumRow]
+
+
+class EventRatePoint(BaseModel):
+    hour: str
+    reroute_count: int
+    sts_count: int
+    total_count: int
+
+
+class EventRateTimelineResponse(BaseModel):
+    as_of: str
+    hours: int
+    points: list[EventRatePoint]
