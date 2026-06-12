@@ -3834,3 +3834,142 @@ def test_chokepoint_anomaly_sorted_by_magnitude(chokepoint_anomaly_client):
     if len(rows_with_z) >= 2:
         z_magnitudes = [abs(row["z_score"]) for row in rows_with_z]
         assert z_magnitudes == sorted(z_magnitudes, reverse=True)
+
+
+# ---------------------------------------------------------------------------
+# Phase 45: Cargo State Transition Detection
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def cargo_state_client(tmp_path, monkeypatch):
+    """Fixture: tanker anchored at rotterdam; draught drops from 15 to 9 = discharge."""
+    import duckdb
+    from fastapi.testclient import TestClient
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+    start_ep = now - timedelta(hours=30)
+    end_ep = now - timedelta(hours=20)
+    snap_entry = start_ep + timedelta(minutes=15)
+    snap_exit = end_ep - timedelta(minutes=15)
+
+    ais_file = tmp_path / "ais_csc.duckdb"
+    conn = duckdb.connect(str(ais_file))
+    conn.execute("""
+    CREATE TABLE live_positions (
+        mmsi BIGINT PRIMARY KEY, name VARCHAR, lat DOUBLE, lon DOUBLE,
+        sog DOUBLE, cog DOUBLE, heading DOUBLE, destination VARCHAR,
+        ship_type INTEGER, length_m DOUBLE, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, updated_ts TIMESTAMP,
+        imo BIGINT, draught DOUBLE, nav_status INTEGER, eta VARCHAR
+    );
+    CREATE TABLE ais_snapshots (
+        snapshot_ts TIMESTAMP, mmsi BIGINT, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, lat DOUBLE, lon DOUBLE, ship_type INTEGER, length_m DOUBLE,
+        sog DOUBLE, nav_status INTEGER, draught DOUBLE, destination VARCHAR,
+        PRIMARY KEY (snapshot_ts, mmsi)
+    );
+    CREATE TABLE vessels (
+        mmsi BIGINT PRIMARY KEY, imo BIGINT, name VARCHAR, flag VARCHAR,
+        flag_iso2 VARCHAR, mid INTEGER, call_sign VARCHAR, vessel_type VARCHAR,
+        dwt INTEGER, grt INTEGER, build_year INTEGER, length_m DOUBLE, beam_m DOUBLE,
+        owner VARCHAR, manager VARCHAR, class_society VARCHAR, enriched_at TIMESTAMP, equasis_ok BOOLEAN
+    );
+    """)
+    conn.executemany("INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [
+        (9901, "TANKER X", 51.9, 4.1, 0.5, 0.0, 0.0, "NLROT", 80, 330.0, "tanker", "Aframax", "ara", now, 5000001, 9.0, 1, None),
+    ])
+    conn.executemany(
+        "INSERT INTO ais_snapshots VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            (snap_entry, 9901, "tanker", "Aframax", "ara", 51.9, 4.1, 80, 330.0, 0.5, 1, 15.0, "NLROT"),
+            (snap_exit,  9901, "tanker", "Aframax", "ara", 51.9, 4.1, 80, 330.0, 0.5, 1,  9.0, "NLROT"),
+        ],
+    )
+    conn.close()
+
+    an_file = tmp_path / "analytics_csc.duckdb"
+    an_conn = duckdb.connect(str(an_file))
+    an_conn.execute("""
+    CREATE TABLE meta_watermark (key VARCHAR PRIMARY KEY, ts TIMESTAMP);
+    CREATE TABLE ais_events (
+        event_id VARCHAR PRIMARY KEY, type VARCHAR, mmsi BIGINT, mmsi2 BIGINT,
+        start_ts TIMESTAMP, end_ts TIMESTAMP, lat DOUBLE, lon DOUBLE,
+        region VARCHAR, kind VARCHAR, segment VARCHAR, details VARCHAR
+    );
+    CREATE TABLE transit_events (
+        mmsi BIGINT, chokepoint VARCHAR, entered_ts TIMESTAMP, exited_ts TIMESTAMP,
+        direction VARCHAR, kind VARCHAR, segment VARCHAR, laden BOOLEAN,
+        PRIMARY KEY (mmsi, chokepoint, entered_ts)
+    );
+    CREATE TABLE anchored_episodes (
+        mmsi BIGINT, zone VARCHAR, start_ts TIMESTAMP, end_ts TIMESTAMP,
+        kind VARCHAR, segment VARCHAR, PRIMARY KEY (mmsi, zone, start_ts)
+    );
+    CREATE TABLE fleet_density (
+        ts TIMESTAMP, region VARCHAR, kind VARCHAR, segment VARCHAR,
+        laden_count INTEGER, ballast_count INTEGER, unknown_count INTEGER,
+        PRIMARY KEY (ts, region, kind, segment)
+    );
+    CREATE TABLE vessel_state (
+        mmsi BIGINT PRIMARY KEY, max_draught_seen DOUBLE, last_draught DOUBLE,
+        laden VARCHAR, updated_ts TIMESTAMP
+    );
+    """)
+    an_conn.executemany(
+        "INSERT INTO anchored_episodes VALUES (?,?,?,?,?,?)",
+        [(9901, "rotterdam", start_ep, end_ep, "tanker", "Aframax")],
+    )
+    an_conn.close()
+
+    reg_file = tmp_path / "reg_csc.duckdb"
+    duckdb.connect(str(reg_file)).execute("""
+    CREATE TABLE vessel_registry (
+        imo BIGINT PRIMARY KEY, ship_name VARCHAR, flag VARCHAR, flag_code VARCHAR,
+        call_sign VARCHAR, gross_tonnage INTEGER, dwt INTEGER, ship_type VARCHAR,
+        year_built INTEGER, ship_status VARCHAR, owner VARCHAR, ism_manager VARCHAR,
+        ship_manager VARCHAR, class_society VARCHAR, pi_club VARCHAR,
+        detention_rate_pct DOUBLE, paris_mou VARCHAR, tokyo_mou VARCHAR,
+        uscg_targeting VARCHAR, fetched_ts TIMESTAMP, fetch_ok BOOLEAN,
+        risk_score INTEGER, risk_indicators VARCHAR, ofac_sanctioned BOOLEAN
+    );
+    """).close()
+
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
+    monkeypatch.setenv("ANALYTICS_DB", str(an_file))
+    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
+
+    from app.main import app as freight_app
+    return TestClient(freight_app)
+
+
+def test_cargo_state_structure(cargo_state_client):
+    r = cargo_state_client.get("/api/analytics/cargo-state-changes?days=7")
+    assert r.status_code == 200
+    d = r.json()
+    assert "total_events" in d and "rows" in d
+
+
+def test_cargo_state_detects_discharge(cargo_state_client):
+    r = cargo_state_client.get("/api/analytics/cargo-state-changes?days=7&kind=tanker&min_change_m=2.0")
+    d = r.json()
+    assert d["total_events"] >= 1
+    row = d["rows"][0]
+    assert row["cargo_state"] == "discharged"
+    assert row["draught_change_m"] < 0
+    assert abs(row["draught_change_m"]) >= 2.0
+
+
+def test_cargo_state_draught_values(cargo_state_client):
+    r = cargo_state_client.get("/api/analytics/cargo-state-changes?days=7&min_change_m=1.0")
+    d = r.json()
+    row = next(r for r in d["rows"] if r["mmsi"] == 9901)
+    assert row["draught_entry"] == 15.0
+    assert row["draught_exit"] == 9.0
+    assert row["zone"] == "rotterdam"
+
+
+def test_cargo_state_min_change_filter(cargo_state_client):
+    r = cargo_state_client.get("/api/analytics/cargo-state-changes?days=7&min_change_m=10.0")
+    d = r.json()
+    assert d["total_events"] == 0

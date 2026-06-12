@@ -1672,3 +1672,42 @@ export function useChokepointAnomaly(windowHours = 6, baselineHours = 48) {
     refetchInterval: 5 * 60 * 1000,
   })
 }
+
+export interface CargoStateChangeRow {
+  mmsi: number
+  name: string | null
+  imo: number | null
+  kind: string | null
+  segment: string | null
+  zone: string
+  region: string | null
+  start_ts: string
+  end_ts: string
+  dwell_hours: number
+  draught_entry: number | null
+  draught_exit: number | null
+  draught_change_m: number | null
+  cargo_state: string
+  lat: number | null
+  lon: number | null
+  registry_risk: number | null
+}
+
+export interface CargoStateChangesResponse {
+  as_of: string
+  days: number
+  total_events: number
+  rows: CargoStateChangeRow[]
+}
+
+export function useCargoStateChanges(days = 7, kind = 'tanker', minChangeM = 1.5) {
+  return useQuery({
+    queryKey: ['cargo-state-changes', days, kind, minChangeM],
+    queryFn: () =>
+      getJSON<CargoStateChangesResponse>(
+        `/api/analytics/cargo-state-changes?days=${days}&kind=${encodeURIComponent(kind)}&min_change_m=${minChangeM}`,
+      ),
+    staleTime: 10 * 60 * 1000,
+    refetchInterval: 10 * 60 * 1000,
+  })
+}

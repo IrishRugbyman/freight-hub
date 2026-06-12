@@ -39,6 +39,7 @@ const FleetAtTimeCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ de
 const DestinationChangesCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.DestinationChangesCard })))
 const OwnerIntelligenceCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.OwnerIntelligenceCard })))
 const ChokepointAnomalyCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.ChokepointAnomalyCard })))
+const CargoStateChangesCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.CargoStateChangesCard })))
 
 function ChartSkeleton() {
   return <div className="h-[300px] animate-pulse rounded-lg bg-muted/40" />
@@ -119,6 +120,7 @@ function AnalyticsPage() {
         </div>
 
         <h2 className="text-base font-semibold text-foreground">Cargo Intelligence</h2>
+        <Suspense fallback={<ChartSkeleton />}><CargoStateChangesCard /></Suspense>
         <Suspense fallback={<ChartSkeleton />}><CargoTransitionsCard /></Suspense>
 
         <h2 className="text-base font-semibold text-foreground">Market Signals</h2>

@@ -1005,3 +1005,30 @@ class ChokepointAnomalyResponse(BaseModel):
     window_hours: int
     baseline_hours: int
     rows: list[ChokepointAnomalyRow]
+
+
+class CargoStateChangeRow(BaseModel):
+    mmsi: int
+    name: str | None
+    imo: int | None
+    kind: str | None
+    segment: str | None
+    zone: str
+    region: str | None
+    start_ts: str
+    end_ts: str
+    dwell_hours: float
+    draught_entry: float | None
+    draught_exit: float | None
+    draught_change_m: float | None
+    cargo_state: str
+    lat: float | None
+    lon: float | None
+    registry_risk: int | None
+
+
+class CargoStateChangesResponse(BaseModel):
+    as_of: str
+    days: int
+    total_events: int
+    rows: list[CargoStateChangeRow]

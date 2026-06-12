@@ -119,6 +119,8 @@ from .schemas import (
     OwnerIntelResponse,
     ChokepointAnomalyRow,
     ChokepointAnomalyResponse,
+    CargoStateChangeRow,
+    CargoStateChangesResponse,
 )
 
 _STATIC = Path(__file__).parent / "static"
@@ -4151,5 +4153,181 @@ def analytics_chokepoint_anomaly(window_hours: int = 6, baseline_hours: int = 48
         as_of=now_dt.isoformat(),
         window_hours=window_hours,
         baseline_hours=baseline_hours,
+        rows=rows,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase 45: Cargo State Transition Detection
+# ---------------------------------------------------------------------------
+
+@app.get("/api/analytics/cargo-state-changes", response_model=CargoStateChangesResponse)
+def analytics_cargo_state_changes(days: int = 7, kind: str = "tanker", min_change_m: float = 1.5, limit: int = 100):
+    """Detect cargo loading/discharge by comparing draught at start vs end of port stays.
+
+    Uses anchored_episodes joined with ais_snapshots (nearest snapshot to start/end).
+    draught_change_m > 0 = loaded (draught increased = cargo loaded).
+    draught_change_m < 0 = discharged (draught decreased = cargo offloaded).
+    min_change_m: minimum draught change to report (default 1.5m, ~typical ballast vs laden).
+    kind: vessel type filter (default tanker; set to 'bulk' for dry bulk).
+    limit: clamped to [1, 500].
+    """
+    days = max(1, min(days, 30))
+    limit = max(1, min(limit, 500))
+    now_dt = datetime.now(UTC).replace(tzinfo=None)
+    cutoff = now_dt - timedelta(days=days)
+
+    # Fetch completed anchored episodes
+    kind_clause = ""
+    params_an: list = [cutoff]
+    if kind:
+        kind_clause = "AND kind = ? "
+        params_an.append(kind)
+
+    eps_df = db.query(
+        f"SELECT mmsi, zone, kind, segment, start_ts, end_ts "
+        f"FROM anchored_episodes "
+        f"WHERE start_ts >= ? {kind_clause}"
+        f"AND end_ts IS NOT NULL "
+        f"ORDER BY start_ts DESC LIMIT 2000",
+        params_an,
+        db=db.analytics_db_path(),
+    )
+    if eps_df.empty:
+        return CargoStateChangesResponse(
+            as_of=now_dt.isoformat(), days=days, total_events=0, rows=[]
+        )
+
+    eps_df["start_ts"] = pd.to_datetime(eps_df["start_ts"])
+    eps_df["end_ts"] = pd.to_datetime(eps_df["end_ts"])
+
+    # For each episode, find the nearest draught snapshot near start and end
+    # Batch query: get all snapshots for these MMSIs in the time window
+    mmsi_list = [int(m) for m in eps_df["mmsi"].unique().tolist()]
+    if not mmsi_list:
+        return CargoStateChangesResponse(
+            as_of=now_dt.isoformat(), days=days, total_events=0, rows=[]
+        )
+
+    snaps_df = db.query(
+        "SELECT mmsi, snapshot_ts, draught, lat, lon "
+        "FROM ais_snapshots "
+        "WHERE mmsi IN (" + ",".join("?" * len(mmsi_list)) + ") "
+        "AND snapshot_ts >= ? "
+        "AND draught IS NOT NULL AND draught > 0.5 "
+        "ORDER BY mmsi, snapshot_ts",
+        mmsi_list + [cutoff],
+    )
+
+    if snaps_df.empty:
+        return CargoStateChangesResponse(
+            as_of=now_dt.isoformat(), days=days, total_events=0, rows=[]
+        )
+
+    snaps_df["snapshot_ts"] = pd.to_datetime(snaps_df["snapshot_ts"])
+
+    # Enrich with live position and registry
+    live_df = db.query(
+        "SELECT mmsi, name, imo, region FROM live_positions "
+        "WHERE mmsi IN (" + ",".join("?" * len(mmsi_list)) + ")",
+        mmsi_list,
+    )
+    live_map: dict[int, dict] = {int(r["mmsi"]): r.to_dict() for _, r in live_df.iterrows()}
+
+    # Registry risk scores
+    imo_list = [int(v["imo"]) for v in live_map.values() if v.get("imo") and not pd.isna(v.get("imo"))]
+    risk_map: dict[int, int] = {}
+    if imo_list:
+        reg_df = db.query(
+            "SELECT imo, risk_score FROM vessel_registry "
+            "WHERE imo IN (" + ",".join("?" * len(imo_list)) + ") AND fetch_ok = true",
+            imo_list,
+            db=db.registry_db_path(),
+        )
+        if not reg_df.empty:
+            for _, r in reg_df.iterrows():
+                imo_v = r.get("imo")
+                risk_v = r.get("risk_score")
+                if imo_v and not pd.isna(imo_v) and risk_v and not pd.isna(risk_v):
+                    risk_map[int(imo_v)] = int(risk_v)
+
+    rows = []
+    for _, ep in eps_df.iterrows():
+        mmsi_int = int(ep["mmsi"])
+        start_ts = ep["start_ts"].replace(tzinfo=None)
+        end_ts = ep["end_ts"].replace(tzinfo=None)
+
+        # Get snapshots for this vessel
+        v_snaps = snaps_df[snaps_df["mmsi"] == mmsi_int].sort_values("snapshot_ts")
+        if v_snaps.empty:
+            continue
+
+        # Find nearest snapshot to start and end (within 2 hours)
+        snap_ts_arr = v_snaps["snapshot_ts"].values
+        start_ts_ns = pd.Timestamp(start_ts)
+        end_ts_ns = pd.Timestamp(end_ts)
+
+        start_idx = (v_snaps["snapshot_ts"] - start_ts_ns).abs().idxmin()
+        end_idx = (v_snaps["snapshot_ts"] - end_ts_ns).abs().idxmin()
+
+        start_snap = v_snaps.loc[start_idx]
+        end_snap = v_snaps.loc[end_idx]
+
+        start_dt_diff = abs((start_snap["snapshot_ts"].replace(tzinfo=None) - start_ts).total_seconds())
+        end_dt_diff = abs((end_snap["snapshot_ts"].replace(tzinfo=None) - end_ts).total_seconds())
+
+        # Only use snapshots within 2 hours of episode start/end
+        if start_dt_diff > 7200 or end_dt_diff > 7200:
+            continue
+
+        d_entry = float(start_snap["draught"]) if not pd.isna(start_snap["draught"]) else None
+        d_exit = float(end_snap["draught"]) if not pd.isna(end_snap["draught"]) else None
+
+        if d_entry is None or d_exit is None:
+            continue
+
+        change_m = round(d_exit - d_entry, 2)
+        if abs(change_m) < min_change_m:
+            continue
+
+        if change_m > 0:
+            cargo_state = "loaded"
+        else:
+            cargo_state = "discharged"
+
+        dwell_hours = round((end_ts - start_ts).total_seconds() / 3600, 1)
+        live = live_map.get(mmsi_int)
+        imo_val = _valid_imo(live.get("imo")) if live else None
+        risk_score = risk_map.get(imo_val) if imo_val else None
+
+        rows.append(
+            CargoStateChangeRow(
+                mmsi=mmsi_int,
+                name=_str_or_none(live.get("name")) if live else None,
+                imo=imo_val,
+                kind=_str_or_none(ep.get("kind")),
+                segment=_str_or_none(ep.get("segment")),
+                zone=str(ep["zone"]),
+                region=_str_or_none(live.get("region")) if live else None,
+                start_ts=start_ts.isoformat(),
+                end_ts=end_ts.isoformat(),
+                dwell_hours=dwell_hours,
+                draught_entry=d_entry,
+                draught_exit=d_exit,
+                draught_change_m=change_m,
+                cargo_state=cargo_state,
+                lat=float(end_snap["lat"]) if not pd.isna(end_snap["lat"]) else None,
+                lon=float(end_snap["lon"]) if not pd.isna(end_snap["lon"]) else None,
+                registry_risk=risk_score,
+            )
+        )
+
+    rows.sort(key=lambda r: abs(r.draught_change_m or 0), reverse=True)
+    rows = rows[:limit]
+
+    return CargoStateChangesResponse(
+        as_of=now_dt.isoformat(),
+        days=days,
+        total_events=len(rows),
         rows=rows,
     )

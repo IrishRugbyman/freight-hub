@@ -14,7 +14,7 @@ import {
   YAxis,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion, useDestinationFlows, useMarketSummary, useVesselRiskScores, useChokepointHeatmap, useTradeLaneMatrix, useAnomalyWatchlist, useStsProximity, useRegionMomentum, useEventRateTimeline, useTransitRateTimeline, useAnchorageOccupancy, useStsOffenders, useFleetAtTime, useDestinationChanges, useOwnerIntelligence, useChokepointAnomaly } from '@/lib/api'
+import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion, useDestinationFlows, useMarketSummary, useVesselRiskScores, useChokepointHeatmap, useTradeLaneMatrix, useAnomalyWatchlist, useStsProximity, useRegionMomentum, useEventRateTimeline, useTransitRateTimeline, useAnchorageOccupancy, useStsOffenders, useFleetAtTime, useDestinationChanges, useOwnerIntelligence, useChokepointAnomaly, useCargoStateChanges } from '@/lib/api'
 import type { RiskEventItem } from '@/lib/api'
 
 const CHOKEPOINTS = [
@@ -3221,6 +3221,114 @@ export function ChokepointAnomalyCard() {
                 </div>
               )
             })}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Phase 45: Cargo State Transition Detection
+// ---------------------------------------------------------------------------
+
+const ZONE_LABEL_CARGO: Record<string, string> = {
+  rotterdam: 'Rotterdam',
+  port_said: 'Port Said',
+  singapore_west: 'S\'pore West',
+  singapore_east: 'S\'pore East',
+  suez_roads: 'Suez Roads',
+  hormuz_anchorage: 'Hormuz Anch.',
+  fujairah: 'Fujairah',
+  kharg: 'Kharg Is.',
+  ras_tanura: 'Ras Tanura',
+  bonny: 'Bonny (Nig)',
+}
+
+export function CargoStateChangesCard() {
+  const [days, setDays] = useState(7)
+  const [kind, setKind] = useState('tanker')
+  const [minChange, setMinChange] = useState(1.5)
+  const { data, isLoading } = useCargoStateChanges(days, kind, minChange)
+  const rows = data?.rows ?? []
+  const loaded = rows.filter(r => r.cargo_state === 'loaded').length
+  const discharged = rows.filter(r => r.cargo_state === 'discharged').length
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex flex-wrap items-center justify-between gap-2">
+          <span>Cargo Loading / Discharge Events</span>
+          <div className="flex flex-wrap gap-2 text-sm font-normal">
+            <select
+              className="rounded border border-border bg-background px-2 py-1 text-xs"
+              value={days}
+              onChange={e => setDays(Number(e.target.value))}
+            >
+              <option value={3}>Last 3d</option>
+              <option value={7}>Last 7d</option>
+              <option value={14}>Last 14d</option>
+            </select>
+            <select
+              className="rounded border border-border bg-background px-2 py-1 text-xs"
+              value={kind}
+              onChange={e => setKind(e.target.value)}
+            >
+              <option value="tanker">Tankers</option>
+              <option value="bulk">Bulkers</option>
+              <option value="">All types</option>
+            </select>
+            <select
+              className="rounded border border-border bg-background px-2 py-1 text-xs"
+              value={minChange}
+              onChange={e => setMinChange(Number(e.target.value))}
+            >
+              <option value={1.0}>Min 1.0m</option>
+              <option value={1.5}>Min 1.5m</option>
+              <option value={2.5}>Min 2.5m</option>
+            </select>
+          </div>
+        </CardTitle>
+        {data && (
+          <p className="text-xs text-muted-foreground">
+            {data.total_events} events in last {data.days}d.{' '}
+            <span className="text-green-400">{loaded} loaded</span>,{' '}
+            <span className="text-blue-400">{discharged} discharged</span>.
+            Detected from draught change ({'>='}{minChange}m) between port entry and exit.
+          </p>
+        )}
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="h-40 animate-pulse rounded bg-muted/40" />
+        ) : rows.length === 0 ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">No cargo state changes in window.</p>
+        ) : (
+          <div className="space-y-0.5 max-h-72 overflow-y-auto pr-1">
+            {rows.map((row) => (
+              <div
+                key={`${row.mmsi}-${row.start_ts}`}
+                className={`flex items-center gap-2 rounded px-2 py-1 text-xs ${row.cargo_state === 'loaded' ? 'bg-green-500/8 hover:bg-green-500/15' : 'bg-blue-500/8 hover:bg-blue-500/15'}`}
+              >
+                <span className={`w-16 shrink-0 rounded px-1 py-0.5 text-center text-[10px] font-bold ${row.cargo_state === 'loaded' ? 'bg-green-500/20 text-green-400' : 'bg-blue-500/20 text-blue-400'}`}>
+                  {row.cargo_state === 'loaded' ? 'LOADED' : 'DISCHRG'}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <span className="font-medium">{row.name ?? `MMSI ${row.mmsi}`}</span>
+                  {row.segment && <span className="ml-1 text-muted-foreground">{row.segment}</span>}
+                  <span className="ml-1 text-muted-foreground/60">{ZONE_LABEL_CARGO[row.zone] ?? row.zone.replace(/_/g, ' ')}</span>
+                </div>
+                <div className="shrink-0 text-right tabular-nums">
+                  <span className="font-semibold">
+                    {row.draught_entry?.toFixed(1)}m {'→'} {row.draught_exit?.toFixed(1)}m
+                  </span>
+                  <span className={`ml-1 font-bold ${(row.draught_change_m ?? 0) > 0 ? 'text-green-400' : 'text-blue-400'}`}>
+                    {(row.draught_change_m ?? 0) > 0 ? '+' : ''}{row.draught_change_m?.toFixed(1)}m
+                  </span>
+                  <span className="ml-1 text-muted-foreground/60">{row.dwell_hours}h</span>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </CardContent>
