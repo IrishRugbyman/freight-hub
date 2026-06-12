@@ -506,10 +506,35 @@ def loitering_events(df: pd.DataFrame) -> list[dict]:
 
 # --- Destination change detection -------------------------------------------
 
+def _dest_edit_dist(a: str, b: str) -> int:
+    """Compute Levenshtein edit distance between two destination strings.
+
+    Truncation noise: "PORT A" -> "PORT AB" has distance 1 (just appended).
+    Real reroutes: "ROTTERDAM" -> "SINGAPORE" has distance 8.
+    Using a simple O(n*m) DP; strings are short (< 50 chars) so this is fast.
+    """
+    if not a or not b:
+        return max(len(a or ""), len(b or ""))
+    n, m = len(a), len(b)
+    prev = list(range(m + 1))
+    for i in range(1, n + 1):
+        curr = [i] + [0] * m
+        for j in range(1, m + 1):
+            if a[i - 1] == b[j - 1]:
+                curr[j] = prev[j - 1]
+            else:
+                curr[j] = 1 + min(prev[j], curr[j - 1], prev[j - 1])
+        prev = curr
+    return prev[m]
+
+
 # Minimum consecutive fixes at the old destination before a change is counted
-_DEST_MIN_CONSEC_FIXES = 3
+_DEST_MIN_CONSEC_FIXES = 5
 # Old destination must have been held for this many minutes (noise filter)
-_DEST_MIN_STABLE_MIN = 20.0
+_DEST_MIN_STABLE_MIN = 60.0
+# Minimum edit distance (Levenshtein) between old and new destination to count as a real change.
+# This filters out "ROTTERDAM A" -> "ROTTERDAM AB" (operator typing character by character).
+_DEST_MIN_EDIT_DIST = 3
 
 
 def destination_change_events(df: pd.DataFrame) -> list[dict]:
@@ -553,7 +578,7 @@ def destination_change_events(df: pd.DataFrame) -> list[dict]:
                     old_duration_min = (
                         grp["snapshot_ts"].iloc[i - 1] - grp["snapshot_ts"].iloc[run_start_idx]
                     ).total_seconds() / 60
-                    if old_duration_min >= _DEST_MIN_STABLE_MIN:
+                    if old_duration_min >= _DEST_MIN_STABLE_MIN and _dest_edit_dist(prev_dest, cur_dest) >= _DEST_MIN_EDIT_DIST:
                         change_fix = grp.iloc[i]
                         change_ts_raw = change_fix["snapshot_ts"]
                         change_ts = (
