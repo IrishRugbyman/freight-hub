@@ -1,5 +1,22 @@
 # Freight Hub Changelog
 
+## 2026-06-12 - Phase 51: Analytics build crash fixes + fleet trend chart + events UX
+
+**Fixed:** Three production bugs that had been causing every analytics build to crash before the watermark was set (forcing 9-min full rebuilds every hour instead of 30-sec incremental runs):
+1. `build.py` gap-recheck loop iterated `numpy.int64` MMSIs directly into DuckDB parameters: `NotImplementedException`. Fixed with `.tolist()` on the numpy unique array.
+2. `detect.py _dest_edit_dist()` received float NaN destination values (pandas coerces None to float in object columns): `TypeError: float has no len()`. Added `math.isnan()` guard.
+3. Each detection step could crash the entire build. Added per-step try/except so individual failures log a WARNING and continue; watermark still advances. 4 dead-code lines removed from port-arrivals endpoint.
+
+**Added:** `GET /api/analytics/fleet-trend?days=30&region=` endpoint aggregating `fleet_density` daily (laden/ballast/unknown/total). Powers new FleetTrendCard area chart in the Overview analytics tab showing 30-day fleet composition trend. 4 new backend tests.
+
+**Improved:** Events page now fetches all events client-side and sorts by severity (dark voyage > position jump > signal lost > loitering > STS > reroute) then time. Per-type counts shown in filter chips; empty-type chips hidden. Limit raised to 500.
+
+**Added:** Events nav badge showing 24h event count (updates every 5 min via `useRecentEventCount` hook). Refreshes automatically.
+
+**Artifacts:** `backend/analytics/build.py` (per-step isolation, numpy fix), `backend/analytics/detect.py` (NaN guard, numpy fix), `backend/app/main.py` (fleet-trend endpoint), `backend/app/schemas.py` (FleetTrendDay, FleetTrendResponse), `backend/tests/test_endpoints.py` (4 new tests), `frontend/src/routes/events.tsx` (severity sort, type counts), `frontend/src/routes/__root.tsx` (event badge), `frontend/src/lib/api.ts` (useRecentEventCount, useFleetTrend, FleetTrendResponse), `frontend/src/routes/analytics/-OverviewCards.tsx` (FleetTrendCard).
+
+---
+
 ## 2026-06-12 - Phase 50: Zero-downtime analytics build + vectorized zone detection
 
 **Tried:** Analytics build held an exclusive DuckDB write lock for the entire 7-10 min build window. All analytics API calls returned empty data during that time. Root cause: `_open_analytics()` opened a write connection at the start and held it until the last line.
