@@ -15,6 +15,7 @@ const FlagRiskCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ defau
 const SpeedTrendCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.SpeedTrendCard })))
 const StsRiskCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.StsRiskCard })))
 const ReroutesCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.ReroutesCard })))
+const TransitRiskCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.TransitRiskCard })))
 
 function ChartSkeleton() {
   return <div className="h-[300px] animate-pulse rounded-lg bg-muted/40" />
@@ -54,6 +55,7 @@ function AnalyticsPage() {
         </div>
 
         <h2 className="text-base font-semibold text-foreground">Event Intelligence</h2>
+        <Suspense fallback={<ChartSkeleton />}><TransitRiskCard /></Suspense>
         <div className="grid gap-4 lg:grid-cols-2">
           <Suspense fallback={<ChartSkeleton />}><StsRiskCard /></Suspense>
           <Suspense fallback={<ChartSkeleton />}><ReroutesCard /></Suspense>

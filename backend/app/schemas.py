@@ -432,6 +432,30 @@ class FleetResponse(BaseModel):
     rows: list[FleetRow]
 
 
+class TransitRiskEvent(BaseModel):
+    mmsi: int
+    name: str | None
+    imo: int | None
+    chokepoint: str
+    entered_ts: str
+    exited_ts: str | None
+    direction: str | None
+    kind: str | None
+    segment: str | None
+    laden: bool | None
+    risk_score: int | None
+    ofac: bool
+
+
+class TransitRiskResponse(BaseModel):
+    as_of: str
+    days: int
+    chokepoint: str
+    total_transits: int
+    enriched: int
+    rows: list[TransitRiskEvent]
+
+
 class StsRiskEvent(BaseModel):
     event_id: str
     start_ts: str

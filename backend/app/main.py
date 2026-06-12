@@ -57,6 +57,8 @@ from .schemas import (
     RerouteRiskEvent,
     RerouteRiskResponse,
     RoutesResponse,
+    TransitRiskEvent,
+    TransitRiskResponse,
     SpeedAnalyticsResponse,
     StsRiskEvent,
     StsRiskResponse,
@@ -977,6 +979,104 @@ def analytics_transits(chokepoint: str = "suez", days: int = 30):
             series.append(TransitDay(date=date_s, direction=direction, kind=kind, count=len(grp)))
         series.sort(key=lambda r: r.date)
     return TransitsResponse(chokepoint=chokepoint, days=d, series=series)
+
+
+@app.get("/api/analytics/transit-risk", response_model=TransitRiskResponse)
+def analytics_transit_risk(chokepoint: str = "hormuz", days: int = 30, min_risk: int = 0):
+    """Chokepoint transit events enriched with vessel risk scores.
+
+    Two-database merge: analytics (transit_events) + AIS (MMSI->IMO) + registry (risk).
+    Returns transits sorted by risk_score descending. Use min_risk=25 to filter noise.
+    """
+    days = max(1, min(90, days))
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
+
+    df = db.query(
+        "SELECT mmsi, chokepoint, entered_ts, exited_ts, direction, kind, segment, laden "
+        "FROM transit_events WHERE chokepoint = ? AND entered_ts >= ? ORDER BY entered_ts DESC",
+        [chokepoint, cutoff],
+        db=db.analytics_db_path(),
+    )
+    if df.empty:
+        return TransitRiskResponse(
+            as_of=_iso(datetime.now(UTC).replace(tzinfo=None)) or "",
+            days=days, chokepoint=chokepoint, total_transits=0, enriched=0, rows=[],
+        )
+
+    all_mmsis = list(set(int(m) for m in df["mmsi"].dropna().tolist()))
+    mmsi_info: dict[int, dict] = {}
+    if all_mmsis:
+        ph = ",".join("?" * len(all_mmsis))
+        lp_df = db.query(
+            f"SELECT mmsi, name, imo FROM live_positions WHERE mmsi IN ({ph})", all_mmsis
+        )
+        for _, r in lp_df.iterrows():
+            mmsi_info[int(r["mmsi"])] = {"name": _str_or_none(r.get("name")), "imo": r.get("imo")}
+        missing = [m for m in all_mmsis if m not in mmsi_info]
+        if missing:
+            ph2 = ",".join("?" * len(missing))
+            v_df = db.query(
+                f"SELECT mmsi, name, imo FROM vessels WHERE mmsi IN ({ph2})", missing
+            )
+            for _, r in v_df.iterrows():
+                mmsi_info[int(r["mmsi"])] = {"name": _str_or_none(r.get("name")), "imo": r.get("imo")}
+
+    imo_risk: dict[int, dict] = {}
+    known_imos = list(set(i for i in (_valid_imo(v.get("imo")) for v in mmsi_info.values()) if i))
+    if known_imos:
+        ph3 = ",".join("?" * len(known_imos))
+        reg_df = db.query(
+            f"SELECT imo, risk_score, COALESCE(ofac_sanctioned, false) AS ofac_sanctioned "
+            f"FROM vessel_registry WHERE imo IN ({ph3}) AND fetch_ok = true",
+            known_imos, db=db.registry_db_path(),
+        )
+        for _, r in reg_df.iterrows():
+            imo_risk[int(r["imo"])] = {
+                "risk_score": int(r["risk_score"]) if r["risk_score"] is not None else None,
+                "ofac": bool(r["ofac_sanctioned"]),
+            }
+
+    rows = []
+    enriched = 0
+    for _, ev in df.iterrows():
+        mmsi_val = int(ev["mmsi"])
+        info = mmsi_info.get(mmsi_val, {})
+        imo_val = _valid_imo(info.get("imo"))
+        risk_info = imo_risk.get(imo_val, {}) if imo_val else {}
+        rs = risk_info.get("risk_score")
+
+        if (rs or 0) < min_risk:
+            continue
+        if rs is not None:
+            enriched += 1
+
+        laden_val = ev.get("laden")
+        laden_bool = None if laden_val is None or (isinstance(laden_val, float) and pd.isna(laden_val)) else bool(laden_val)
+
+        rows.append(TransitRiskEvent(
+            mmsi=mmsi_val,
+            name=info.get("name"),
+            imo=imo_val,
+            chokepoint=str(ev["chokepoint"]),
+            entered_ts=_iso(ev["entered_ts"]) or "",
+            exited_ts=_iso(ev.get("exited_ts")) if ev.get("exited_ts") is not None else None,
+            direction=_str_or_none(ev.get("direction")),
+            kind=_str_or_none(ev.get("kind")),
+            segment=_str_or_none(ev.get("segment")),
+            laden=laden_bool,
+            risk_score=rs,
+            ofac=bool(risk_info.get("ofac", False)),
+        ))
+
+    rows.sort(key=lambda r: (r.risk_score or 0), reverse=True)
+    return TransitRiskResponse(
+        as_of=_iso(datetime.now(UTC).replace(tzinfo=None)) or "",
+        days=days,
+        chokepoint=chokepoint,
+        total_transits=len(df),
+        enriched=enriched,
+        rows=rows,
+    )
 
 
 @app.get("/api/analytics/congestion", response_model=CongestionResponse)

@@ -699,3 +699,48 @@ def test_reroutes_days_clamped(reroute_client):
     r = reroute_client.get("/api/analytics/reroutes?days=200")
     assert r.status_code == 200
     assert r.json()["days"] == 90
+
+
+# ---- /api/analytics/transit-risk --------------------------------------------
+
+
+def test_transit_risk_structure(analytics_client):
+    r = analytics_client.get("/api/analytics/transit-risk?chokepoint=hormuz&days=30")
+    assert r.status_code == 200
+    d = r.json()
+    for key in ("as_of", "days", "chokepoint", "total_transits", "enriched", "rows"):
+        assert key in d
+    assert d["chokepoint"] == "hormuz"
+    # conftest seeds one hormuz transit (mmsi 1003, VLCC A)
+    assert d["total_transits"] >= 1
+
+
+def test_transit_risk_event_fields(analytics_client):
+    r = analytics_client.get("/api/analytics/transit-risk?chokepoint=hormuz&days=30")
+    rows = r.json()["rows"]
+    assert len(rows) >= 1
+    row = next(r for r in rows if r["mmsi"] == 1003)
+    assert row["direction"] == "outbound"
+    assert row["kind"] == "tanker"
+    assert row["segment"] == "VLCC"
+    assert row["laden"] is True
+
+
+def test_transit_risk_wrong_chokepoint(analytics_client):
+    r = analytics_client.get("/api/analytics/transit-risk?chokepoint=bosphorus&days=30")
+    assert r.status_code == 200
+    assert r.json()["total_transits"] == 0
+    assert r.json()["rows"] == []
+
+
+def test_transit_risk_min_risk_filter(analytics_client):
+    r = analytics_client.get("/api/analytics/transit-risk?chokepoint=hormuz&days=30&min_risk=999")
+    assert r.status_code == 200
+    # No vessel has risk_score >= 999
+    assert r.json()["rows"] == []
+
+
+def test_transit_risk_days_clamped(analytics_client):
+    r = analytics_client.get("/api/analytics/transit-risk?days=200")
+    assert r.status_code == 200
+    assert r.json()["days"] == 90

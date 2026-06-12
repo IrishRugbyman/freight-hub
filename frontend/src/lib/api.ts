@@ -808,6 +808,39 @@ export function useEvents(params?: { type?: string; days?: number; limit?: numbe
   })
 }
 
+export interface TransitRiskEvent {
+  mmsi: number
+  name: string | null
+  imo: number | null
+  chokepoint: string
+  entered_ts: string
+  exited_ts: string | null
+  direction: string | null
+  kind: string | null
+  segment: string | null
+  laden: boolean | null
+  risk_score: number | null
+  ofac: boolean
+}
+
+export interface TransitRiskResponse {
+  as_of: string
+  days: number
+  chokepoint: string
+  total_transits: number
+  enriched: number
+  rows: TransitRiskEvent[]
+}
+
+export function useTransitRisk(chokepoint = 'hormuz', days = 30, minRisk = 0) {
+  return useQuery({
+    queryKey: ['transit-risk', chokepoint, days, minRisk],
+    queryFn: () => getJSON<TransitRiskResponse>(`/api/analytics/transit-risk?chokepoint=${chokepoint}&days=${days}&min_risk=${minRisk}`),
+    staleTime: ANALYTICS_STALE,
+    refetchInterval: REFETCH_MS,
+  })
+}
+
 export interface StsRiskEvent {
   event_id: string
   start_ts: string

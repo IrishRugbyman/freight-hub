@@ -12,7 +12,7 @@ import {
   YAxis,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes } from '@/lib/api'
+import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk } from '@/lib/api'
 
 const CHOKEPOINTS = [
   'singapore_malacca', 'suez', 'hormuz', 'panama', 'gibraltar',
@@ -812,6 +812,98 @@ export function ReroutesCard() {
                     <td className="max-w-[8rem] truncate py-0.5 pr-2">{ev.name ?? ev.mmsi}</td>
                     <td className="max-w-[8rem] truncate py-0.5 pr-2 text-muted-foreground">{ev.old_destination ?? '-'}</td>
                     <td className="max-w-[8rem] truncate py-0.5 pr-2">{ev.new_destination ?? '-'}</td>
+                    <td className="py-0.5">{riskBadge(ev.risk_score, ev.ofac)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {rows.length > 15 && (
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                Showing 15 of {rows.length.toLocaleString()} (risk-sorted)
+              </p>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+const RISK_CHOKEPOINTS = [
+  'hormuz', 'suez', 'singapore_malacca', 'bab_el_mandeb',
+  'dover_channel', 'cape_good_hope', 'bosphorus_dardanelles',
+]
+
+export function TransitRiskCard() {
+  const [chokepoint, setChokepoint] = useState('hormuz')
+  const [days, setDays] = useState(30)
+  const { data, isLoading } = useTransitRisk(chokepoint, days, 0)
+  const rows = data?.rows ?? []
+  const showing = rows.slice(0, 15)
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm flex flex-wrap items-center gap-2">
+          Chokepoint Transits
+          <select
+            value={chokepoint}
+            onChange={(e) => setChokepoint(e.target.value)}
+            className="rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] focus:outline-none"
+          >
+            {RISK_CHOKEPOINTS.map((cp) => (
+              <option key={cp} value={cp}>{fmt(cp)}</option>
+            ))}
+          </select>
+          <div className="flex gap-1">
+            {[7, 14, 30].map((d) => (
+              <button
+                key={d}
+                onClick={() => setDays(d)}
+                className={`rounded px-1.5 py-0.5 text-[10px] ${days === d ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'}`}
+              >
+                {d}d
+              </button>
+            ))}
+          </div>
+          {data && (
+            <span className="ml-auto text-xs font-normal text-muted-foreground">
+              {data.total_transits.toLocaleString()} transits
+              {data.enriched > 0 && ` - ${data.enriched} risk-scored`}
+            </span>
+          )}
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {isLoading && <div className="h-48 animate-pulse rounded bg-muted/40" />}
+        {!isLoading && rows.length === 0 && (
+          <EmptyState message={`No ${fmt(chokepoint)} transits in last ${days} days`} />
+        )}
+        {!isLoading && rows.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-muted-foreground">
+                  <th className="pb-1 pr-2 font-normal">Time</th>
+                  <th className="pb-1 pr-2 font-normal">Vessel</th>
+                  <th className="pb-1 pr-2 font-normal">Segment</th>
+                  <th className="pb-1 pr-2 font-normal">Dir.</th>
+                  <th className="pb-1 pr-2 font-normal">Laden</th>
+                  <th className="pb-1 font-normal">Risk</th>
+                </tr>
+              </thead>
+              <tbody>
+                {showing.map((ev, i) => (
+                  <tr key={`${ev.mmsi}-${ev.entered_ts}-${i}`} className="border-t border-border/30">
+                    <td className="py-0.5 pr-2 text-muted-foreground">{ev.entered_ts.slice(5, 16).replace('T', ' ')}</td>
+                    <td className="max-w-[8rem] truncate py-0.5 pr-2">{ev.name ?? ev.mmsi}</td>
+                    <td className="py-0.5 pr-2 text-muted-foreground">{ev.segment ?? ev.kind ?? '-'}</td>
+                    <td className="py-0.5 pr-2">{ev.direction ? fmt(ev.direction) : '-'}</td>
+                    <td className="py-0.5 pr-2">
+                      {ev.laden === null ? '-' : ev.laden
+                        ? <span className="text-blue-400">L</span>
+                        : <span className="text-muted-foreground">B</span>}
+                    </td>
                     <td className="py-0.5">{riskBadge(ev.risk_score, ev.ofac)}</td>
                   </tr>
                 ))}
