@@ -566,7 +566,7 @@ export function useEquasis(imo: number | null | undefined) {
 // ---- Vessel voyages + state (new features) ----
 
 export interface VoyageEvent {
-  type: 'port_call' | 'transit' | 'reroute'
+  type: 'port_call' | 'transit' | 'reroute' | 'cargo_load' | 'cargo_discharge' | 'sts'
   ts: string
   end_ts: string | null
   zone: string | null
@@ -579,6 +579,11 @@ export interface VoyageEvent {
   lon: number | null
   kind: string | null
   segment: string | null
+  draught_before: number | null
+  draught_after: number | null
+  change_m: number | null
+  mmsi2: number | null
+  name2: string | null
 }
 
 export interface VoyagesResponse {

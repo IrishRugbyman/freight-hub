@@ -233,7 +233,7 @@ class EventsResponse(BaseModel):
 
 
 class VoyageEvent(BaseModel):
-    type: str  # port_call | transit | reroute
+    type: str  # port_call | transit | reroute | cargo_load | cargo_discharge | sts
     ts: str
     end_ts: str | None = None
     zone: str | None = None
@@ -246,6 +246,13 @@ class VoyageEvent(BaseModel):
     lon: float | None = None
     kind: str | None = None
     segment: str | None = None
+    # cargo transition fields (type = cargo_load / cargo_discharge)
+    draught_before: float | None = None
+    draught_after: float | None = None
+    change_m: float | None = None
+    # STS co-participant
+    mmsi2: int | None = None
+    name2: str | None = None
 
 
 class VoyagesResponse(BaseModel):

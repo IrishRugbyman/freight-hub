@@ -1,4 +1,4 @@
-import { X, Anchor, Navigation, ArrowLeftRight } from 'lucide-react'
+import { X, Anchor, Navigation, ArrowLeftRight, TrendingUp, TrendingDown, Ship } from 'lucide-react'
 import { useEquasis, useVesselState, useVoyages } from '@/lib/api'
 import type { Vessel, VoyageEvent } from '@/lib/api'
 import { colorFor } from '@/lib/segments'
@@ -107,6 +107,53 @@ function VoyageEventRow({ ev }: { ev: VoyageEvent }) {
           <span className="text-muted-foreground line-through truncate">{ev.old_destination ?? '?'}</span>
           <span className="mx-1 text-muted-foreground/60">-&gt;</span>
           <span className="font-medium">{ev.new_destination ?? '?'}</span>
+          <div className="text-muted-foreground/60">{time}</div>
+        </div>
+      </div>
+    )
+  }
+
+  if (ev.type === 'cargo_load') {
+    return (
+      <div className="flex items-start gap-2 text-[10px]">
+        <TrendingUp size={9} className="mt-0.5 shrink-0 text-green-400" />
+        <div className="min-w-0">
+          <span className="font-medium text-green-400">Loading</span>
+          {ev.change_m != null && (
+            <span className="text-muted-foreground ml-1">
+              {ev.draught_before?.toFixed(1)}m -&gt; {ev.draught_after?.toFixed(1)}m (+{ev.change_m.toFixed(1)}m)
+            </span>
+          )}
+          <div className="text-muted-foreground/60">{time}</div>
+        </div>
+      </div>
+    )
+  }
+
+  if (ev.type === 'cargo_discharge') {
+    return (
+      <div className="flex items-start gap-2 text-[10px]">
+        <TrendingDown size={9} className="mt-0.5 shrink-0 text-orange-400" />
+        <div className="min-w-0">
+          <span className="font-medium text-orange-400">Discharging</span>
+          {ev.change_m != null && (
+            <span className="text-muted-foreground ml-1">
+              {ev.draught_before?.toFixed(1)}m -&gt; {ev.draught_after?.toFixed(1)}m (-{ev.change_m.toFixed(1)}m)
+            </span>
+          )}
+          <div className="text-muted-foreground/60">{time}</div>
+        </div>
+      </div>
+    )
+  }
+
+  if (ev.type === 'sts') {
+    return (
+      <div className="flex items-start gap-2 text-[10px]">
+        <Ship size={9} className="mt-0.5 shrink-0 text-purple-400/80" />
+        <div className="min-w-0 truncate">
+          <span className="font-medium">STS Transfer</span>
+          {ev.name2 && <span className="text-muted-foreground ml-1">w/ {ev.name2}</span>}
           <div className="text-muted-foreground/60">{time}</div>
         </div>
       </div>

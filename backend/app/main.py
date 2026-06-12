@@ -345,6 +345,75 @@ def vessel_voyages(mmsi: int, days: int = 14):
             )
         )
 
+    # STS events (ship-to-ship transfers involving this vessel)
+    sts_df = db.query(
+        "SELECT start_ts, end_ts, mmsi2, lat, lon, kind, segment, details "
+        "FROM ais_events WHERE type = 'sts' AND (mmsi = ? OR mmsi2 = ?) AND start_ts >= ? "
+        "ORDER BY start_ts",
+        [mmsi, mmsi, cutoff],
+        db=_db,
+    )
+    if not sts_df.empty:
+        sts_mmsis2 = [int(m) for m in sts_df["mmsi2"].dropna().unique() if _valid_imo(m)]
+        name2_map: dict[int, str | None] = {}
+        if sts_mmsis2:
+            ph_sts = ",".join("?" * len(sts_mmsis2))
+            n2 = db.query(f"SELECT mmsi, name FROM live_positions WHERE mmsi IN ({ph_sts})", sts_mmsis2)
+            for _, r in n2.iterrows():
+                name2_map[int(r["mmsi"])] = _str_or_none(r.get("name"))
+        for _, r in sts_df.iterrows():
+            try:
+                d = _json.loads(r["details"]) if r["details"] else {}
+            except (ValueError, TypeError):
+                d = {}
+            mmsi2_val = int(r["mmsi2"]) if r["mmsi2"] is not None and not pd.isna(r["mmsi2"]) else None
+            events.append(VoyageEvent(
+                type="sts",
+                ts=_iso(r["start_ts"]) or "",
+                end_ts=_iso(r["end_ts"]) if r["end_ts"] is not None else None,
+                lat=float(r["lat"]) if r["lat"] is not None and not pd.isna(r["lat"]) else None,
+                lon=float(r["lon"]) if r["lon"] is not None and not pd.isna(r["lon"]) else None,
+                kind=str(r["kind"]) if r["kind"] else None,
+                segment=str(r["segment"]) if r["segment"] else None,
+                mmsi2=mmsi2_val,
+                name2=name2_map.get(mmsi2_val) if mmsi2_val else None,
+            ))
+
+    # Cargo transitions for this vessel from AIS snapshots
+    snap_df = db.query(
+        "SELECT snapshot_ts, draught, lat, lon, region "
+        "FROM ais_snapshots "
+        "WHERE mmsi = ? AND snapshot_ts >= ? AND draught > 0 "
+        "ORDER BY snapshot_ts",
+        [mmsi, cutoff],
+    )
+    if not snap_df.empty and len(snap_df) >= 4:
+        snap_df["snapshot_ts"] = pd.to_datetime(snap_df["snapshot_ts"])
+        snap_df["bucket"] = snap_df["snapshot_ts"].dt.floor("6h")
+        bucket_agg = (
+            snap_df.groupby("bucket")
+            .agg(d_median=("draught", "median"), lat=("lat", "median"), lon=("lon", "median"), fix_cnt=("draught", "count"))
+            .reset_index()
+        )
+        bucket_agg = bucket_agg[bucket_agg["fix_cnt"] >= 2].sort_values("bucket").reset_index(drop=True)
+        if len(bucket_agg) >= 2:
+            bucket_agg["prev_d"] = bucket_agg["d_median"].shift(1)
+            bucket_agg["change"] = bucket_agg["d_median"] - bucket_agg["prev_d"]
+            bucket_agg = bucket_agg.dropna(subset=["change"])
+            for _, row in bucket_agg[bucket_agg["change"].abs() >= 2.0].iterrows():
+                ch = float(row["change"])
+                bkt = row["bucket"]
+                trans_ts = bkt.to_pydatetime().replace(tzinfo=None) if hasattr(bkt, "to_pydatetime") else bkt
+                events.append(VoyageEvent(
+                    type="cargo_load" if ch > 0 else "cargo_discharge",
+                    ts=_iso(trans_ts) or "",
+                    lat=round(float(row["lat"]), 4),
+                    lon=round(float(row["lon"]), 4),
+                    draught_before=round(float(row["prev_d"]), 1),
+                    draught_after=round(float(row["d_median"]), 1),
+                    change_m=round(abs(ch), 1),
+                ))
+
     # Sort all events chronologically
     events.sort(key=lambda e: e.ts)
     return VoyagesResponse(mmsi=mmsi, events=events)
