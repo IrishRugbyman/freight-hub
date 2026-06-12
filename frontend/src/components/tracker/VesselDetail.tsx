@@ -269,6 +269,11 @@ export function VesselDetail({
                   <MouBadge label="Tokyo" value={eq.tokyo_mou} />
                 </div>
               )}
+              {eq.ofac_sanctioned && (
+                <div className="mt-1 rounded border border-red-500/50 bg-red-500/15 px-2 py-1 text-[10px] font-semibold text-red-300 uppercase tracking-wide">
+                  OFAC SDN Sanctioned
+                </div>
+              )}
               {eq.risk_score != null && (
                 <>
                   <div className="flex items-baseline justify-between gap-3 pt-1.5 pb-0.5">

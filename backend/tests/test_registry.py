@@ -133,7 +133,7 @@ CREATE TABLE IF NOT EXISTS vessel_registry (
     class_society VARCHAR, pi_club VARCHAR,
     detention_rate_pct DOUBLE, paris_mou VARCHAR, tokyo_mou VARCHAR, uscg_targeting VARCHAR,
     fetched_ts TIMESTAMP, fetch_ok BOOLEAN,
-    risk_score INTEGER, risk_indicators VARCHAR
+    risk_score INTEGER, risk_indicators VARCHAR, ofac_sanctioned BOOLEAN
 )
 """
 

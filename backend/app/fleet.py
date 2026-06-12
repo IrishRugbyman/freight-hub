@@ -51,6 +51,20 @@ def _safe_float(val: Any) -> float | None:
         return None
 
 
+def _safe_bool(val: Any) -> bool | None:
+    if val is None:
+        return None
+    try:
+        if pd.isna(val):
+            return None
+    except (TypeError, ValueError):
+        pass
+    try:
+        return bool(val)
+    except (TypeError, ValueError):
+        return None
+
+
 def _safe_str(val: Any) -> str | None:
     if val is None:
         return None
@@ -253,6 +267,7 @@ def query_fleet(
             ship_status=_safe_str(r.ship_status),
             risk_score=_safe_int(getattr(r, "risk_score", None)) if "risk_score" in cols else None,
             risk_indicators=ri,
+            ofac_sanctioned=_safe_bool(getattr(r, "ofac_sanctioned", None)) if "ofac_sanctioned" in cols else None,
             mmsi=_safe_int(r.mmsi),
             live_name=_safe_str(r.live_name),
             lat=_safe_float(r.lat),

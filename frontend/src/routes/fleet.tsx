@@ -429,6 +429,11 @@ export default function FleetPage() {
                 </td>
                 <td className={`px-2.5 py-1.5 font-mono ${riskColor(row.risk_score)}`}
                     title={row.risk_indicators?.join('\n') ?? ''}>
+                  {row.ofac_sanctioned && (
+                    <span className="mr-1 rounded border border-red-500/50 bg-red-500/15 px-1 py-px text-[9px] font-bold text-red-300">
+                      OFAC
+                    </span>
+                  )}
                   {row.risk_score != null ? row.risk_score : '—'}
                 </td>
                 <td className="px-2.5 py-1.5 text-muted-foreground">{row.segment ?? '—'}</td>

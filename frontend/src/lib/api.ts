@@ -421,6 +421,7 @@ export interface EquasisData {
   uscg_targeting?: string
   risk_score?: number
   risk_indicators?: string[]
+  ofac_sanctioned?: boolean
 }
 
 // ---- Fleet Explorer (Phase 6) ----
@@ -444,6 +445,7 @@ export interface FleetRow {
   ship_status?: string
   risk_score?: number
   risk_indicators?: string[]
+  ofac_sanctioned?: boolean
   // Live fields (null when not currently tracked)
   mmsi?: number
   live_name?: string

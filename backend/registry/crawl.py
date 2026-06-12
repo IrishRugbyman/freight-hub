@@ -57,13 +57,15 @@ CREATE TABLE IF NOT EXISTS vessel_registry (
     class_society VARCHAR, pi_club VARCHAR,
     detention_rate_pct DOUBLE, paris_mou VARCHAR, tokyo_mou VARCHAR, uscg_targeting VARCHAR,
     fetched_ts TIMESTAMP, fetch_ok BOOLEAN,
-    risk_score INTEGER, risk_indicators VARCHAR
+    risk_score INTEGER, risk_indicators VARCHAR,
+    ofac_sanctioned BOOLEAN
 )
 """
 
 _MIGRATIONS = [
     "ALTER TABLE vessel_registry ADD COLUMN IF NOT EXISTS risk_score INTEGER",
     "ALTER TABLE vessel_registry ADD COLUMN IF NOT EXISTS risk_indicators VARCHAR",
+    "ALTER TABLE vessel_registry ADD COLUMN IF NOT EXISTS ofac_sanctioned BOOLEAN",
 ]
 
 
@@ -201,6 +203,20 @@ def run(
     except Exception as exc:
         logger.debug("Could not load event counts: %s", exc)
 
+    # Fetch OFAC SDN sanctioned vessel IMOs (non-fatal if network is unavailable)
+    from .ofac import fetch_sanctioned_imos
+    sanctioned_imos: set[int] = fetch_sanctioned_imos()
+    logger.info("OFAC: %d sanctioned vessel IMOs loaded", len(sanctioned_imos))
+
+    # Update ofac_sanctioned flag for all vessels already in the registry
+    if sanctioned_imos and not reg_df.empty:
+        for imo_val in reg_df["imo"].astype(int).tolist():
+            flag_val = imo_val in sanctioned_imos
+            reg_conn.execute(
+                "UPDATE vessel_registry SET ofac_sanctioned = ? WHERE imo = ?",
+                [flag_val, imo_val],
+            )
+
     n_new = n_refreshed = n_failed = 0
     existing_imos = set(reg_df["imo"].astype(int).tolist()) if not reg_df.empty else set()
 
@@ -216,6 +232,7 @@ def run(
         fetch_ok = data is not None and bool(_meaningful & data.keys())
 
         if fetch_ok:
+            is_sanctioned = imo in sanctioned_imos
             score, indicators = _risk_score(
                 imo=imo,
                 ship_type=data.get("ship_type"),
@@ -228,8 +245,9 @@ def run(
                 event_counts=event_counts_by_imo.get(imo, {}),
                 owner=data.get("owner"),
                 single_ship_owner=bool(data.get("owner") and data["owner"] in single_ship_owners),
+                ofac_sanctioned=is_sanctioned,
             )
-            _upsert(reg_conn, imo, data, now, score, json.dumps(indicators))
+            _upsert(reg_conn, imo, data, now, score, json.dumps(indicators), is_sanctioned)
             if imo in existing_imos:
                 n_refreshed += 1
             else:
@@ -257,6 +275,7 @@ def _upsert(
     now: datetime,
     risk_score_val: int | None = None,
     risk_indicators_json: str | None = None,
+    ofac_sanctioned: bool | None = None,
 ) -> None:
     conn.execute(
         """
@@ -265,8 +284,8 @@ def _upsert(
             gross_tonnage, dwt, ship_type, year_built, ship_status,
             owner, ism_manager, ship_manager, class_society, pi_club,
             detention_rate_pct, paris_mou, tokyo_mou, uscg_targeting,
-            fetched_ts, fetch_ok, risk_score, risk_indicators
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            fetched_ts, fetch_ok, risk_score, risk_indicators, ofac_sanctioned
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             imo,
@@ -292,6 +311,7 @@ def _upsert(
             True,
             risk_score_val,
             risk_indicators_json,
+            ofac_sanctioned,
         ],
     )
 

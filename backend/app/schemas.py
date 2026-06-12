@@ -294,6 +294,7 @@ class FleetRow(BaseModel):
     ship_status: str | None = None
     risk_score: int | None = None
     risk_indicators: list[str] | None = None
+    ofac_sanctioned: bool | None = None
     # Live fields (None when vessel not currently tracked)
     mmsi: int | None = None
     live_name: str | None = None

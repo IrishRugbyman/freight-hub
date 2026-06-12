@@ -37,6 +37,7 @@ _IG_CLUBS = [
 # ---------------------------------------------------------------------------
 # Scoring weights (0-100 scale)
 # ---------------------------------------------------------------------------
+_W_OFAC = 100               # OFAC SDN sanction (immediate max score)
 _W_OLD_TANKER = 20          # tanker AND age >= 15y
 _W_OLD_TANKER_SEVERE = 30   # tanker AND age >= 25y (override of above)
 _W_NO_PI = 20               # no P&I or not an IG member
@@ -77,14 +78,19 @@ def risk_score(
     paris_mou: str | None,
     tokyo_mou: str | None,
     detention_rate_pct: float | None,
-    event_counts: dict[str, int],   # {"gap": N, "sts": N, "loiter": N} for last 90d
+    event_counts: dict[str, int],   # {"gap": N, "sts": N, "loiter": N, "dark_voyage": N} for last 90d
     owner: str | None,
     single_ship_owner: bool,
+    ofac_sanctioned: bool = False,
 ) -> tuple[int, list[str]]:
     """Compute a 0-100 risk score and list the indicators that fired.
 
     Returns (score, [list of fired indicator descriptions]).
+    OFAC sanction immediately returns score=100 (overrides all other indicators).
     """
+    if ofac_sanctioned:
+        return 100, ["OFAC SDN sanctioned vessel"]
+
     score = 0
     fired: list[str] = []
     current_year = datetime.now(UTC).year

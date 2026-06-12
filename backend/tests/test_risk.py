@@ -198,3 +198,75 @@ def test_bulk_carrier_age_not_penalized():
         single_ship_owner=False,
     )
     assert not any("tanker" in ind.lower() for ind in indicators)
+
+
+def test_ofac_sanctioned_returns_100():
+    """OFAC sanctioned vessel gets score=100 regardless of other indicators."""
+    score, indicators = risk_score(
+        imo=9123456,
+        ship_type="Chemical/Oil Products Tanker",
+        year_built=2020,  # new vessel - no age penalty
+        pi_club="Gard",   # IG member - no PI penalty
+        class_society="DNV GL (IACS)",
+        paris_mou="White",
+        tokyo_mou="White",
+        detention_rate_pct=0.0,
+        event_counts={},
+        owner="Respectable Shipping Co",
+        single_ship_owner=False,
+        ofac_sanctioned=True,
+    )
+    assert score == 100
+    assert len(indicators) == 1
+    assert "OFAC" in indicators[0]
+
+
+def test_ofac_not_sanctioned_does_not_fire():
+    """ofac_sanctioned=False should not add OFAC indicator."""
+    score, indicators = risk_score(
+        imo=9123457,
+        ship_type="Chemical/Oil Products Tanker",
+        year_built=2020,
+        pi_club="Gard",
+        class_society="DNV GL (IACS)",
+        paris_mou="White",
+        tokyo_mou="White",
+        detention_rate_pct=0.0,
+        event_counts={},
+        owner="Respectable Shipping Co",
+        single_ship_owner=False,
+        ofac_sanctioned=False,
+    )
+    assert not any("OFAC" in ind for ind in indicators)
+
+
+def test_dark_voyage_in_risk_score():
+    """dark_voyage event should add significant risk weight."""
+    score_with, _ = risk_score(
+        imo=9111111,
+        ship_type="Crude Oil Tanker",
+        year_built=2018,
+        pi_club="Gard",
+        class_society="DNV GL (IACS)",
+        paris_mou="White",
+        tokyo_mou="White",
+        detention_rate_pct=0.0,
+        event_counts={"dark_voyage": 1},
+        owner="Test Co",
+        single_ship_owner=False,
+    )
+    score_without, _ = risk_score(
+        imo=9111112,
+        ship_type="Crude Oil Tanker",
+        year_built=2018,
+        pi_club="Gard",
+        class_society="DNV GL (IACS)",
+        paris_mou="White",
+        tokyo_mou="White",
+        detention_rate_pct=0.0,
+        event_counts={},
+        owner="Test Co",
+        single_ship_owner=False,
+    )
+    assert score_with > score_without
+    assert score_with - score_without == 25  # _W_DARK_VOYAGE

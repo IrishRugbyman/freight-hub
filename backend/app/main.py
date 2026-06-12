@@ -400,6 +400,8 @@ def vessel_equasis(imo: int):
                     result[col] = []
             elif col == "risk_score":
                 result[col] = int(val)
+            elif col == "ofac_sanctioned":
+                result[col] = bool(val)
             else:
                 result[col] = val
         return result
