@@ -12,6 +12,7 @@ const OwnerRiskCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ defa
 const FleetSpeedCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.FleetSpeedCard })))
 const RegionUtilCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.RegionUtilCard })))
 const FlagRiskCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.FlagRiskCard })))
+const SpeedTrendCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.SpeedTrendCard })))
 
 function ChartSkeleton() {
   return <div className="h-[300px] animate-pulse rounded-lg bg-muted/40" />
@@ -51,6 +52,7 @@ function AnalyticsPage() {
         </div>
 
         <h2 className="text-base font-semibold text-foreground">Fleet Speed &amp; Utilization</h2>
+        <Suspense fallback={<ChartSkeleton />}><SpeedTrendCard /></Suspense>
         <div className="grid gap-4 lg:grid-cols-2">
           <Suspense fallback={<ChartSkeleton />}><FleetSpeedCard /></Suspense>
           <Suspense fallback={<ChartSkeleton />}><RegionUtilCard /></Suspense>

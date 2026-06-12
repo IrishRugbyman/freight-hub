@@ -471,3 +471,51 @@ def test_region_util_excludes_null_region(client):
     # COASTER has region=None -> not in results
     assert "None" not in regions
     assert None not in regions
+
+
+# ---- /api/analytics/speed-trend ----
+
+def test_speed_trend_structure(analytics_client):
+    r = analytics_client.get("/api/analytics/speed-trend?kind=tanker&segment=VLCC")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["kind"] == "tanker"
+    assert d["segment"] == "VLCC"
+    assert "days" in d
+    assert isinstance(d["series"], list)
+    for pt in d["series"]:
+        assert "date" in pt
+        assert "avg_sog" in pt
+        assert "underway_count" in pt
+        assert "total_count" in pt
+
+
+def test_speed_trend_returns_data(analytics_client):
+    # _SNAP_SEED has VLCC snapshots: 3 at SOG=14.0 today, 1 at SOG=12.0 yesterday (30h ago)
+    # Both days should appear in the 30-day window
+    r = analytics_client.get("/api/analytics/speed-trend?kind=tanker&segment=VLCC&days=30")
+    assert r.status_code == 200
+    d = r.json()
+    assert len(d["series"]) >= 1
+    # All data points should be underway VLCCs (nav=0)
+    for pt in d["series"]:
+        assert pt["underway_count"] > 0
+        # SOG values are either 14.0 or 12.0 depending on the day
+        if pt["avg_sog"] is not None:
+            assert 11.0 <= pt["avg_sog"] <= 15.0
+
+
+def test_speed_trend_filters_by_kind(analytics_client):
+    r = analytics_client.get("/api/analytics/speed-trend?kind=bulk&days=30")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["kind"] == "bulk"
+    # No bulk snapshots in seed -> empty series
+    assert d["series"] == []
+
+
+def test_speed_trend_days_clamped(analytics_client):
+    r = analytics_client.get("/api/analytics/speed-trend?kind=tanker&days=200")
+    assert r.status_code == 200
+    # days clamped to 90
+    assert r.json()["days"] == 90

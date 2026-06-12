@@ -12,7 +12,7 @@ import {
   YAxis,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk } from '@/lib/api'
+import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend } from '@/lib/api'
 
 const CHOKEPOINTS = [
   'singapore_malacca', 'suez', 'hormuz', 'panama', 'gibraltar',
@@ -602,6 +602,83 @@ export function FlagRiskCard() {
               P/T: Paris/Tokyo MOU (B=Black, G=Grey, W=White). Grows as registry is crawled.
             </div>
           </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+const SPEED_SEGMENTS = [
+  { kind: 'tanker', segment: 'VLCC', label: 'VLCC' },
+  { kind: 'tanker', segment: 'Suezmax', label: 'Suezmax' },
+  { kind: 'tanker', segment: 'Aframax', label: 'Aframax' },
+  { kind: 'bulk', segment: 'Capesize', label: 'Capesize' },
+  { kind: 'bulk', segment: 'Supramax', label: 'Supramax' },
+] as const
+
+export function SpeedTrendCard() {
+  const [selected, setSelected] = useState<{ kind: string; segment: string }>({ kind: 'tanker', segment: 'VLCC' })
+  const [days, setDays] = useState(14)
+  const { data, isLoading } = useSpeedTrend(selected.kind, selected.segment, days)
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <CardTitle className="text-sm font-medium">Fleet Speed Trend</CardTitle>
+          <div className="flex flex-wrap gap-1">
+            {SPEED_SEGMENTS.map((s) => (
+              <button
+                key={`${s.kind}-${s.segment}`}
+                onClick={() => setSelected({ kind: s.kind, segment: s.segment })}
+                className={`rounded px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                  selected.segment === s.segment && selected.kind === s.kind
+                    ? 'bg-primary/20 text-primary'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+          <select
+            value={days}
+            onChange={(e) => setDays(Number(e.target.value))}
+            className="ml-auto rounded border border-border bg-card px-1.5 py-0.5 text-[10px] text-foreground"
+          >
+            {[7, 14, 30].map((d) => <option key={d} value={d}>Last {d}d</option>)}
+          </select>
+        </div>
+        <p className="text-[10px] text-muted-foreground">
+          Daily avg SOG (kn) for underway vessels. Rising speed = tighter freight market.
+        </p>
+      </CardHeader>
+      <CardContent>
+        {isLoading || !data ? (
+          <EmptyState message="Loading..." />
+        ) : data.series.length < 2 ? (
+          <EmptyState message="Trend builds as snapshot history accumulates. Check back in a few days." />
+        ) : (
+          <ResponsiveContainer width="100%" height={200}>
+            <LineChart data={data.series} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+              <XAxis
+                dataKey="date"
+                tick={{ fontSize: 9 }}
+                tickFormatter={(d: string) => d.slice(5)}
+              />
+              <YAxis tick={{ fontSize: 9 }} domain={['auto', 'auto']} unit=" kn" />
+              <Tooltip contentStyle={TOOLTIP_STYLE} />
+              <Line
+                type="monotone"
+                dataKey="avg_sog"
+                stroke={SEG_COLORS[selected.segment] ?? '#3b82f6'}
+                strokeWidth={2}
+                dot={{ r: 3 }}
+                connectNulls
+              />
+            </LineChart>
+          </ResponsiveContainer>
         )}
       </CardContent>
     </Card>

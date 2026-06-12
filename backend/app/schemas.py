@@ -319,6 +319,20 @@ class OwnerRiskResponse(BaseModel):
     as_of: str
     rows: list[OwnerRiskItem]
 
+class SpeedTrendPoint(BaseModel):
+    date: str          # YYYY-MM-DD
+    avg_sog: float | None
+    underway_count: int
+    total_count: int
+
+
+class SpeedTrendResponse(BaseModel):
+    kind: str
+    segment: str | None
+    days: int
+    series: list[SpeedTrendPoint]
+
+
 class FlagRiskRow(BaseModel):
     flag: str
     flag_code: str | None

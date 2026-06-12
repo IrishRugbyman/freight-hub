@@ -56,6 +56,8 @@ from .schemas import (
     RoutesResponse,
     SpeedAnalyticsResponse,
     SpeedSegmentRow,
+    SpeedTrendPoint,
+    SpeedTrendResponse,
     TrackPoint,
     TransitsResponse,
     Vessel,
@@ -484,6 +486,51 @@ def analytics_speed():
         total_vessels=len(df),
         rows=rows,
     )
+
+
+@app.get("/api/analytics/speed-trend", response_model=SpeedTrendResponse)
+def analytics_speed_trend(kind: str = "tanker", segment: str | None = None, days: int = 14):
+    """Daily average SOG trend for a vessel segment from snapshot history.
+
+    kind: 'tanker' or 'bulk'
+    segment: optional filter (VLCC, Suezmax, Capesize, etc.)
+    days: clamped 1-90; daily avg computed from ais_snapshots (underway vessels, SOG > 0.2 kn)
+
+    This is a real demand signal: rising VLCC speed indicates stronger crude tanker demand.
+    """
+    days = max(1, min(90, days))
+    since = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
+
+    params: list = [since, kind]
+    seg_clause = ""
+    if segment:
+        seg_clause = "AND segment = ?"
+        params.append(segment)
+
+    df = db.query(
+        f"SELECT CAST(snapshot_ts AS DATE) AS day, sog, nav_status "
+        f"FROM ais_snapshots "
+        f"WHERE snapshot_ts > ? AND kind = ? {seg_clause}",
+        params,
+    )
+
+    if df.empty:
+        return SpeedTrendResponse(kind=kind, segment=segment, days=days, series=[])
+
+    series = []
+    for day, grp in df.groupby("day"):
+        total = len(grp)
+        underway = grp[(grp["nav_status"] == 0) & (grp["sog"] > 0.2)]
+        avg_sog = round(float(underway["sog"].mean()), 2) if len(underway) > 0 else None
+        series.append(SpeedTrendPoint(
+            date=str(day),
+            avg_sog=avg_sog,
+            underway_count=len(underway),
+            total_count=total,
+        ))
+
+    series.sort(key=lambda p: p.date)
+    return SpeedTrendResponse(kind=kind, segment=segment, days=days, series=series)
 
 
 @app.get("/api/analytics/region-util", response_model=RegionUtilResponse)

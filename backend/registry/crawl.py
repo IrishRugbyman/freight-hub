@@ -135,6 +135,7 @@ def run(
         "SELECT DISTINCT CAST(imo AS BIGINT) AS imo "
         "FROM live_positions WHERE imo >= 1000000 AND imo <= 9999999",
         db=ais_path,
+        retries=200,  # AIS collector holds lock <1s every ~90s; 200 retries = 60s budget
     )
 
     if live_df.empty:

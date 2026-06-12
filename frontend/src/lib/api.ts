@@ -723,6 +723,31 @@ export interface RegionUtilResponse {
   rows: RegionUtilRow[]
 }
 
+export interface SpeedTrendPoint {
+  date: string
+  avg_sog: number | null
+  underway_count: number
+  total_count: number
+}
+
+export interface SpeedTrendResponse {
+  kind: string
+  segment: string | null
+  days: number
+  series: SpeedTrendPoint[]
+}
+
+export function useSpeedTrend(kind: string, segment?: string, days = 14) {
+  const qs = new URLSearchParams({ kind, days: String(days) })
+  if (segment) qs.set('segment', segment)
+  return useQuery({
+    queryKey: ['speed-trend', kind, segment ?? '', days],
+    queryFn: () => getJSON<SpeedTrendResponse>(`/api/analytics/speed-trend?${qs}`),
+    staleTime: ANALYTICS_STALE,
+    refetchInterval: REFETCH_MS,
+  })
+}
+
 export function useFleetSpeed() {
   return useQuery({
     queryKey: ['fleet-speed'],

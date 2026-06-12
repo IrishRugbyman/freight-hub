@@ -3,8 +3,8 @@
 Downloads the public OFAC SDN XML list from the US Treasury, extracts vessel entries,
 and returns a set of IMO numbers that appear on the list.
 
-Source: https://ofac.treasury.gov/downloads/sdn.xml (public, no auth required)
-The file is ~6MB, updated regularly by the Treasury.
+Source: https://sanctionslistservice.ofac.treas.gov/api/publicationpreview/exports/sdn.xml
+(public, no auth required; updated regularly by the Treasury)
 
 This module is deliberately free of side effects - it returns data, never writes to DB.
 The caller (crawl.py) decides how to store results.
@@ -20,7 +20,7 @@ from urllib.request import Request, urlopen
 
 log = logging.getLogger(__name__)
 
-_SDN_URL = "https://ofac.treasury.gov/downloads/sdn.xml"
+_SDN_URL = "https://sanctionslistservice.ofac.treas.gov/api/publicationpreview/exports/sdn.xml"
 _SDN_NS = "https://sanctionslistservice.ofac.treas.gov/api/PublicationsService/SDN/xml/schema"
 
 _IMO_RE = re.compile(r"\bIMO\s*[:#]?\s*(\d{7})\b", re.IGNORECASE)
