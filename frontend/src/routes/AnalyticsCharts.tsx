@@ -13,7 +13,7 @@ import {
   YAxis,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion, useDestinationFlows, useMarketSummary } from '@/lib/api'
+import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion, useDestinationFlows, useMarketSummary, useVesselRiskScores } from '@/lib/api'
 import type { RiskEventItem } from '@/lib/api'
 
 const CHOKEPOINTS = [
@@ -1670,6 +1670,171 @@ export function DestinationFlowCard() {
                     </td>
                   </tr>
                 ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Phase 30: Vessel Behavioral Risk Leaderboard
+// ---------------------------------------------------------------------------
+
+function riskScoreBar(score: number) {
+  if (score >= 75) return 'bg-red-500'
+  if (score >= 50) return 'bg-orange-500'
+  if (score >= 25) return 'bg-yellow-500'
+  return 'bg-green-500/60'
+}
+
+function riskScoreLabel(score: number) {
+  if (score >= 75) return { text: 'Critical', cls: 'text-red-400 font-semibold' }
+  if (score >= 50) return { text: 'High', cls: 'text-orange-400 font-semibold' }
+  if (score >= 25) return { text: 'Elevated', cls: 'text-yellow-400' }
+  return { text: 'Low', cls: 'text-green-400/80' }
+}
+
+export function VesselRiskLeaderboardCard() {
+  const [topN, setTopN] = useState(25)
+  const [days, setDays] = useState(30)
+  const [kindFilter, setKindFilter] = useState('')
+  const { data, isLoading } = useVesselRiskScores(topN, days, '', kindFilter, 5)
+  const rows = data?.rows ?? []
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex flex-wrap items-center justify-between gap-2">
+          <span>Vessel Risk Leaderboard</span>
+          <div className="flex flex-wrap gap-2 text-sm font-normal">
+            <select
+              className="rounded border border-border bg-background px-2 py-1 text-xs"
+              value={kindFilter}
+              onChange={e => setKindFilter(e.target.value)}
+            >
+              <option value="">All types</option>
+              <option value="tanker">Tankers</option>
+              <option value="bulk">Bulkers</option>
+            </select>
+            <select
+              className="rounded border border-border bg-background px-2 py-1 text-xs"
+              value={days}
+              onChange={e => setDays(Number(e.target.value))}
+            >
+              <option value={7}>7d</option>
+              <option value={14}>14d</option>
+              <option value={30}>30d</option>
+              <option value={60}>60d</option>
+            </select>
+            <select
+              className="rounded border border-border bg-background px-2 py-1 text-xs"
+              value={topN}
+              onChange={e => setTopN(Number(e.target.value))}
+            >
+              <option value={25}>Top 25</option>
+              <option value={50}>Top 50</option>
+              <option value={100}>Top 100</option>
+            </select>
+          </div>
+        </CardTitle>
+        {data && (
+          <p className="text-xs text-muted-foreground">
+            {data.total_candidates} candidates scored ({data.days}d behavioral window) as of{' '}
+            {new Date(data.as_of).toLocaleTimeString()}
+          </p>
+        )}
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="h-48 animate-pulse rounded bg-muted/40" />
+        ) : rows.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">
+            No vessels above minimum risk threshold.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-xs text-muted-foreground">
+                  <th className="w-8 text-right py-1 pr-2">#</th>
+                  <th className="text-left py-1 pr-3 font-medium">Vessel</th>
+                  <th className="text-left py-1 pr-3 font-medium">Segment</th>
+                  <th className="text-left py-1 pr-3 font-medium">Region</th>
+                  <th className="text-center py-1 pr-2 font-medium">STS</th>
+                  <th className="text-center py-1 pr-2 font-medium">Reroutes</th>
+                  <th className="text-center py-1 pr-2 font-medium">Registry</th>
+                  <th className="text-right py-1 font-medium">Score</th>
+                  <th className="text-left py-1 pl-2 font-medium">Risk</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, i) => {
+                  const label = riskScoreLabel(row.total_score)
+                  return (
+                    <tr key={row.mmsi} className="border-b border-border/20 hover:bg-muted/20">
+                      <td className="py-1.5 pr-2 text-right text-xs text-muted-foreground tabular-nums">
+                        {i + 1}
+                      </td>
+                      <td className="py-1.5 pr-3">
+                        <span className="font-medium text-foreground/90">{row.name ?? '—'}</span>
+                        {row.ofac && (
+                          <span className="ml-1.5 rounded bg-red-500/20 px-1 py-0.5 text-xs text-red-400 font-bold">
+                            OFAC
+                          </span>
+                        )}
+                        <div className="text-xs text-muted-foreground">
+                          {row.mmsi}{row.imo ? ` / ${row.imo}` : ''}
+                        </div>
+                      </td>
+                      <td className="py-1.5 pr-3 text-muted-foreground text-xs">
+                        {row.segment ?? row.kind ?? '—'}
+                      </td>
+                      <td className="py-1.5 pr-3 text-muted-foreground text-xs">
+                        {row.region?.replace(/_/g, ' ') ?? '—'}
+                      </td>
+                      <td className="py-1.5 pr-2 text-center tabular-nums font-mono text-xs">
+                        {row.sts_count > 0 ? (
+                          <span className="text-orange-400">{row.sts_count}</span>
+                        ) : (
+                          <span className="text-muted-foreground/40">0</span>
+                        )}
+                      </td>
+                      <td className="py-1.5 pr-2 text-center tabular-nums font-mono text-xs">
+                        {row.reroute_count > 0 ? (
+                          <span className="text-yellow-400">{row.reroute_count}</span>
+                        ) : (
+                          <span className="text-muted-foreground/40">0</span>
+                        )}
+                      </td>
+                      <td className="py-1.5 pr-2 text-center tabular-nums text-xs">
+                        {row.registry_risk !== null ? (
+                          <span className={row.registry_risk >= 50 ? 'text-red-400' : row.registry_risk >= 25 ? 'text-yellow-400' : 'text-muted-foreground'}>
+                            {row.registry_risk}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground/30">—</span>
+                        )}
+                      </td>
+                      <td className="py-1.5 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <div className="h-1.5 w-12 rounded-full bg-muted/40 overflow-hidden">
+                            <div
+                              className={`h-full rounded-full ${riskScoreBar(row.total_score)}`}
+                              style={{ width: `${row.total_score}%` }}
+                            />
+                          </div>
+                          <span className="tabular-nums font-mono text-xs font-semibold w-6 text-right">
+                            {row.total_score}
+                          </span>
+                        </div>
+                      </td>
+                      <td className={`py-1.5 pl-2 text-xs ${label.cls}`}>{label.text}</td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>

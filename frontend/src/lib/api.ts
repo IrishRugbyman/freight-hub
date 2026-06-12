@@ -1205,3 +1205,40 @@ export function usePortCongestion(kind = '', days = 14) {
   })
 }
 
+
+export interface VesselRiskRow {
+  mmsi: number
+  imo: number | null
+  name: string | null
+  kind: string | null
+  segment: string | null
+  region: string | null
+  lat: number | null
+  lon: number | null
+  sts_count: number
+  reroute_count: number
+  registry_risk: number | null
+  ofac: boolean
+  behavioral_score: number
+  total_score: number
+}
+
+export interface VesselRiskResponse {
+  as_of: string
+  days: number
+  top_n: number
+  total_candidates: number
+  rows: VesselRiskRow[]
+}
+
+export function useVesselRiskScores(topN = 50, days = 30, segment = '', kind = '', minScore = 5) {
+  return useQuery({
+    queryKey: ['vessel-risk-scores', topN, days, segment, kind, minScore],
+    queryFn: () =>
+      getJSON<VesselRiskResponse>(
+        `/api/analytics/vessel-risk-scores?top_n=${topN}&days=${days}&segment=${segment}&kind=${kind}&min_score=${minScore}`
+      ),
+    staleTime: 2 * 60 * 1000,
+    refetchInterval: 2 * 60 * 1000,
+  })
+}

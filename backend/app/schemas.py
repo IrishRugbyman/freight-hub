@@ -704,3 +704,31 @@ class PortCongestionResponse(BaseModel):
     as_of: str
     days_baseline: int
     rows: list[PortCongestionRow]
+
+
+# ---- Phase 30: Vessel Behavioral Risk Leaderboard ----
+
+
+class VesselRiskRow(BaseModel):
+    mmsi: int
+    imo: int | None
+    name: str | None
+    kind: str | None
+    segment: str | None
+    region: str | None
+    lat: float | None
+    lon: float | None
+    sts_count: int
+    reroute_count: int
+    registry_risk: int | None
+    ofac: bool
+    behavioral_score: int   # 0-100 from event counts alone
+    total_score: int        # 0-100 composite (behavioral + registry + ofac bonus)
+
+
+class VesselRiskResponse(BaseModel):
+    as_of: str
+    days: int
+    top_n: int
+    total_candidates: int
+    rows: list[VesselRiskRow]

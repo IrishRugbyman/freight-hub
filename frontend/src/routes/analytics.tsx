@@ -25,6 +25,7 @@ const RiskEventsCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ def
 const PortCongestionCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.PortCongestionCard })))
 const DestinationFlowCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.DestinationFlowCard })))
 const MarketSummaryCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.MarketSummaryCard })))
+const VesselRiskLeaderboardCard = lazy(() => import('./AnalyticsCharts').then((m) => ({ default: m.VesselRiskLeaderboardCard })))
 
 function ChartSkeleton() {
   return <div className="h-[300px] animate-pulse rounded-lg bg-muted/40" />
@@ -74,6 +75,9 @@ function AnalyticsPage() {
           <Suspense fallback={<ChartSkeleton />}><OwnerRiskCard /></Suspense>
           <Suspense fallback={<ChartSkeleton />}><FlagRiskCard /></Suspense>
         </div>
+
+        <h2 className="text-base font-semibold text-foreground">Vessel Risk Leaderboard</h2>
+        <Suspense fallback={<ChartSkeleton />}><VesselRiskLeaderboardCard /></Suspense>
 
         <h2 className="text-base font-semibold text-foreground">Intelligence Alerts</h2>
         <Suspense fallback={<ChartSkeleton />}><RiskEventsCard /></Suspense>

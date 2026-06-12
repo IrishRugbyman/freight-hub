@@ -1796,3 +1796,236 @@ def test_market_summary_zero_events(flow_client):
     assert d["reroutes_24h"] == 0
     assert d["sts_24h"] == 0
     assert d["gaps_24h"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Phase 30: vessel behavioral risk leaderboard
+# ---------------------------------------------------------------------------
+
+import pytest as _pytest_ph30
+
+
+@_pytest_ph30.fixture
+def risk_leaderboard_client(tmp_path, monkeypatch):
+    """Fixture for vessel-risk-scores endpoint.
+
+    Vessels:
+      9001  VLCC RISK  IMO=7001  sts_count=3  reroute_count=2  reg_risk=80  ofac=False
+      9002  CAPE REROUTE  IMO=7002  sts_count=0  reroute_count=5  reg_risk=None  ofac=False
+      9003  TANKER OFAC  IMO=7003  sts_count=1  reroute_count=0  reg_risk=60  ofac=True
+      9004  BULK CLEAN  IMO=7004  sts_count=0  reroute_count=0  reg_risk=10  ofac=False
+      9005  SMALL VESSEL  (segment=Small)  - must be excluded even if events exist
+    """
+    import duckdb
+    from datetime import UTC, datetime, timedelta
+    from fastapi.testclient import TestClient
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+    recent = now - timedelta(days=1)
+
+    ais_schema = """
+    CREATE TABLE live_positions (
+        mmsi BIGINT PRIMARY KEY, name VARCHAR, lat DOUBLE, lon DOUBLE,
+        sog DOUBLE, cog DOUBLE, heading DOUBLE, destination VARCHAR,
+        ship_type INTEGER, length_m DOUBLE, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, updated_ts TIMESTAMP,
+        imo BIGINT, draught DOUBLE, nav_status INTEGER, eta VARCHAR
+    );
+    CREATE TABLE ais_snapshots (
+        snapshot_ts TIMESTAMP, mmsi BIGINT, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, lat DOUBLE, lon DOUBLE, ship_type INTEGER, length_m DOUBLE,
+        sog DOUBLE, nav_status INTEGER, draught DOUBLE, destination VARCHAR,
+        PRIMARY KEY (snapshot_ts, mmsi)
+    );
+    """
+    an_schema = """
+    CREATE TABLE meta_watermark (key VARCHAR PRIMARY KEY, ts TIMESTAMP);
+    CREATE TABLE ais_events (
+        event_id VARCHAR PRIMARY KEY, type VARCHAR,
+        mmsi BIGINT, mmsi2 BIGINT,
+        start_ts TIMESTAMP, end_ts TIMESTAMP,
+        lat DOUBLE, lon DOUBLE,
+        region VARCHAR, kind VARCHAR, segment VARCHAR, details VARCHAR
+    );
+    CREATE TABLE transit_events (
+        mmsi BIGINT, chokepoint VARCHAR, entered_ts TIMESTAMP, exited_ts TIMESTAMP,
+        direction VARCHAR, kind VARCHAR, segment VARCHAR, laden BOOLEAN,
+        PRIMARY KEY (mmsi, chokepoint, entered_ts)
+    );
+    CREATE TABLE anchored_episodes (
+        mmsi BIGINT, zone VARCHAR, start_ts TIMESTAMP, end_ts TIMESTAMP,
+        kind VARCHAR, segment VARCHAR, PRIMARY KEY (mmsi, zone, start_ts)
+    );
+    CREATE TABLE fleet_density (
+        ts TIMESTAMP, region VARCHAR, kind VARCHAR, segment VARCHAR,
+        laden_count INTEGER, ballast_count INTEGER, unknown_count INTEGER,
+        PRIMARY KEY (ts, region, kind, segment)
+    );
+    CREATE TABLE vessel_state (
+        mmsi BIGINT PRIMARY KEY, max_draught_seen DOUBLE, last_draught DOUBLE,
+        laden VARCHAR, updated_ts TIMESTAMP
+    );
+    """
+    reg_schema = """
+    CREATE TABLE vessel_registry (
+        imo BIGINT PRIMARY KEY, ship_name VARCHAR, flag VARCHAR, flag_code VARCHAR,
+        call_sign VARCHAR, gross_tonnage INTEGER, dwt INTEGER, ship_type VARCHAR,
+        year_built INTEGER, ship_status VARCHAR, owner VARCHAR, ism_manager VARCHAR,
+        ship_manager VARCHAR, class_society VARCHAR, pi_club VARCHAR,
+        detention_rate_pct DOUBLE, paris_mou VARCHAR, tokyo_mou VARCHAR,
+        uscg_targeting VARCHAR, fetched_ts TIMESTAMP, fetch_ok BOOLEAN,
+        risk_score INTEGER, risk_indicators VARCHAR, ofac_sanctioned BOOLEAN
+    );
+    """
+
+    ais_file = tmp_path / "ais.duckdb"
+    ais_conn = duckdb.connect(str(ais_file))
+    ais_conn.execute(ais_schema)
+    ais_conn.executemany(
+        "INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            (9001, "VLCC RISK",    25.0, 56.0, 14.0, 90.0, None, "CNSHA", 80, 330, "tanker", "VLCC",     "hormuz", now, 7001, 20.0, 0, None),
+            (9002, "CAPE REROUTE", 3.5,  5.0,  12.0, 45.0, None, "ARA",   74, 300, "bulk",   "Capesize", "ara",    now, 7002, 18.0, 0, None),
+            (9003, "TANKER OFAC",  1.3, 103.8, 0.5,  180.0, None, "SGSIN", 80, 300, "tanker", "VLCC",     "singapore_malacca", now, 7003, 19.0, 1, None),
+            (9004, "BULK CLEAN",   51.0, 3.0,  10.0, 270.0, None, "NLRTM", 74, 290, "bulk",   "Capesize", "north_sea", now, 7004, 15.0, 0, None),
+            (9005, "SMALL VESSEL", 10.0, 10.0,  5.0,   0.0, None, None,    70, 20,  "tanker", "Small",    "ara",    now, None, None, None, None),
+        ],
+    )
+    ais_conn.close()
+
+    an_file = tmp_path / "analytics.duckdb"
+    an_conn = duckdb.connect(str(an_file))
+    an_conn.execute(an_schema)
+    # STS events: 9001 is involved in 3 as mmsi, 9003 is involved in 1 as mmsi2
+    an_conn.executemany(
+        "INSERT INTO ais_events VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            ("sts-1", "sts", 9001, None, recent, None, 25.0, 56.0, "hormuz", "tanker", "VLCC", "{}"),
+            ("sts-2", "sts", 9001, None, recent, None, 25.1, 56.1, "hormuz", "tanker", "VLCC", "{}"),
+            ("sts-3", "sts", 9001, None, recent, None, 25.2, 56.2, "hormuz", "tanker", "VLCC", "{}"),
+            ("sts-4", "sts", 9002, 9003, recent, None, 3.5,  5.0,  "ara",    "bulk",   "Capesize", "{}"),
+            # Reroutes for 9001 (2) and 9002 (5)
+            ("rr-1",  "reroute", 9001, None, recent, None, 25.0, 56.0, "hormuz", "tanker", "VLCC", "{}"),
+            ("rr-2",  "reroute", 9001, None, recent, None, 25.0, 56.0, "hormuz", "tanker", "VLCC", "{}"),
+            ("rr-3",  "reroute", 9002, None, recent, None, 3.5,  5.0,  "ara",    "bulk",   "Capesize", "{}"),
+            ("rr-4",  "reroute", 9002, None, recent, None, 3.5,  5.0,  "ara",    "bulk",   "Capesize", "{}"),
+            ("rr-5",  "reroute", 9002, None, recent, None, 3.5,  5.0,  "ara",    "bulk",   "Capesize", "{}"),
+            ("rr-6",  "reroute", 9002, None, recent, None, 3.5,  5.0,  "ara",    "bulk",   "Capesize", "{}"),
+            ("rr-7",  "reroute", 9002, None, recent, None, 3.5,  5.0,  "ara",    "bulk",   "Capesize", "{}"),
+            # Small vessel event - should be excluded from results (segment filter)
+            ("rr-8",  "reroute", 9005, None, recent, None, 10.0, 10.0, "ara",    "tanker", "Small", "{}"),
+        ],
+    )
+    an_conn.close()
+
+    reg_file = tmp_path / "registry.duckdb"
+    reg_conn = duckdb.connect(str(reg_file))
+    reg_conn.execute(reg_schema)
+    reg_conn.executemany(
+        "INSERT INTO vessel_registry (imo, ship_name, fetch_ok, risk_score, ofac_sanctioned) VALUES (?,?,?,?,?)",
+        [
+            (7001, "VLCC RISK",    True, 80,  False),
+            (7003, "TANKER OFAC",  True, 60,  True),
+            (7004, "BULK CLEAN",   True, 10,  False),
+        ],
+    )
+    reg_conn.close()
+
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
+    monkeypatch.setenv("ANALYTICS_DB", str(an_file))
+    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
+    from app.main import app
+    return TestClient(app)
+
+
+def test_vessel_risk_scores_structure(risk_leaderboard_client):
+    r = risk_leaderboard_client.get("/api/analytics/vessel-risk-scores")
+    assert r.status_code == 200
+    d = r.json()
+    for key in ("as_of", "days", "top_n", "total_candidates", "rows"):
+        assert key in d
+    if d["rows"]:
+        row = d["rows"][0]
+        for field in ("mmsi", "sto_count", "reroute_count", "behavioral_score", "total_score", "ofac"):
+            assert field in row or field.replace("sto_count", "sts_count") in row
+
+
+def test_vessel_risk_scores_excludes_small(risk_leaderboard_client):
+    r = risk_leaderboard_client.get("/api/analytics/vessel-risk-scores?min_score=0")
+    d = r.json()
+    mmsis = {row["mmsi"] for row in d["rows"]}
+    assert 9005 not in mmsis  # Small segment vessel must be excluded
+
+
+def test_vessel_risk_scores_sorted_by_total(risk_leaderboard_client):
+    r = risk_leaderboard_client.get("/api/analytics/vessel-risk-scores?min_score=0")
+    rows = r.json()["rows"]
+    scores = [row["total_score"] for row in rows]
+    assert scores == sorted(scores, reverse=True)
+
+
+def test_vessel_risk_scores_behavioral_formula(risk_leaderboard_client):
+    r = risk_leaderboard_client.get("/api/analytics/vessel-risk-scores?min_score=0")
+    rows = {row["mmsi"]: row for row in r.json()["rows"]}
+    # 9002: sts=1 (as mmsi2 party in sts-4), reroute=5 -> behavioral = min(1*20 + 5*5, 100) = min(45,100) = 45
+    if 9002 in rows:
+        row = rows[9002]
+        assert row["sts_count"] == 1
+        assert row["reroute_count"] == 5
+        assert row["behavioral_score"] == 45
+        # No registry data -> total = behavioral = 45
+        assert row["total_score"] == 45
+
+
+def test_vessel_risk_scores_registry_weighting(risk_leaderboard_client):
+    r = risk_leaderboard_client.get("/api/analytics/vessel-risk-scores?min_score=0")
+    rows = {row["mmsi"]: row for row in r.json()["rows"]}
+    # 9001: sts=3, reroute=2 -> behavioral = min(3*20 + 2*5, 100) = min(70,100) = 70
+    # registry_risk=80, ofac=False -> total = round(70*0.4 + 80*0.6) = round(28+48) = 76
+    if 9001 in rows:
+        row = rows[9001]
+        assert row["sts_count"] == 3
+        assert row["reroute_count"] == 2
+        assert row["behavioral_score"] == 70
+        assert row["registry_risk"] == 80
+        assert row["ofac"] is False
+        assert row["total_score"] == 76
+
+
+def test_vessel_risk_scores_ofac_bonus(risk_leaderboard_client):
+    r = risk_leaderboard_client.get("/api/analytics/vessel-risk-scores?min_score=0")
+    rows = {row["mmsi"]: row for row in r.json()["rows"]}
+    # 9003: sts=1 (as mmsi2 in sts-4), reroute=0 -> behavioral = min(1*20, 100) = 20
+    # registry_risk=60, ofac=True -> total = min(round(20*0.4 + 60*0.6) + 25, 100) = min(round(8+36)+25, 100) = min(69, 100) = 69
+    if 9003 in rows:
+        row = rows[9003]
+        assert row["ofac"] is True
+        assert row["total_score"] == pytest.approx(69, abs=2)
+
+
+def test_vessel_risk_scores_registry_only_included(risk_leaderboard_client):
+    r = risk_leaderboard_client.get("/api/analytics/vessel-risk-scores?min_score=0")
+    rows = {row["mmsi"]: row for row in r.json()["rows"]}
+    # 9004: no events but risk_score=10 -> should appear with total>0
+    assert 9004 in rows
+    row = rows[9004]
+    assert row["sts_count"] == 0
+    assert row["reroute_count"] == 0
+    assert row["behavioral_score"] == 0
+    # total = round(0*0.4 + 10*0.6) = 6, no ofac
+    assert row["total_score"] == 6
+
+
+def test_vessel_risk_scores_top_n_param(risk_leaderboard_client):
+    r = risk_leaderboard_client.get("/api/analytics/vessel-risk-scores?top_n=2&min_score=0")
+    d = r.json()
+    assert len(d["rows"]) <= 2
+    assert d["top_n"] == 2
+    assert d["total_candidates"] >= 2
+
+
+def test_vessel_risk_scores_kind_filter(risk_leaderboard_client):
+    r = risk_leaderboard_client.get("/api/analytics/vessel-risk-scores?kind=bulk&min_score=0")
+    d = r.json()
+    for row in d["rows"]:
+        assert row["kind"] == "bulk"

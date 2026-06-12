@@ -70,6 +70,8 @@ from .schemas import (
     RiskEventsResponse,
     PortCongestionRow,
     PortCongestionResponse,
+    VesselRiskRow,
+    VesselRiskResponse,
     RoutesResponse,
     SlowSteamerEvent,
     SlowSteamersResponse,
@@ -2502,6 +2504,176 @@ def analytics_port_congestion(kind: str = "", days: int = 14):
         as_of=_iso(now_ts) or "",
         days_baseline=days,
         rows=rows_out,
+    )
+
+
+@app.get("/api/analytics/vessel-risk-scores", response_model=VesselRiskResponse)
+def analytics_vessel_risk_scores(
+    top_n: int = 50,
+    days: int = 30,
+    segment: str | None = None,
+    kind: str | None = None,
+    min_score: int = 5,
+):
+    """Composite behavioral + registry risk leaderboard per live vessel.
+
+    Scoring (0-100):
+      behavioral_score = min(sts_count * 20 + reroute_count * 5, 100)
+      registry_component = registry_risk if present else 0
+      total_score = min(round((behavioral_score + registry_component) / 2)
+                        + (25 if ofac else 0), 100)
+    Vessels with no events and no registry data are excluded.
+    """
+    top_n = max(1, min(200, top_n))
+    days = max(1, min(90, days))
+
+    now_ts = datetime.now(UTC).replace(tzinfo=None)
+    cutoff = now_ts - timedelta(days=days)
+
+    # Step 1: event counts from analytics DB
+    sts_df = db.query(
+        "SELECT mmsi, COUNT(*) AS cnt FROM ais_events "
+        "WHERE type = 'sts' AND start_ts >= ? GROUP BY mmsi "
+        "UNION ALL "
+        "SELECT mmsi2 AS mmsi, COUNT(*) AS cnt FROM ais_events "
+        "WHERE type = 'sts' AND mmsi2 IS NOT NULL AND start_ts >= ? GROUP BY mmsi2",
+        [cutoff, cutoff],
+        db=db.analytics_db_path(),
+    )
+    sts_counts: dict[int, int] = {}
+    if not sts_df.empty:
+        for _, r in sts_df.iterrows():
+            m = int(r["mmsi"])
+            sts_counts[m] = sts_counts.get(m, 0) + int(r["cnt"])
+
+    rr_df = db.query(
+        "SELECT mmsi, COUNT(*) AS cnt FROM ais_events "
+        "WHERE type = 'reroute' AND start_ts >= ? GROUP BY mmsi",
+        [cutoff],
+        db=db.analytics_db_path(),
+    )
+    reroute_counts: dict[int, int] = {}
+    if not rr_df.empty:
+        for _, r in rr_df.iterrows():
+            reroute_counts[int(r["mmsi"])] = int(r["cnt"])
+
+    # Step 2: live positions (segment/kind filter applied here)
+    lp_conds = ["segment != 'Small'"]
+    lp_params: list = []
+    if segment:
+        lp_conds.append("segment = ?")
+        lp_params.append(segment)
+    if kind:
+        lp_conds.append("kind = ?")
+        lp_params.append(kind)
+    lp_df = db.query(
+        "SELECT mmsi, imo, name, kind, segment, region, lat, lon "
+        "FROM live_positions WHERE " + " AND ".join(lp_conds),
+        lp_params or None,
+    )
+    if lp_df.empty:
+        return VesselRiskResponse(
+            as_of=_iso(now_ts) or "",
+            days=days,
+            top_n=top_n,
+            total_candidates=0,
+            rows=[],
+        )
+
+    # mmsi -> live fields map
+    lp_map: dict[int, dict] = {}
+    for _, r in lp_df.iterrows():
+        lp_map[int(r["mmsi"])] = {
+            "imo": _valid_imo(r.get("imo")),
+            "name": _str_or_none(r.get("name")),
+            "kind": _str_or_none(r.get("kind")),
+            "segment": _str_or_none(r.get("segment")),
+            "region": _str_or_none(r.get("region")),
+            "lat": float(r["lat"]) if r.get("lat") is not None and not pd.isna(r["lat"]) else None,
+            "lon": float(r["lon"]) if r.get("lon") is not None and not pd.isna(r["lon"]) else None,
+        }
+
+    # Step 3: registry risk data via IMO
+    live_imos = [v["imo"] for v in lp_map.values() if v["imo"] is not None]
+    reg_map: dict[int, dict] = {}  # keyed by imo
+    if live_imos:
+        placeholders = ",".join(["?"] * len(live_imos))
+        reg_df = db.query(
+            f"SELECT imo, risk_score, ofac_sanctioned FROM vessel_registry "
+            f"WHERE imo IN ({placeholders}) AND fetch_ok = true",
+            live_imos,
+            db=db.registry_db_path(),
+        )
+        if not reg_df.empty:
+            for _, r in reg_df.iterrows():
+                imo_val = _valid_imo(r.get("imo"))
+                if imo_val is not None:
+                    reg_map[imo_val] = {
+                        "risk_score": int(r["risk_score"]) if r.get("risk_score") is not None and not pd.isna(r["risk_score"]) else None,
+                        "ofac": bool(r["ofac_sanctioned"]) if r.get("ofac_sanctioned") is not None and not pd.isna(r["ofac_sanctioned"]) else False,
+                    }
+
+    # Step 4: candidate MMSIs = vessels with behavioral events OR registry risk > 0
+    behavioral_mmsis = set(sts_counts) | set(reroute_counts)
+    reg_imo_to_mmsi: dict[int, int] = {v["imo"]: k for k, v in lp_map.items() if v["imo"] is not None}
+    reg_risk_mmsis: set[int] = set()
+    for imo, r in reg_map.items():
+        if (r.get("risk_score") or 0) > 0 or r.get("ofac"):
+            mmsi_for_imo = reg_imo_to_mmsi.get(imo)
+            if mmsi_for_imo is not None:
+                reg_risk_mmsis.add(mmsi_for_imo)
+
+    fleet_mmsis = set(lp_map)
+    candidate_mmsis = (behavioral_mmsis | reg_risk_mmsis) & fleet_mmsis
+
+    # Step 5: score and filter
+    rows_out: list[VesselRiskRow] = []
+    for mmsi in candidate_mmsis:
+        live = lp_map[mmsi]
+        imo = live["imo"]
+        reg = reg_map.get(imo) if imo else None
+
+        sts_c = sts_counts.get(mmsi, 0)
+        rr_c = reroute_counts.get(mmsi, 0)
+        behavioral = min(sts_c * 20 + rr_c * 5, 100)
+
+        reg_risk = reg["risk_score"] if reg else None
+        ofac = reg["ofac"] if reg else False
+        if reg_risk is not None:
+            base = round(behavioral * 0.4 + reg_risk * 0.6)
+        else:
+            base = behavioral
+        total = min(base + (25 if ofac else 0), 100)
+
+        if total < min_score:
+            continue
+
+        rows_out.append(VesselRiskRow(
+            mmsi=mmsi,
+            imo=imo,
+            name=live["name"],
+            kind=live["kind"],
+            segment=live["segment"],
+            region=live["region"],
+            lat=live["lat"],
+            lon=live["lon"],
+            sts_count=sts_c,
+            reroute_count=rr_c,
+            registry_risk=reg_risk,
+            ofac=ofac,
+            behavioral_score=behavioral,
+            total_score=total,
+        ))
+
+    rows_out.sort(key=lambda r: (-r.total_score, -r.behavioral_score))
+    total_candidates = len(rows_out)
+
+    return VesselRiskResponse(
+        as_of=_iso(now_ts) or "",
+        days=days,
+        top_n=top_n,
+        total_candidates=total_candidates,
+        rows=rows_out[:top_n],
     )
 
 
