@@ -877,3 +877,17 @@ class EventRateTimelineResponse(BaseModel):
     as_of: str
     hours: int
     points: list[EventRatePoint]
+
+
+class TransitRatePoint(BaseModel):
+    hour: str
+    chokepoint: str
+    count: int
+    laden_count: int
+
+
+class TransitRateTimelineResponse(BaseModel):
+    as_of: str
+    hours: int
+    chokepoints: list[str]
+    points: list[TransitRatePoint]

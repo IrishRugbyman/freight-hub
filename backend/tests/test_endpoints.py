@@ -2920,3 +2920,155 @@ def test_event_rate_timeline_hours_clamp(event_rate_client):
     r = event_rate_client.get("/api/analytics/event-rate-timeline?hours=6")
     d = r.json()
     assert d["hours"] == 6
+
+
+# ---------------------------------------------------------------------------
+# Phase 38: Transit Rate Timeline
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def transit_rate_client(tmp_path, monkeypatch):
+    """Fixture for transit-rate-timeline endpoint.
+
+    transit_events:
+      - dover_channel: 3 transits at hour H (2 laden, 1 ballast)
+      - suez: 1 transit at hour H, 2 at hour H-1
+    """
+    import duckdb
+    from fastapi.testclient import TestClient
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+    h0 = now.replace(minute=0, second=0, microsecond=0)
+    h1 = h0 - timedelta(hours=1)
+
+    ais_schema = """
+    CREATE TABLE live_positions (
+        mmsi BIGINT PRIMARY KEY, name VARCHAR, lat DOUBLE, lon DOUBLE,
+        sog DOUBLE, cog DOUBLE, heading DOUBLE, destination VARCHAR,
+        ship_type INTEGER, length_m DOUBLE, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, updated_ts TIMESTAMP,
+        imo BIGINT, draught DOUBLE, nav_status INTEGER, eta VARCHAR
+    );
+    CREATE TABLE ais_snapshots (
+        snapshot_ts TIMESTAMP, mmsi BIGINT, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, lat DOUBLE, lon DOUBLE, ship_type INTEGER, length_m DOUBLE,
+        sog DOUBLE, nav_status INTEGER, draught DOUBLE, destination VARCHAR,
+        PRIMARY KEY (snapshot_ts, mmsi)
+    );
+    CREATE TABLE vessels (
+        mmsi BIGINT PRIMARY KEY, imo BIGINT, name VARCHAR, flag VARCHAR,
+        flag_iso2 VARCHAR, mid INTEGER, call_sign VARCHAR, vessel_type VARCHAR,
+        dwt INTEGER, grt INTEGER, build_year INTEGER, length_m DOUBLE, beam_m DOUBLE,
+        owner VARCHAR, manager VARCHAR, class_society VARCHAR, enriched_at TIMESTAMP, equasis_ok BOOLEAN
+    );
+    """
+    ais_file = tmp_path / "ais_tr.duckdb"
+    duckdb.connect(str(ais_file)).execute(ais_schema).close()
+
+    an_schema = """
+    CREATE TABLE meta_watermark (key VARCHAR PRIMARY KEY, ts TIMESTAMP);
+    CREATE TABLE ais_events (
+        event_id VARCHAR PRIMARY KEY, type VARCHAR, mmsi BIGINT, mmsi2 BIGINT,
+        start_ts TIMESTAMP, end_ts TIMESTAMP, lat DOUBLE, lon DOUBLE,
+        region VARCHAR, kind VARCHAR, segment VARCHAR, details VARCHAR
+    );
+    CREATE TABLE transit_events (
+        mmsi BIGINT, chokepoint VARCHAR, entered_ts TIMESTAMP, exited_ts TIMESTAMP,
+        direction VARCHAR, kind VARCHAR, segment VARCHAR, laden BOOLEAN,
+        PRIMARY KEY (mmsi, chokepoint, entered_ts)
+    );
+    CREATE TABLE anchored_episodes (
+        mmsi BIGINT, zone VARCHAR, start_ts TIMESTAMP, end_ts TIMESTAMP,
+        kind VARCHAR, segment VARCHAR, PRIMARY KEY (mmsi, zone, start_ts)
+    );
+    CREATE TABLE fleet_density (
+        ts TIMESTAMP, region VARCHAR, kind VARCHAR, segment VARCHAR,
+        laden_count INTEGER, ballast_count INTEGER, unknown_count INTEGER,
+        PRIMARY KEY (ts, region, kind, segment)
+    );
+    CREATE TABLE vessel_state (
+        mmsi BIGINT PRIMARY KEY, max_draught_seen DOUBLE, last_draught DOUBLE,
+        laden VARCHAR, updated_ts TIMESTAMP
+    );
+    """
+    an_file = tmp_path / "analytics_tr.duckdb"
+    an_conn = duckdb.connect(str(an_file))
+    an_conn.execute(an_schema)
+    an_conn.executemany(
+        "INSERT INTO transit_events VALUES (?,?,?,?,?,?,?,?)",
+        [
+            (9401, "dover_channel", h0, None, "northbound", "tanker", "VLCC", True),
+            (9402, "dover_channel", h0, None, "southbound", "bulk",   "Capesize", True),
+            (9403, "dover_channel", h0, None, "northbound", "tanker", "Suezmax", False),
+            (9404, "suez",          h0, None, "northbound", "tanker", "VLCC", True),
+            (9405, "suez",          h1, None, "northbound", "tanker", "VLCC", False),
+            (9406, "suez",          h1, None, "southbound", "bulk",   "Capesize", True),
+        ],
+    )
+    an_conn.close()
+
+    reg_file = tmp_path / "reg_tr.duckdb"
+    reg_conn = duckdb.connect(str(reg_file))
+    reg_conn.execute("""
+    CREATE TABLE vessel_registry (
+        imo BIGINT PRIMARY KEY, ship_name VARCHAR, flag VARCHAR, flag_code VARCHAR,
+        call_sign VARCHAR, gross_tonnage INTEGER, dwt INTEGER, ship_type VARCHAR,
+        year_built INTEGER, ship_status VARCHAR, owner VARCHAR, ism_manager VARCHAR,
+        ship_manager VARCHAR, class_society VARCHAR, pi_club VARCHAR,
+        detention_rate_pct DOUBLE, paris_mou VARCHAR, tokyo_mou VARCHAR,
+        uscg_targeting VARCHAR, fetched_ts TIMESTAMP, fetch_ok BOOLEAN,
+        risk_score INTEGER, risk_indicators VARCHAR, ofac_sanctioned BOOLEAN
+    );
+    """)
+    reg_conn.close()
+
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
+    monkeypatch.setenv("ANALYTICS_DB", str(an_file))
+    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
+
+    from app.main import app as freight_app
+    return TestClient(freight_app)
+
+
+def test_transit_rate_structure(transit_rate_client):
+    r = transit_rate_client.get("/api/analytics/transit-rate-timeline")
+    assert r.status_code == 200
+    d = r.json()
+    assert "as_of" in d and "hours" in d and "chokepoints" in d and "points" in d
+    assert isinstance(d["chokepoints"], list)
+    for pt in d["points"]:
+        assert "hour" in pt and "chokepoint" in pt and "count" in pt and "laden_count" in pt
+
+
+def test_transit_rate_dover_counts(transit_rate_client):
+    r = transit_rate_client.get("/api/analytics/transit-rate-timeline?hours=72")
+    d = r.json()
+    dover_pts = [p for p in d["points"] if p["chokepoint"] == "dover_channel"]
+    assert dover_pts
+    pt = dover_pts[0]
+    assert pt["count"] == 3
+    assert pt["laden_count"] == 2
+
+
+def test_transit_rate_suez_prev_hour(transit_rate_client):
+    r = transit_rate_client.get("/api/analytics/transit-rate-timeline?hours=72")
+    d = r.json()
+    suez_pts = [p for p in d["points"] if p["chokepoint"] == "suez"]
+    assert len(suez_pts) == 2
+    total = sum(p["count"] for p in suez_pts)
+    assert total == 3
+
+
+def test_transit_rate_chokepoint_filter(transit_rate_client):
+    r = transit_rate_client.get("/api/analytics/transit-rate-timeline?hours=72&chokepoints_csv=suez")
+    d = r.json()
+    assert all(p["chokepoint"] == "suez" for p in d["points"])
+    assert "dover_channel" not in d["chokepoints"]
+
+
+def test_transit_rate_chokepoints_list(transit_rate_client):
+    r = transit_rate_client.get("/api/analytics/transit-rate-timeline?hours=72")
+    d = r.json()
+    assert "dover_channel" in d["chokepoints"]
+    assert "suez" in d["chokepoints"]

@@ -1462,3 +1462,29 @@ export function useEventRateTimeline(hours = 72) {
     refetchInterval: 5 * 60 * 1000,
   })
 }
+
+export interface TransitRatePoint {
+  hour: string
+  chokepoint: string
+  count: number
+  laden_count: number
+}
+
+export interface TransitRateTimelineResponse {
+  as_of: string
+  hours: number
+  chokepoints: string[]
+  points: TransitRatePoint[]
+}
+
+export function useTransitRateTimeline(hours = 72, chopointsCSV = '') {
+  return useQuery({
+    queryKey: ['transit-rate-timeline', hours, chopointsCSV],
+    queryFn: () =>
+      getJSON<TransitRateTimelineResponse>(
+        `/api/analytics/transit-rate-timeline?hours=${hours}&chokepoints_csv=${encodeURIComponent(chopointsCSV)}`,
+      ),
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+  })
+}

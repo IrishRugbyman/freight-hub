@@ -14,7 +14,7 @@ import {
   YAxis,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion, useDestinationFlows, useMarketSummary, useVesselRiskScores, useChokepointHeatmap, useTradeLaneMatrix, useAnomalyWatchlist, useStsProximity, useRegionMomentum, useEventRateTimeline } from '@/lib/api'
+import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk, useFleetSpeed, useRegionUtil, useFlagRisk, useSpeedTrend, useStsRisk, useReroutes, useTransitRisk, useFleetAge, useAnchorageDwell, useCargoTransitions, useSlowSteamers, useFleetUtilization, useRiskEvents, usePortCongestion, useDestinationFlows, useMarketSummary, useVesselRiskScores, useChokepointHeatmap, useTradeLaneMatrix, useAnomalyWatchlist, useStsProximity, useRegionMomentum, useEventRateTimeline, useTransitRateTimeline } from '@/lib/api'
 import type { RiskEventItem } from '@/lib/api'
 
 const CHOKEPOINTS = [
@@ -2480,6 +2480,130 @@ export function EventRateTimelineCard() {
               <Bar dataKey="STS" fill="#a855f7" opacity={0.8} />
               <Line type="monotone" dataKey="Total" stroke="#facc15" dot={false} strokeWidth={1.5} />
             </ComposedChart>
+          </ResponsiveContainer>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Phase 38: Chokepoint Transit Rate Timeline
+// ---------------------------------------------------------------------------
+
+const CP_LINE_COLORS: Record<string, string> = {
+  dover_channel: '#3b82f6',
+  singapore_malacca: '#22c55e',
+  suez: '#f97316',
+  hormuz: '#ef4444',
+  bosphorus_dardanelles: '#a855f7',
+  gibraltar: '#facc15',
+  cape_good_hope: '#64748b',
+  panama: '#06b6d4',
+  bab_el_mandeb: '#f43f5e',
+}
+
+const CP_SHORT: Record<string, string> = {
+  dover_channel: 'Dover',
+  singapore_malacca: 'Sing/Mal',
+  suez: 'Suez',
+  hormuz: 'Hormuz',
+  bosphorus_dardanelles: 'Bosphorus',
+  gibraltar: 'Gibraltar',
+  cape_good_hope: 'C. Good Hope',
+  panama: 'Panama',
+  bab_el_mandeb: 'Bab el-Mandeb',
+}
+
+export function TransitRateTimelineCard() {
+  const [hours, setHours] = useState(72)
+  const [selectedCPs, setSelectedCPs] = useState<string[]>(['dover_channel', 'singapore_malacca', 'suez'])
+  const { data, isLoading } = useTransitRateTimeline(hours, selectedCPs.join(','))
+
+  const chartData = React.useMemo(() => {
+    if (!data?.points.length) return []
+    const pts = data.points
+    const hours_set: Set<string> = new Set(pts.map(p => p.hour))
+    const sorted_hours = [...hours_set].sort()
+    return sorted_hours.map(h => {
+      const row: Record<string, string | number> = {
+        hour: new Date(h).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit' }),
+      }
+      for (const cp of selectedCPs) {
+        const pt = pts.find(p => p.hour === h && p.chokepoint === cp)
+        row[cp] = pt?.count ?? 0
+      }
+      return row
+    })
+  }, [data, selectedCPs])
+
+  const availableCPs = data?.chokepoints ?? Object.keys(CP_SHORT)
+
+  function toggleCP(cp: string) {
+    setSelectedCPs(prev => prev.includes(cp) ? prev.filter(c => c !== cp) : [...prev, cp])
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex flex-wrap items-center justify-between gap-2">
+          <span>Chokepoint Transit Rate</span>
+          <select
+            className="rounded border border-border bg-background px-2 py-1 text-xs font-normal"
+            value={hours}
+            onChange={e => setHours(Number(e.target.value))}
+          >
+            <option value={24}>Last 24h</option>
+            <option value={48}>Last 48h</option>
+            <option value={72}>Last 72h</option>
+            <option value={168}>Last 7d</option>
+          </select>
+        </CardTitle>
+        <div className="flex flex-wrap gap-1.5 pt-1">
+          {availableCPs.map(cp => (
+            <button
+              key={cp}
+              onClick={() => toggleCP(cp)}
+              className={`rounded px-2 py-0.5 text-[10px] transition-opacity ${selectedCPs.includes(cp) ? 'opacity-100' : 'opacity-30'}`}
+              style={{ backgroundColor: (CP_LINE_COLORS[cp] ?? '#888') + '33', color: CP_LINE_COLORS[cp] ?? '#888', border: `1px solid ${CP_LINE_COLORS[cp] ?? '#888'}55` }}
+            >
+              {CP_SHORT[cp] ?? cp}
+            </button>
+          ))}
+        </div>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="h-64 animate-pulse rounded bg-muted/40" />
+        ) : chartData.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">No transit data in window.</p>
+        ) : (
+          <ResponsiveContainer width="100%" height={240}>
+            <LineChart data={chartData} margin={{ left: -10 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+              <XAxis
+                dataKey="hour"
+                tick={{ fontSize: 9 }}
+                interval={Math.max(0, Math.floor(chartData.length / 8) - 1)}
+                angle={-25}
+                textAnchor="end"
+                height={40}
+              />
+              <YAxis tick={{ fontSize: 10 }} />
+              <Tooltip />
+              <Legend wrapperStyle={{ fontSize: 10 }} formatter={cp => CP_SHORT[String(cp)] ?? cp} />
+              {selectedCPs.map(cp => (
+                <Line
+                  key={cp}
+                  type="monotone"
+                  dataKey={cp}
+                  stroke={CP_LINE_COLORS[cp] ?? '#888'}
+                  dot={false}
+                  strokeWidth={1.5}
+                  name={cp}
+                />
+              ))}
+            </LineChart>
           </ResponsiveContainer>
         )}
       </CardContent>

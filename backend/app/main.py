@@ -89,6 +89,8 @@ from .schemas import (
     SpeedAnalyticsResponse,
     EventRatePoint,
     EventRateTimelineResponse,
+    TransitRatePoint,
+    TransitRateTimelineResponse,
     RegionMomentumRow,
     RegionMomentumResponse,
     StsProximityPair,
@@ -1624,6 +1626,51 @@ def analytics_density(region: str = "singapore_malacca", days: int = 30):
             )
         series.sort(key=lambda r: r.date)
     return DensityResponse(region=region, days=d, series=series)
+
+
+@app.get("/api/analytics/transit-rate-timeline", response_model=TransitRateTimelineResponse)
+def analytics_transit_rate_timeline(hours: int = 72, chokepoints_csv: str = ""):
+    """Hourly transit counts per chokepoint over the last N hours.
+
+    chokepoints_csv: comma-separated chokepoint names to filter (empty = all).
+    Returns one point per (hour, chokepoint) combination.
+    """
+    h = max(6, min(hours, 336))
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=h)
+    df = db.query(
+        "SELECT entered_ts, chokepoint, laden FROM transit_events WHERE entered_ts >= ? ORDER BY entered_ts",
+        [cutoff],
+        db=db.analytics_db_path(),
+    )
+    now = datetime.now(UTC)
+    as_of = _iso(now) or ""
+    if df.empty:
+        return TransitRateTimelineResponse(as_of=as_of, hours=h, chokepoints=[], points=[])
+
+    df["entered_ts"] = pd.to_datetime(df["entered_ts"])
+    df["hour"] = df["entered_ts"].dt.floor("h")
+    df["laden_flag"] = df["laden"].fillna(False).astype(bool).astype(int)
+
+    cp_filter = [c.strip() for c in chokepoints_csv.split(",") if c.strip()]
+    if cp_filter:
+        df = df[df["chokepoint"].isin(cp_filter)]
+
+    agg = (
+        df.groupby(["hour", "chokepoint"])
+        .agg(count=("chokepoint", "size"), laden_count=("laden_flag", "sum"))
+        .reset_index()
+    )
+    active_cps = sorted(agg["chokepoint"].unique().tolist())
+    points = [
+        TransitRatePoint(
+            hour=_iso(r["hour"]) or str(r["hour"]),
+            chokepoint=str(r["chokepoint"]),
+            count=int(r["count"]),
+            laden_count=int(r["laden_count"]),
+        )
+        for _, r in agg.iterrows()
+    ]
+    return TransitRateTimelineResponse(as_of=as_of, hours=h, chokepoints=active_cps, points=points)
 
 
 @app.get("/api/analytics/event-rate-timeline", response_model=EventRateTimelineResponse)
