@@ -306,6 +306,19 @@ class FleetRow(BaseModel):
     segment: str | None = None
 
 
+class OwnerRiskItem(BaseModel):
+    owner: str
+    vessel_count: int
+    avg_risk_score: float
+    max_risk_score: int
+    high_risk_count: int  # risk_score >= 50
+    ofac_count: int
+    flags: list[str]
+
+class OwnerRiskResponse(BaseModel):
+    as_of: str
+    rows: list[OwnerRiskItem]
+
 class FleetFacetItem(BaseModel):
     value: str
     count: int

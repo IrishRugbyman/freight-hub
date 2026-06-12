@@ -638,6 +638,31 @@ export function usePortFlow(kind?: string, topN?: number) {
   })
 }
 
+export interface OwnerRiskItem {
+  owner: string
+  vessel_count: number
+  avg_risk_score: number
+  max_risk_score: number
+  high_risk_count: number
+  ofac_count: number
+  flags: string[]
+}
+
+export interface OwnerRiskResponse {
+  as_of: string
+  rows: OwnerRiskItem[]
+}
+
+export function useOwnerRisk(minVessels = 2, topN = 30) {
+  const qs = `min_vessels=${minVessels}&top_n=${topN}`
+  return useQuery({
+    queryKey: ['owner-risk', qs],
+    queryFn: () => getJSON<OwnerRiskResponse>(`/api/fleet/owner-risk?${qs}`),
+    staleTime: ANALYTICS_STALE,
+    refetchInterval: REFETCH_MS,
+  })
+}
+
 export function useEvents(params?: { type?: string; days?: number; limit?: number }, enabled = true) {
   const searchParams = new URLSearchParams()
   if (params?.type) searchParams.set('type', params.type)

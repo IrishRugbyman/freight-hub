@@ -307,3 +307,108 @@ def test_fleet_risk_min(tmp_path, monkeypatch):
     assert body["total"] == 1
     assert body["rows"][0]["ship_name"] == "HIGH RISK"
     assert body["rows"][0]["risk_score"] == 65
+
+
+# ---------------------------------------------------------------------------
+# /api/fleet/owner-risk
+# ---------------------------------------------------------------------------
+
+def _make_owner_risk_client(tmp_path, monkeypatch) -> "TestClient":
+    """Registry with risk_scores set so we can assert concentration math."""
+    ais_file = tmp_path / "ais.duckdb"
+    ais_conn = duckdb.connect(str(ais_file))
+    ais_conn.execute(_AIS_SCHEMA)
+    ais_conn.close()
+
+    reg_file = tmp_path / "registry.duckdb"
+    reg_conn = duckdb.connect(str(reg_file))
+    reg_conn.execute(_REG_SCHEMA)
+    # owner A has 3 vessels (scores 60, 40, 80) -> avg=60, max=80, high=2
+    reg_conn.executemany(
+        "INSERT INTO vessel_registry (imo, ship_name, flag, owner, risk_score, fetch_ok, fetched_ts) VALUES (?,?,?,?,?,true,?)",
+        [
+            (8000001, "SHIP A1", "Liberia", "OWNER_A", 60, _NOW),
+            (8000002, "SHIP A2", "Liberia", "OWNER_A", 40, _NOW),
+            (8000003, "SHIP A3", "Panama", "OWNER_A", 80, _NOW),
+            # owner B has 2 vessels (scores 20, 30) -> avg=25, max=30, high=0
+            (8000004, "SHIP B1", "Malta", "OWNER_B", 20, _NOW),
+            (8000005, "SHIP B2", "Malta", "OWNER_B", 30, _NOW),
+            # owner C has 1 vessel (score 90) - excluded by min_vessels=2
+            (8000006, "SHIP C1", "Togo", "OWNER_C", 90, _NOW),
+            # fetch_ok=false should be excluded
+        ],
+    )
+    reg_conn.execute(
+        "INSERT INTO vessel_registry (imo, ship_name, flag, owner, risk_score, fetch_ok, fetched_ts) VALUES (?,?,?,?,?,false,?)",
+        [8000099, "BROKEN", "None", "OWNER_D", 50, _NOW],
+    )
+    reg_conn.close()
+
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
+    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
+    from app.main import app
+    return TestClient(app)
+
+
+def test_owner_risk_structure(tmp_path, monkeypatch):
+    client = _make_owner_risk_client(tmp_path, monkeypatch)
+    r = client.get("/api/fleet/owner-risk")
+    assert r.status_code == 200
+    d = r.json()
+    assert "as_of" in d
+    assert "rows" in d
+    assert isinstance(d["rows"], list)
+    for row in d["rows"]:
+        assert "owner" in row
+        assert "vessel_count" in row
+        assert "avg_risk_score" in row
+        assert "max_risk_score" in row
+        assert "high_risk_count" in row
+        assert "ofac_count" in row
+        assert "flags" in row
+
+
+def test_owner_risk_values(tmp_path, monkeypatch):
+    client = _make_owner_risk_client(tmp_path, monkeypatch)
+    r = client.get("/api/fleet/owner-risk?min_vessels=2")
+    assert r.status_code == 200
+    rows = {row["owner"]: row for row in r.json()["rows"]}
+    assert "OWNER_A" in rows
+    assert "OWNER_B" in rows
+    # Single-vessel owner excluded
+    assert "OWNER_C" not in rows
+    # fetch_ok=false excluded
+    assert "OWNER_D" not in rows
+    a = rows["OWNER_A"]
+    assert a["vessel_count"] == 3
+    assert a["avg_risk_score"] == pytest.approx(60.0, abs=0.5)
+    assert a["max_risk_score"] == 80
+    assert a["high_risk_count"] == 2
+    b = rows["OWNER_B"]
+    assert b["vessel_count"] == 2
+    assert b["avg_risk_score"] == pytest.approx(25.0, abs=0.5)
+    assert b["high_risk_count"] == 0
+
+
+def test_owner_risk_sorted_by_avg_desc(tmp_path, monkeypatch):
+    client = _make_owner_risk_client(tmp_path, monkeypatch)
+    r = client.get("/api/fleet/owner-risk?min_vessels=1")
+    assert r.status_code == 200
+    rows = r.json()["rows"]
+    scores = [row["avg_risk_score"] for row in rows]
+    assert scores == sorted(scores, reverse=True)
+
+
+def test_owner_risk_min_vessels_1_includes_single(tmp_path, monkeypatch):
+    client = _make_owner_risk_client(tmp_path, monkeypatch)
+    r = client.get("/api/fleet/owner-risk?min_vessels=1")
+    assert r.status_code == 200
+    owners = {row["owner"] for row in r.json()["rows"]}
+    assert "OWNER_C" in owners
+
+
+def test_owner_risk_top_n_clamped(tmp_path, monkeypatch):
+    client = _make_owner_risk_client(tmp_path, monkeypatch)
+    r = client.get("/api/fleet/owner-risk?min_vessels=1&top_n=2")
+    assert r.status_code == 200
+    assert len(r.json()["rows"]) <= 2

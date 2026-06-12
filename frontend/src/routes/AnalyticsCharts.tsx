@@ -12,7 +12,7 @@ import {
   YAxis,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useCongestion, useDensity, useLaden, useTransits, usePortFlow } from '@/lib/api'
+import { useCongestion, useDensity, useLaden, useTransits, usePortFlow, useOwnerRisk } from '@/lib/api'
 
 const CHOKEPOINTS = [
   'singapore_malacca', 'suez', 'hormuz', 'panama', 'gibraltar',
@@ -301,6 +301,92 @@ export function PortFlowCard() {
               })}
             </div>
           </>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+function riskColor(score: number): string {
+  if (score >= 70) return 'text-red-400'
+  if (score >= 50) return 'text-orange-400'
+  if (score >= 30) return 'text-yellow-400'
+  return 'text-green-400'
+}
+
+export function OwnerRiskCard() {
+  const [minVessels, setMinVessels] = useState(2)
+  const { data, isLoading } = useOwnerRisk(minVessels, 25)
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className="text-sm font-medium">Owner Risk Concentration</CardTitle>
+        <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+          <span>Min vessels:</span>
+          {[1, 2, 3, 5].map((n) => (
+            <button
+              key={n}
+              onClick={() => setMinVessels(n)}
+              className={`rounded px-1.5 py-0.5 font-medium transition-colors ${
+                minVessels === n ? 'bg-primary/20 text-primary' : 'hover:text-foreground'
+              }`}
+            >
+              {n}+
+            </button>
+          ))}
+        </div>
+      </CardHeader>
+      <CardContent>
+        {isLoading || !data ? (
+          <EmptyState message="Loading..." />
+        ) : data.rows.length === 0 ? (
+          <EmptyState message="No owner data available. Registry crawl may not have run yet." />
+        ) : (
+          <div className="space-y-1">
+            <div className="grid grid-cols-[1fr_3rem_3rem_3rem_3rem] gap-1 pb-1 text-[10px] font-medium text-muted-foreground border-b border-border">
+              <span>Owner</span>
+              <span className="text-right">Ships</span>
+              <span className="text-right">Avg</span>
+              <span className="text-right">Max</span>
+              <span className="text-right">High</span>
+            </div>
+            {data.rows.map((row) => (
+              <div
+                key={row.owner}
+                className="grid grid-cols-[1fr_3rem_3rem_3rem_3rem] gap-1 items-center text-xs"
+              >
+                <div className="truncate font-medium" title={row.owner}>
+                  {row.owner}
+                  {row.ofac_count > 0 && (
+                    <span className="ml-1 rounded bg-red-500/15 px-1 py-0.5 text-[9px] font-semibold text-red-400">
+                      OFAC
+                    </span>
+                  )}
+                  {row.flags.length > 0 && (
+                    <span className="ml-1 text-[9px] text-muted-foreground/60">
+                      {row.flags.slice(0, 2).join(', ')}
+                    </span>
+                  )}
+                </div>
+                <span className="text-right text-muted-foreground">{row.vessel_count}</span>
+                <span className={`text-right font-mono font-semibold ${riskColor(row.avg_risk_score)}`}>
+                  {row.avg_risk_score.toFixed(0)}
+                </span>
+                <span className={`text-right font-mono text-[10px] ${riskColor(row.max_risk_score)}`}>
+                  {row.max_risk_score}
+                </span>
+                <span className="text-right text-[10px] text-muted-foreground">
+                  {row.high_risk_count > 0 ? (
+                    <span className="text-orange-400">{row.high_risk_count}</span>
+                  ) : '0'}
+                </span>
+              </div>
+            ))}
+            <div className="pt-1 text-[10px] text-muted-foreground/50">
+              Avg/Max: risk score 0-100. High: vessels with score &gt;= 50.
+            </div>
+          </div>
         )}
       </CardContent>
     </Card>

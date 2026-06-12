@@ -43,6 +43,8 @@ from .schemas import (
     LadenResponse,
     LadenSegment,
     Meta,
+    OwnerRiskItem,
+    OwnerRiskResponse,
     PortFlowResponse,
     PortDestItem,
     RoutesResponse,
@@ -752,6 +754,51 @@ def fleet(
 def fleet_facets():
     """Distinct filter values with counts for the Fleet Explorer dropdowns."""
     return _fleet.query_facets()
+
+
+@app.get("/api/fleet/owner-risk", response_model=OwnerRiskResponse)
+def fleet_owner_risk(min_vessels: int = 2, top_n: int = 30):
+    """Owner concentration analysis: which owners control the most high-risk tonnage.
+
+    Only includes owners with >= min_vessels (clamped 1-10) vessels in the registry.
+    Returns top_n owners by avg risk score (clamped 1-100).
+    """
+    min_vessels = max(1, min(10, min_vessels))
+    top_n = max(1, min(100, top_n))
+
+    df = db.query(
+        "SELECT owner, risk_score, flag, ofac_sanctioned "
+        "FROM vessel_registry "
+        "WHERE fetch_ok = true AND owner IS NOT NULL AND risk_score IS NOT NULL",
+        db=db.registry_db_path(),
+    )
+    if df.empty:
+        return OwnerRiskResponse(as_of=_iso(datetime.now(UTC).replace(tzinfo=None)) or "", rows=[])
+
+    rows = []
+    for owner, grp in df.groupby("owner"):
+        if len(grp) < min_vessels:
+            continue
+        avg_risk = float(grp["risk_score"].mean())
+        max_risk = int(grp["risk_score"].max())
+        high_risk = int((grp["risk_score"] >= 50).sum())
+        ofac_count = int(grp["ofac_sanctioned"].fillna(False).astype(bool).sum()) if "ofac_sanctioned" in grp.columns else 0
+        flags = sorted(set(grp["flag"].dropna().tolist()))[:5]
+        rows.append(OwnerRiskItem(
+            owner=str(owner),
+            vessel_count=len(grp),
+            avg_risk_score=round(avg_risk, 1),
+            max_risk_score=max_risk,
+            high_risk_count=high_risk,
+            ofac_count=ofac_count,
+            flags=flags,
+        ))
+
+    rows.sort(key=lambda r: r.avg_risk_score, reverse=True)
+    return OwnerRiskResponse(
+        as_of=_iso(datetime.now(UTC).replace(tzinfo=None)) or "",
+        rows=rows[:top_n],
+    )
 
 
 @app.get("/api/fleet/export")
