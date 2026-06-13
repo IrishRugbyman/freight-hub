@@ -16,7 +16,7 @@ export const DEFAULT_LAYERS: LayerState = {
   headingArrows: true,
   counts: true,
   chokepoints: false,
-  eventPins: true,
+  eventPins: false,
   deckgl: false,
   heatmap: false,
   riskOverlay: true,
