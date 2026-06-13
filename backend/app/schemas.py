@@ -1143,3 +1143,27 @@ class FleetTrendResponse(BaseModel):
     region: str | None
     series: list[FleetTrendDay]
 
+
+# Phase 52: Shadow fleet monitor
+class ShadowFleetRow(BaseModel):
+    mmsi: int
+    imo: int | None
+    name: str | None
+    kind: str | None
+    segment: str | None
+    region: str | None
+    sts_count: int
+    gap_count: int
+    spoof_count: int
+    risk_score: int | None
+    ofac: bool
+    flags: list[str]
+    last_event_ts: str | None
+
+
+class ShadowFleetResponse(BaseModel):
+    as_of: str
+    days: int
+    total: int
+    rows: list[ShadowFleetRow]
+

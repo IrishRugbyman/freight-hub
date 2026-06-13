@@ -1907,3 +1907,37 @@ export function useFleetTrend(days = 30, region?: string) {
     refetchInterval: 5 * 60_000,
   })
 }
+
+// ---- Shadow fleet monitor (Phase 52) ----
+
+export interface ShadowFleetRow {
+  mmsi: number
+  imo: number | null
+  name: string | null
+  kind: string | null
+  segment: string | null
+  region: string | null
+  sts_count: number
+  gap_count: number
+  spoof_count: number
+  risk_score: number | null
+  ofac: boolean
+  flags: string[]
+  last_event_ts: string | null
+}
+
+export interface ShadowFleetResponse {
+  as_of: string
+  days: number
+  total: number
+  rows: ShadowFleetRow[]
+}
+
+export function useShadowFleet(days = 7, limit = 50) {
+  return useQuery({
+    queryKey: ['shadow-fleet', days, limit],
+    queryFn: () => getJSON<ShadowFleetResponse>(`/api/analytics/shadow-fleet?days=${days}&limit=${limit}`),
+    staleTime: ANALYTICS_STALE,
+    refetchInterval: 5 * 60_000,
+  })
+}

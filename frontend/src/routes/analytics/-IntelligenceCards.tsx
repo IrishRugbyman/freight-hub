@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   useAnomalyWatchlist, useDestinationChanges, useStsProximity,
   useStsOffenders, useReroutes, useRiskEvents, useEventRateTimeline,
+  useShadowFleet,
   type RerouteRiskEvent,
 } from '@/lib/api'
 import { EmptyState, TOOLTIP_STYLE, LEGEND_STYLE } from './-analyticsShared'
@@ -524,11 +525,99 @@ export function EventRateTimelineCard() {
 }
 
 // ---------------------------------------------------------------------------
+// ShadowFleetCard
+// ---------------------------------------------------------------------------
+export function ShadowFleetCard() {
+  const [days, setDays] = useState(7)
+  const [limit, setLimit] = useState(50)
+  const { data, isLoading } = useShadowFleet(days, limit)
+  const rows = data?.rows ?? []
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex flex-wrap items-center justify-between gap-2">
+          <span>Shadow Fleet Monitor</span>
+          <div className="flex flex-wrap gap-2 text-sm font-normal">
+            <select className="rounded border border-border bg-background px-2 py-1 text-xs" value={days} onChange={e => setDays(Number(e.target.value))}>
+              <option value={7}>Last 7d</option>
+              <option value={14}>Last 14d</option>
+              <option value={30}>Last 30d</option>
+            </select>
+            <select className="rounded border border-border bg-background px-2 py-1 text-xs" value={limit} onChange={e => setLimit(Number(e.target.value))}>
+              <option value={25}>Top 25</option>
+              <option value={50}>Top 50</option>
+              <option value={100}>Top 100</option>
+            </select>
+          </div>
+        </CardTitle>
+        {data && (
+          <p className="text-xs text-muted-foreground">
+            {data.total} vessels matched dark-transfer pattern (STS + gap/spoof) in last {data.days}d. Ranked by risk score then covert event count.
+          </p>
+        )}
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="h-64 animate-pulse rounded bg-muted/40" />
+        ) : rows.length === 0 ? (
+          <EmptyState message="No vessels matched the shadow fleet pattern in this window." />
+        ) : (
+          <div className="space-y-0.5 max-h-96 overflow-y-auto pr-1">
+            {rows.map((row, i) => (
+              <div
+                key={row.mmsi}
+                className={`rounded px-2 py-1.5 ${row.ofac ? 'border-l-2 border-red-500/60 bg-red-500/10' : 'bg-muted/15 hover:bg-muted/30'}`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="w-5 shrink-0 text-[10px] text-muted-foreground/60 tabular-nums">{i + 1}</span>
+                      <span className="text-sm font-medium truncate">{row.name ?? `MMSI ${row.mmsi}`}</span>
+                      {row.ofac && <span className="rounded bg-red-500/20 px-1 py-px text-[9px] font-bold text-red-400 uppercase">OFAC</span>}
+                      {row.segment && <span className="text-xs text-muted-foreground">{row.segment}</span>}
+                      {row.region && <span className="text-xs text-muted-foreground/60">{row.region.replace(/_/g, ' ')}</span>}
+                    </div>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 pl-6">
+                      <span className="text-[10px]">
+                        <span className="text-blue-400 font-semibold tabular-nums">{row.sts_count}</span>
+                        <span className="ml-0.5 text-muted-foreground/60">STS</span>
+                      </span>
+                      <span className="text-[10px]">
+                        <span className="text-red-400 font-semibold tabular-nums">{row.gap_count}</span>
+                        <span className="ml-0.5 text-muted-foreground/60">gap</span>
+                      </span>
+                      <span className="text-[10px]">
+                        <span className="text-purple-400 font-semibold tabular-nums">{row.spoof_count}</span>
+                        <span className="ml-0.5 text-muted-foreground/60">spoof</span>
+                      </span>
+                      {row.last_event_ts && (
+                        <span className="text-[10px] text-muted-foreground/50">
+                          {row.last_event_ts.slice(5, 16).replace('T', ' ')}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    {riskBadge(row.risk_score, row.ofac)}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Default export: Intelligence tab component
 // ---------------------------------------------------------------------------
 export default function IntelligenceTab() {
   return (
     <div className="space-y-6">
+      <ShadowFleetCard />
       <AnomalyWatchlistCard />
       <div className="grid gap-4 lg:grid-cols-2">
         <DestinationChangesCard />

@@ -7,12 +7,16 @@ const TYPE_COLORS: Record<string, string> = {
   gap: '#ef4444',
   loiter: '#eab308',
   sts: '#3b82f6',
+  spoof: '#a855f7',
+  dark_voyage: '#dc2626',
 }
 
 const TYPE_LABELS: Record<string, string> = {
   gap: 'Signal Lost',
   loiter: 'Loitering',
   sts: 'STS',
+  spoof: 'Spoof',
+  dark_voyage: 'Dark',
 }
 
 function pinSvg(color: string, label: string): string {
@@ -26,7 +30,7 @@ function pinSvg(color: string, label: string): string {
 
 function makeEventMarker(ev: AisEvent): L.Marker {
   const color = TYPE_COLORS[ev.type] ?? '#6b7280'
-  const label = ev.type === 'gap' ? '!' : ev.type === 'loiter' ? '~' : '⇌'
+  const label = ev.type === 'gap' ? '!' : ev.type === 'loiter' ? '~' : ev.type === 'spoof' ? '?' : ev.type === 'dark_voyage' ? 'D' : '⇌'
   return L.marker([ev.lat, ev.lon], {
     icon: L.divIcon({
       className: '',
@@ -47,7 +51,7 @@ function makeEventMarker(ev: AisEvent): L.Marker {
 
 export function EventPinsLayer({ visible }: { visible: boolean }) {
   const map = useMap()
-  const { data } = useEvents({ days: 2, limit: 100 }, visible)
+  const { data } = useEvents({ days: 2, limit: 300 }, visible)
 
   useEffect(() => {
     if (!visible || !data?.events.length) return

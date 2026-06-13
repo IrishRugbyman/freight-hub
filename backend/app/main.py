@@ -133,6 +133,8 @@ from .schemas import (
     ChokepointStatusResponse,
     FleetTrendDay,
     FleetTrendResponse,
+    ShadowFleetRow,
+    ShadowFleetResponse,
 )
 
 _STATIC = Path(__file__).parent / "static"
@@ -2108,6 +2110,138 @@ def analytics_fleet_trend(days: int = 30, region: str = ""):
         days=days,
         region=region or None,
         series=series,
+    )
+
+
+@app.get("/api/analytics/shadow-fleet", response_model=ShadowFleetResponse)
+def analytics_shadow_fleet(days: int = 7, limit: int = 50):
+    """Shadow fleet precursor monitor: vessels with STS events AND gap/spoof events.
+
+    Identifies vessels matching the dark-transfer pattern (STS candidate + signal lost
+    or position jump within the same window). Ranked by risk score then event count.
+    Three-DB join: analytics (events) + AIS (MMSI->IMO+name) + registry (risk scores).
+    """
+    days = max(1, min(30, days))
+    limit = max(1, min(200, limit))
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
+    now_dt = datetime.now(UTC).replace(tzinfo=None)
+    _adb = db.analytics_db_path()
+
+    # STS participants in window
+    sts_df = db.query(
+        "SELECT mmsi, mmsi2, start_ts FROM ais_events WHERE type = 'sts' AND start_ts >= ?",
+        [cutoff], db=_adb,
+    )
+    if sts_df.empty:
+        return ShadowFleetResponse(as_of=_iso(now_dt) or "", days=days, total=0, rows=[])
+
+    sts_mmsis: set[int] = set(sts_df["mmsi"].dropna().astype(int).tolist())
+    sts_mmsis.update(sts_df["mmsi2"].dropna().astype(int).tolist())
+
+    # Gap + spoof events in window - filter to STS participants
+    ph = ",".join("?" * len(sts_mmsis))
+    covert_df = db.query(
+        f"SELECT mmsi, type, start_ts FROM ais_events "
+        f"WHERE type IN ('gap','spoof') AND start_ts >= ? AND mmsi IN ({ph})",
+        [cutoff] + list(sts_mmsis), db=_adb,
+    )
+    if covert_df.empty:
+        return ShadowFleetResponse(as_of=_iso(now_dt) or "", days=days, total=0, rows=[])
+
+    covert_mmsis: set[int] = set(covert_df["mmsi"].dropna().astype(int).tolist())
+
+    # Build per-vessel event counts
+    sts_count_map: dict[int, int] = {}
+    for mmsi_val in sts_df["mmsi"].dropna().astype(int):
+        sts_count_map[mmsi_val] = sts_count_map.get(mmsi_val, 0) + 1
+    for mmsi_val in sts_df["mmsi2"].dropna().astype(int):
+        sts_count_map[mmsi_val] = sts_count_map.get(mmsi_val, 0) + 1
+
+    gap_count_map: dict[int, int] = {}
+    spoof_count_map: dict[int, int] = {}
+    last_event_map: dict[int, str] = {}
+    for _, r in covert_df.iterrows():
+        m = int(r["mmsi"])
+        if r["type"] == "gap":
+            gap_count_map[m] = gap_count_map.get(m, 0) + 1
+        else:
+            spoof_count_map[m] = spoof_count_map.get(m, 0) + 1
+        ts_str = _iso(r["start_ts"]) or ""
+        if m not in last_event_map or ts_str > last_event_map[m]:
+            last_event_map[m] = ts_str
+
+    # MMSI -> name + IMO from live_positions
+    all_mmsis = list(covert_mmsis)
+    lp_df = db.query(
+        f"SELECT mmsi, name, imo FROM live_positions WHERE mmsi IN ({','.join('?'*len(all_mmsis))})",
+        all_mmsis,
+    )
+    mmsi_info: dict[int, dict] = {}
+    for _, r in lp_df.iterrows():
+        mmsi_info[int(r["mmsi"])] = {"name": _str_or_none(r.get("name")), "imo": r.get("imo")}
+
+    # IMO -> risk from registry
+    known_imos = [_valid_imo(v.get("imo")) for v in mmsi_info.values() if _valid_imo(v.get("imo"))]
+    imo_risk: dict[int, dict] = {}
+    if known_imos:
+        ph_imo = ",".join("?" * len(known_imos))
+        reg_df = db.query(
+            f"SELECT imo, risk_score, COALESCE(ofac_sanctioned, false) AS ofac, flag "
+            f"FROM vessel_registry WHERE imo IN ({ph_imo}) AND fetch_ok = true",
+            known_imos, db=db.registry_db_path(),
+        )
+        for _, r in reg_df.iterrows():
+            imo_risk[int(r["imo"])] = {
+                "risk_score": int(r["risk_score"]) if r["risk_score"] is not None else None,
+                "ofac": bool(r["ofac"]),
+                "flag": _str_or_none(r.get("flag")),
+            }
+
+    # Live region from cache
+    live_df = _live_all()
+    mmsi_region: dict[int, str | None] = {}
+    mmsi_kind: dict[int, str | None] = {}
+    mmsi_segment: dict[int, str | None] = {}
+    if not live_df.empty:
+        for _, _row in live_df[live_df["mmsi"].isin(all_mmsis)].iterrows():
+            _m = int(_row["mmsi"])
+            mmsi_region[_m] = _str_or_none(_row.get("region"))
+            mmsi_kind[_m] = _str_or_none(_row.get("kind"))
+            mmsi_segment[_m] = _str_or_none(_row.get("segment"))
+
+    rows: list[ShadowFleetRow] = []
+    for mmsi_val in covert_mmsis:
+        info = mmsi_info.get(mmsi_val, {})
+        imo_val = _valid_imo(info.get("imo"))
+        reg = imo_risk.get(imo_val, {}) if imo_val else {}
+        rows.append(ShadowFleetRow(
+            mmsi=mmsi_val,
+            imo=imo_val,
+            name=info.get("name"),
+            kind=mmsi_kind.get(mmsi_val),
+            segment=mmsi_segment.get(mmsi_val),
+            region=mmsi_region.get(mmsi_val),
+            sts_count=sts_count_map.get(mmsi_val, 0),
+            gap_count=gap_count_map.get(mmsi_val, 0),
+            spoof_count=spoof_count_map.get(mmsi_val, 0),
+            risk_score=reg.get("risk_score"),
+            ofac=bool(reg.get("ofac", False)),
+            flags=[reg["flag"]] if reg.get("flag") else [],
+            last_event_ts=last_event_map.get(mmsi_val),
+        ))
+
+    rows.sort(key=lambda r: (
+        -(r.risk_score or 0),
+        -(r.gap_count + r.spoof_count),
+        -(r.sts_count),
+    ))
+    rows = rows[:limit]
+
+    return ShadowFleetResponse(
+        as_of=_iso(now_dt) or "",
+        days=days,
+        total=len(covert_mmsis),
+        rows=rows,
     )
 
 

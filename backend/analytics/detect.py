@@ -299,7 +299,11 @@ def fleet_density_rows(df: pd.DataFrame, ts: pd.Timestamp, vessel_states: dict) 
             draught = row.get("draught") if "draught" in grp.columns else None
             if pd.isna(draught) if draught is not None else True:
                 draught = None
-            status = laden_status(draught, max_seen, str(segment) if segment else None)
+            # If snapshot has no draught but we have a prior classified state, reuse it.
+            if draught is None and state.get("laden") in ("laden", "ballast"):
+                status = state["laden"]
+            else:
+                status = laden_status(draught, max_seen, str(segment) if segment else None)
             if status == "laden":
                 laden_count += 1
             elif status == "ballast":
