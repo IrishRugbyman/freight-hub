@@ -1,5 +1,35 @@
 # Freight Hub Changelog
 
+## 2026-06-14 - Phase 53: High-risk events syndication feed (Atom + JSON Feed)
+
+**Added:** Public, no-accounts syndication feeds over the same `ais_events` rows that power
+`/api/events`. Closes the last unbuilt backlog item (the "email/RSS digest"), delivered as
+feeds rather than email to fit the deliberately no-accounts / no-SMTP public-showcase stance.
+
+- `GET /api/feed.xml` - Atom 1.0 (`application/atom+xml`), well-formed, self/alternate links,
+  feed `updated` = newest entry, per-entry stable `urn:freight-event:<event_id>` ids,
+  `category`, RFC 3339 timestamps.
+- `GET /api/feed.json` - JSON Feed 1.1 (`application/feed+json`).
+- Default surfaces only high-risk types (`dark_voyage`, `spoof`, `gap`, `loiter`, `sts`);
+  reroutes excluded as noise. Overridable via `?types=`, window via `?days=` (1-30),
+  `?limit=` (1-500). Each entry deep-links to the tracker (`/?mmsi=<mmsi>`) and is name-enriched
+  from `live_positions` (falls back to `MMSI <n>` when a vessel has aged out).
+- New `app/feed.py` pure builders (hand-built Atom via stdlib, JSON Feed as a dict; no new
+  deps). Shared `_fetch_events_raw()` read helper in `main.py`.
+- Frontend: `SubscribeFeed` RSS popover on the Events page header (copy Atom/JSON URLs, built
+  from `window.location.origin` so it works in dev and prod). No new deps.
+- 5 new backend tests (Atom well-formedness, high-risk default filter, `types=` override,
+  JSON Feed structure, empty-DB valid feed). 324 backend tests passing; frontend build clean.
+
+**Also:** `uv sync --extra dev` added `psycopg2-binary` (env drift after the market-data
+loaders migration left the freight venv missing it, which had been erroring the whole suite).
+
+**Artifacts:** `backend/app/feed.py`, `backend/app/main.py` (Response import, feed module
+import, `_fetch_events_raw`, `_feed_types`, `feed_atom`, `feed_json`), `backend/tests/test_endpoints.py`,
+`frontend/src/components/SubscribeFeed.tsx`, `frontend/src/routes/events.tsx`.
+
+---
+
 ## 2026-06-12 - Phase 51: Analytics build crash fixes + fleet trend chart + events UX
 
 **Fixed:** Three production bugs that had been causing every analytics build to crash before the watermark was set (forcing 9-min full rebuilds every hour instead of 30-sec incremental runs):

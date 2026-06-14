@@ -28,7 +28,7 @@ Promote to a phase only with a written plan:
 
 - **Port-call history:** derive arrival/departure events per vessel from anchored episodes + destination changes; per-vessel voyage timeline on the detail panel.
 - **Owner/fleet dashboards:** aggregate analytics by owner (which owners' VLCCs are laden vs ballast right now); needs registry join.
-- **Email/RSS digest:** daily summary of new high-risk events (gaps, STS, new high-score vessels).
+- ~~**Email/RSS digest:** daily summary of new high-risk events.~~ Done 2026-06-14 (Phase 53): Atom + JSON Feed at `/api/feed.xml` and `/api/feed.json`, plus Subscribe popover on the Events page. Delivered as feeds (no accounts/SMTP) per the public-showcase stance.
 
 ---
 

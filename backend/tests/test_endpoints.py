@@ -272,6 +272,78 @@ def test_events_empty_outside_days(analytics_client):
     assert r.status_code == 200
 
 
+# ---- /api/feed.xml + /api/feed.json (syndication) ----
+
+def test_feed_atom_well_formed(analytics_client):
+    import xml.etree.ElementTree as ET
+
+    r = analytics_client.get("/api/feed.xml")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/atom+xml")
+    root = ET.fromstring(r.text)  # raises on malformed XML
+    ns = {"a": "http://www.w3.org/2005/Atom"}
+    entries = root.findall("a:entry", ns)
+    # seed has gap + loiter + sts (all high-risk), no reroute
+    assert len(entries) == 3
+    titles = [e.findtext("a:title", default="", namespaces=ns) for e in entries]
+    assert any("STS Candidate" in t for t in titles)
+    # entry ids are stable urns built from event_id
+    ids = [e.findtext("a:id", default="", namespaces=ns) for e in entries]
+    assert any(i.startswith("urn:freight-event:") for i in ids)
+
+
+def test_feed_atom_excludes_reroute_by_default(analytics_client):
+    # seed has no reroute; assert the default filter is the high-risk set, not all
+    from app.feed import HIGH_RISK_TYPES
+
+    assert "reroute" not in HIGH_RISK_TYPES
+    r = analytics_client.get("/api/feed.xml")
+    assert "reroute" not in r.text
+
+
+def test_feed_types_override(analytics_client):
+    import xml.etree.ElementTree as ET
+
+    r = analytics_client.get("/api/feed.xml", params={"types": "sts"})
+    assert r.status_code == 200
+    root = ET.fromstring(r.text)
+    ns = {"a": "http://www.w3.org/2005/Atom"}
+    entries = root.findall("a:entry", ns)
+    assert len(entries) == 1
+    assert "STS Candidate" in entries[0].findtext("a:title", default="", namespaces=ns)
+
+
+def test_feed_json_structure(analytics_client):
+    r = analytics_client.get("/api/feed.json")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/feed+json")
+    doc = r.json()
+    assert doc["version"] == "https://jsonfeed.org/version/1.1"
+    assert doc["title"]
+    assert isinstance(doc["items"], list)
+    assert len(doc["items"]) == 3
+    item = doc["items"][0]
+    for field in ("id", "url", "title", "date_published"):
+        assert field in item
+    assert item["url"].startswith("https://freight.lbzgiu.xyz/?mmsi=")
+
+
+def test_feed_empty_db_valid(client, tmp_path, monkeypatch):
+    # Point analytics DB at a missing file -> empty event set -> still a valid empty feed.
+    # (analytics_db_path reads ANALYTICS_DB at request time, so post-fixture setenv works.)
+    import xml.etree.ElementTree as ET
+
+    monkeypatch.setenv("ANALYTICS_DB", str(tmp_path / "missing_analytics.duckdb"))
+    r = client.get("/api/feed.xml")
+    assert r.status_code == 200
+    root = ET.fromstring(r.text)
+    ns = {"a": "http://www.w3.org/2005/Atom"}
+    assert root.findall("a:entry", ns) == []
+    rj = client.get("/api/feed.json")
+    assert rj.status_code == 200
+    assert rj.json()["items"] == []
+
+
 # ---- /api/vessels/{mmsi}/state ----
 
 def test_vessel_state_known(analytics_client):

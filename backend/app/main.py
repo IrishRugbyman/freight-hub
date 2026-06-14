@@ -21,13 +21,13 @@ from ais.regions import REGIONS
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from loaders.freight import load_ais_dispersion
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
-from . import db, equasis, fleet as _fleet
+from . import db, equasis, feed as _feed, fleet as _fleet
 from .runner_dispersion import run_dispersion_default
 from .runner_routes import run_routes_default
 from .schemas import (
@@ -2394,6 +2394,107 @@ def events(
         )
 
     return EventsResponse(events=result_events, total=len(result_events))
+
+
+def _fetch_events_raw(types: list[str], days: int, limit: int) -> list[dict]:
+    """Fetch + name-enrich ``ais_events`` rows as plain dicts.
+
+    Shared read path for the syndication feeds. ``types`` filters by event type
+    (empty list = no type filter); rows are returned newest-first.
+    """
+    days = max(1, min(30, days))
+    limit = max(1, min(500, limit))
+    _db = db.analytics_db_path()
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
+
+    where_clauses = ["start_ts >= ?"]
+    params: list = [cutoff]
+    if types:
+        placeholders = ",".join(["?"] * len(types))
+        where_clauses.append(f"type IN ({placeholders})")
+        params.extend(types)
+
+    sql = (
+        "SELECT event_id, type, mmsi, mmsi2, start_ts, end_ts, lat, lon, "
+        "       region, kind, segment, details "
+        "FROM ais_events WHERE " + " AND ".join(where_clauses) +
+        " ORDER BY start_ts DESC LIMIT ?"
+    )
+    params.append(limit)
+
+    rows_df = db.query(sql, params, db=_db)
+    if rows_df.empty:
+        return []
+
+    all_mmsis = list(
+        set(rows_df["mmsi"].dropna().astype(int).tolist())
+        | set(rows_df["mmsi2"].dropna().astype(int).tolist())
+    )
+    name_map: dict[int, str] = {}
+    if all_mmsis:
+        placeholders = ",".join(["?"] * len(all_mmsis))
+        name_df = db.query(
+            f"SELECT mmsi, name FROM live_positions WHERE mmsi IN ({placeholders})",
+            all_mmsis,
+        )
+        if not name_df.empty:
+            name_map = dict(zip(name_df["mmsi"].astype(int), name_df["name"].fillna("")))
+
+    out: list[dict] = []
+    for _, row in rows_df.iterrows():
+        mmsi_int = int(row["mmsi"])
+        mmsi2_val = row["mmsi2"]
+        mmsi2_int = (
+            int(mmsi2_val) if mmsi2_val is not None and not pd.isna(mmsi2_val) else None
+        )
+        try:
+            details_dict = _json.loads(row["details"]) if row["details"] else {}
+        except (ValueError, TypeError):
+            details_dict = {}
+        out.append(
+            {
+                "event_id": str(row["event_id"]),
+                "type": str(row["type"]),
+                "mmsi": mmsi_int,
+                "mmsi2": mmsi2_int,
+                "start_ts": _iso(row["start_ts"]) or "",
+                "end_ts": _iso(row["end_ts"]) or "",
+                "lat": float(row["lat"]),
+                "lon": float(row["lon"]),
+                "region": str(row["region"]) if row["region"] else None,
+                "kind": str(row["kind"]) if row["kind"] else None,
+                "segment": str(row["segment"]) if row["segment"] else None,
+                "details": details_dict,
+                "vessel_name": name_map.get(mmsi_int),
+                "vessel2_name": name_map.get(mmsi2_int) if mmsi2_int else None,
+            }
+        )
+    return out
+
+
+def _feed_types(types: str | None) -> list[str]:
+    """Resolve the ?types= override to a validated list, defaulting to high-risk."""
+    if not types:
+        return list(_feed.HIGH_RISK_TYPES)
+    requested = [t.strip() for t in types.split(",") if t.strip()]
+    valid = set(_feed.HIGH_RISK_TYPES) | {"reroute"}
+    return [t for t in requested if t in valid] or list(_feed.HIGH_RISK_TYPES)
+
+
+@app.get("/api/feed.xml")
+def feed_atom(days: int = 7, limit: int = 100, types: str | None = None):
+    """Atom 1.0 feed of high-risk maritime events. ?days=7 ?types=dark_voyage,sts."""
+    events = _fetch_events_raw(_feed_types(types), days, limit)
+    xml = _feed.build_atom(events, f"{_feed.SITE_URL}/api/feed.xml")
+    return Response(content=xml, media_type="application/atom+xml; charset=utf-8")
+
+
+@app.get("/api/feed.json")
+def feed_json(days: int = 7, limit: int = 100, types: str | None = None):
+    """JSON Feed 1.1 of high-risk maritime events. ?days=7 ?types=dark_voyage,sts."""
+    events = _fetch_events_raw(_feed_types(types), days, limit)
+    doc = _feed.build_json_feed(events, f"{_feed.SITE_URL}/api/feed.json")
+    return Response(content=doc, media_type="application/feed+json; charset=utf-8")
 
 
 @app.get("/api/fleet", response_model=FleetResponse)

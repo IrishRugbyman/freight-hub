@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react'
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useEvents, type AisEvent } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { SubscribeFeed } from '@/components/SubscribeFeed'
 
 export const Route = createFileRoute('/events')({ component: EventsPage })
 
@@ -108,15 +109,18 @@ export default function EventsPage() {
           })}
         </div>
 
-        <select
-          value={days}
-          onChange={(e) => setDays(Number(e.target.value))}
-          className="ml-auto rounded border border-border bg-card px-2 py-1 text-sm text-foreground"
-        >
-          {[1, 3, 7, 14, 30].map((d) => (
-            <option key={d} value={d}>Last {d}d</option>
-          ))}
-        </select>
+        <div className="ml-auto flex items-center gap-2">
+          <SubscribeFeed />
+          <select
+            value={days}
+            onChange={(e) => setDays(Number(e.target.value))}
+            className="rounded border border-border bg-card px-2 py-1 text-sm text-foreground"
+          >
+            {[1, 3, 7, 14, 30].map((d) => (
+              <option key={d} value={d}>Last {d}d</option>
+            ))}
+          </select>
+        </div>
       </div>
 
       <Card>
