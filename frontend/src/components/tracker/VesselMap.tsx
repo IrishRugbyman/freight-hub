@@ -6,6 +6,7 @@ import { VesselLayer } from './VesselLayer'
 import { ChokepointLayer } from './ChokepointLayer'
 import { TrailLayer } from './TrailLayer'
 import { EventPinsLayer } from './EventPinsLayer'
+import { PipelineLayer } from './PipelineLayer'
 import { RiskLayer } from './RiskLayer'
 import { useHighRiskPositions } from '@/lib/api'
 import { colorFor } from '@/lib/segments'
@@ -85,6 +86,7 @@ export function VesselMap({
       )}
       {layers.chokepoints && <ChokepointLayer />}
       <EventPinsLayer visible={layers.eventPins} />
+      <PipelineLayer visible={layers.pipelines} />
       {layers.riskOverlay && riskPositions.length > 0 && (
         <RiskLayer
           positions={riskPositions}

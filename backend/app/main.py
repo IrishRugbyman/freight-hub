@@ -135,6 +135,8 @@ from .schemas import (
     FleetTrendResponse,
     ShadowFleetRow,
     ShadowFleetResponse,
+    PipelineSegment,
+    PipelinesResponse,
 )
 
 _STATIC = Path(__file__).parent / "static"
@@ -5329,3 +5331,84 @@ def analytics_chokepoint_status():
         ))
 
     return ChokepointStatusResponse(as_of=now_dt.isoformat(), rows=rows)
+
+
+# Phase 54: Pipeline disruption map layer
+# Cache avoids re-querying PostgreSQL on every map render (data changes ~quarterly).
+_pipelines_cache: dict[bool, tuple[float, PipelinesResponse]] = {}
+_PIPELINES_TTL = 3600.0  # 1 hour
+
+
+@app.get("/api/pipelines", response_model=PipelinesResponse)
+def get_pipelines(disrupted_only: bool = True):
+    """Pipeline segments for the map layer.
+
+    By default returns only disrupted pipelines (offline + reduced, currently ~37).
+    Pass disrupted_only=false for all 618 pipelines.
+    Data source: World Monitor (Global Energy Monitor, CC-BY 4.0) via market_data PostgreSQL.
+    """
+    import math
+    import time
+
+    import pandas as pd
+    from loaders.worldmonitor import load_pipelines_for_map
+
+    now = time.monotonic()
+    if disrupted_only in _pipelines_cache:
+        cached_ts, cached_result = _pipelines_cache[disrupted_only]
+        if now - cached_ts < _PIPELINES_TTL:
+            return cached_result
+
+    try:
+        df = load_pipelines_for_map(disrupted_only=disrupted_only)
+    except Exception:
+        df = pd.DataFrame()
+
+    def _float(v) -> float | None:
+        try:
+            f = float(v)
+            return None if math.isnan(f) else round(f, 3)
+        except (TypeError, ValueError):
+            return None
+
+    def _str(v) -> str | None:
+        return str(v) if v is not None and not (isinstance(v, float) and math.isnan(v)) else None
+
+    rows: list[PipelineSegment] = []
+    for _, r in df.iterrows():
+        rows.append(PipelineSegment(
+            id=str(r["id"]),
+            name=str(r["name"]),
+            commodity=str(r["commodity"]),
+            physical_state=str(r["physical_state"]),
+            capacity_mbd=_float(r.get("capacity_mbd")),
+            capacity_bcm_yr=_float(r.get("capacity_bcm_yr")),
+            from_country=str(r["from_country"]),
+            to_country=str(r["to_country"]),
+            start_lat=float(r["start_lat"]),
+            start_lon=float(r["start_lon"]),
+            end_lat=float(r["end_lat"]),
+            end_lon=float(r["end_lon"]),
+            disruption_description=_str(r.get("disruption_description")),
+            disruption_event_type=_str(r.get("disruption_event_type")),
+            disruption_since=str(r["disruption_since"]) if r.get("disruption_since") else None,
+        ))
+
+    total_offline_mbd = sum(
+        (p.capacity_mbd or 0.0) for p in rows if p.physical_state == "offline"
+    )
+    total_offline_bcm = sum(
+        (p.capacity_bcm_yr or 0.0) for p in rows if p.physical_state == "offline"
+    )
+
+    result = PipelinesResponse(
+        as_of=datetime.now(UTC).isoformat(),
+        disrupted_only=disrupted_only,
+        total_offline=sum(1 for p in rows if p.physical_state == "offline"),
+        total_reduced=sum(1 for p in rows if p.physical_state == "reduced"),
+        total_offline_mbd=round(total_offline_mbd, 2),
+        total_offline_bcm=round(total_offline_bcm, 1),
+        pipelines=rows,
+    )
+    _pipelines_cache[disrupted_only] = (now, result)
+    return result

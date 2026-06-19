@@ -1167,3 +1167,32 @@ class ShadowFleetResponse(BaseModel):
     total: int
     rows: list[ShadowFleetRow]
 
+
+# Phase 54: Pipeline disruption map layer
+class PipelineSegment(BaseModel):
+    id: str
+    name: str
+    commodity: str
+    physical_state: str
+    capacity_mbd: float | None = None
+    capacity_bcm_yr: float | None = None
+    from_country: str
+    to_country: str
+    start_lat: float
+    start_lon: float
+    end_lat: float
+    end_lon: float
+    disruption_description: str | None = None
+    disruption_event_type: str | None = None
+    disruption_since: str | None = None
+
+
+class PipelinesResponse(BaseModel):
+    as_of: str
+    disrupted_only: bool
+    total_offline: int
+    total_reduced: int
+    total_offline_mbd: float
+    total_offline_bcm: float
+    pipelines: list[PipelineSegment]
+

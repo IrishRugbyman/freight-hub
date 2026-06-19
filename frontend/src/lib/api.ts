@@ -1941,3 +1941,42 @@ export function useShadowFleet(days = 7, limit = 50) {
     refetchInterval: 5 * 60_000,
   })
 }
+
+// Phase 54: Pipeline disruption layer
+export interface PipelineSegment {
+  id: string
+  name: string
+  commodity: string
+  physical_state: 'offline' | 'reduced' | 'flowing' | 'unknown'
+  capacity_mbd: number | null
+  capacity_bcm_yr: number | null
+  from_country: string
+  to_country: string
+  start_lat: number
+  start_lon: number
+  end_lat: number
+  end_lon: number
+  disruption_description: string | null
+  disruption_event_type: string | null
+  disruption_since: string | null
+}
+
+export interface PipelinesResponse {
+  as_of: string
+  disrupted_only: boolean
+  total_offline: number
+  total_reduced: number
+  total_offline_mbd: number
+  total_offline_bcm: number
+  pipelines: PipelineSegment[]
+}
+
+export function usePipelines(enabled = true) {
+  return useQuery({
+    queryKey: ['pipelines'],
+    queryFn: () => getJSON<PipelinesResponse>('/api/pipelines'),
+    staleTime: 60 * 60_000,
+    refetchInterval: 60 * 60_000,
+    enabled,
+  })
+}

@@ -6,6 +6,7 @@ export interface LayerState {
   counts: boolean
   chokepoints: boolean
   eventPins: boolean
+  pipelines: boolean
   deckgl: boolean
   heatmap: boolean
   riskOverlay: boolean
@@ -17,6 +18,7 @@ export const DEFAULT_LAYERS: LayerState = {
   counts: true,
   chokepoints: false,
   eventPins: false,
+  pipelines: false,
   deckgl: false,
   heatmap: false,
   riskOverlay: true,

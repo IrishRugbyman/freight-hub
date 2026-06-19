@@ -4472,3 +4472,45 @@ def test_fleet_trend_no_region_filter(analytics_client):
     d = r.json()
     # No suez data in seed
     assert d["series"] == []
+
+
+# Phase 54: Pipeline disruption layer (reads PostgreSQL - live server only)
+def test_pipelines_disrupted_only(client):
+    r = client.get("/api/pipelines")
+    assert r.status_code == 200
+    body = r.json()
+    assert "pipelines" in body
+    assert "total_offline" in body
+    assert "total_reduced" in body
+    assert isinstance(body["pipelines"], list)
+    for p in body["pipelines"]:
+        assert p["physical_state"] in ("offline", "reduced")
+        assert p["start_lat"] is not None
+        assert p["end_lat"] is not None
+
+
+def test_pipelines_response_schema(client):
+    r = client.get("/api/pipelines")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["disrupted_only"] is True
+    assert body["total_offline"] >= 0
+    assert body["total_reduced"] >= 0
+    assert body["total_offline_mbd"] >= 0
+    assert body["total_offline_bcm"] >= 0
+    # Pipeline count consistent with totals
+    n_offline = sum(1 for p in body["pipelines"] if p["physical_state"] == "offline")
+    n_reduced = sum(1 for p in body["pipelines"] if p["physical_state"] == "reduced")
+    assert n_offline == body["total_offline"]
+    assert n_reduced == body["total_reduced"]
+
+
+def test_pipelines_all_mode(client):
+    r = client.get("/api/pipelines?disrupted_only=false")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["disrupted_only"] is False
+    # All-pipelines mode returns more than disrupted-only mode
+    r2 = client.get("/api/pipelines")
+    body2 = r2.json()
+    assert len(body["pipelines"]) > len(body2["pipelines"])
