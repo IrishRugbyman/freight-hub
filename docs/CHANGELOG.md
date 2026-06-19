@@ -1,5 +1,34 @@
 # Freight Hub Changelog
 
+## 2026-06-19 - Phase 54: Pipeline disruption map layer
+
+**Added:** Toggleable "Disrupted pipelines" layer on the vessel tracker map. Draws the 37
+currently offline or reduced global energy pipelines as color-coded Polylines on top of
+live vessel positions (offline=red dashed, reduced=orange). Clicking a line opens a popup
+with pipeline name, route, capacity, event type, and the disruption description from the
+World Monitor database. The layer is off by default and can be toggled via the Controls panel.
+
+Data source: World Monitor (Global Energy Monitor, CC-BY 4.0) - same dataset as the
+quant research projects (gas-storage, transport-arb). Current state: 15 pipelines offline
+(4.62 mbd / 399 bcm/yr), 22 pipelines reduced. Key offline: Kirkuk-Ceyhan (1.6 mbd, IQ->TR,
+Mar 2023), Druzhba North (1.0 mbd, RU->DE, Feb 2023), Nord Stream 1+2 (55 bcm/yr each, sabotage
+Sep 2022), Brotherhood/Soyuz Ukraine transit (142 bcm/yr, commercial end Jan 2025).
+
+Backend: New `load_pipelines_for_map(disrupted_only)` loader in `loaders/worldmonitor.py`
+(LATERAL JOIN to attach the most recent active disruption per pipeline). `GET /api/pipelines`
+endpoint with 1h in-process cache. `PipelineSegment` + `PipelinesResponse` schemas.
+3 new tests; 323 total passing.
+
+Frontend: `PipelineLayer.tsx` (imperative L.polyline), `usePipelines()` hook in `api.ts`,
+`pipelines` key in `LayerState` and `DEFAULT_LAYERS`, toggle in `LayerToggles`.
+
+**Artifacts:** `backend/app/main.py`, `backend/app/schemas.py`, `backend/tests/test_endpoints.py`,
+`frontend/src/components/tracker/PipelineLayer.tsx`, `frontend/src/lib/api.ts`,
+`frontend/src/components/tracker/{VesselMap,LayerToggles,types}.tsx`,
+`shared/market-data/loaders/worldmonitor.py`.
+
+---
+
 ## 2026-06-14 - Phase 53: High-risk events syndication feed (Atom + JSON Feed)
 
 **Added:** Public, no-accounts syndication feeds over the same `ais_events` rows that power
