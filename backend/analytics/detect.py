@@ -637,8 +637,10 @@ def sts_candidates(df: pd.DataFrame) -> list[dict]:
     if df.empty or "kind" not in df.columns:
         return []
 
-    # Filter to slow tankers outside anchorage zones
-    tankers = df[df["kind"] == "tanker"].copy()
+    # Filter to slow tankers outside anchorage zones.
+    # Exclude "Small" segment: Small tankers moored in port account for the vast
+    # majority of false-positive co-locations in dense port areas like Busan and ARA.
+    tankers = df[(df["kind"] == "tanker") & (df["segment"].fillna("") != "Small")].copy()
     if tankers.empty:
         return []
 

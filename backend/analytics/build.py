@@ -411,6 +411,17 @@ def _run_inner(conn: duckdb.DuckDBPyConnection, reset: bool) -> None:
     max_ts_dt = max_ts.to_pydatetime() if hasattr(max_ts, "to_pydatetime") else max_ts
     lookback_since = max_ts_dt - timedelta(hours=48)
 
+    # Clear re-detected types covering the lookback window before reinserting.
+    # STS, loitering, and spoof are re-detected from scratch on every run; their
+    # event_id is derived from start_ts which shifts as the sliding window advances,
+    # so without this clear step each build creates new duplicates for ongoing events.
+    # Gaps use a different mechanism (stable on last-seen-fix) and are NOT cleared.
+    for _t in ("sts", "loiter", "spoof"):
+        conn.execute(
+            "DELETE FROM ais_events WHERE type = ? AND start_ts >= ?",
+            [_t, lookback_since],
+        )
+
     df_48h = _ais_query(
         "SELECT mmsi, snapshot_ts, lat, lon, sog, nav_status, draught, destination, "
         "       kind, segment, region "
