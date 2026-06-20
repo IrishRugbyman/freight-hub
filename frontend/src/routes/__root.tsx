@@ -35,6 +35,7 @@ function RootLayout() {
         <nav className="flex items-center">
           <NavItem to="/">Tracker</NavItem>
           <NavItem to="/fleet">Fleet</NavItem>
+          <NavItem to="/pipelines">Pipelines</NavItem>
           <NavItem to="/routes">Routes</NavItem>
           <NavItem to="/dispersion">Dispersion</NavItem>
           <NavItem to="/analytics">Analytics</NavItem>
