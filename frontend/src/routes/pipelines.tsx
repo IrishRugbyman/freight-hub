@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { MapPin } from 'lucide-react'
+import { ChevronDown, ChevronRight, MapPin } from 'lucide-react'
 import { usePipelines, type PipelineSegment } from '@/lib/api'
 
 export const Route = createFileRoute('/pipelines')({
@@ -310,7 +310,7 @@ export default function PipelinesPage() {
                     <tr
                       key={p.id}
                       className={`cursor-pointer border-b border-border/20 transition-colors ${disrupted ? 'hover:bg-muted/40' : 'hover:bg-muted/20'}`}
-                      onClick={() => setExpanded(isExpanded ? null : p.id)}
+                      onClick={() => navigate({ to: '/', search: { pipeline_id: p.id } as never })}
                     >
                       <td className="px-4 py-2.5" style={{ minWidth: '240px', maxWidth: '320px' }}>
                         <span
@@ -355,16 +355,30 @@ export default function PipelinesPage() {
                         )}
                       </td>
                       <td className="px-2 py-2.5">
-                        <button
-                          title="View on map"
-                          className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-muted hover:text-primary"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            navigate({ to: '/', search: { pipeline_id: p.id } as never })
-                          }}
-                        >
-                          <MapPin size={13} />
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button
+                            title="View on map"
+                            className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-muted hover:text-primary"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              navigate({ to: '/', search: { pipeline_id: p.id } as never })
+                            }}
+                          >
+                            <MapPin size={13} />
+                          </button>
+                          {p.disruption_description && (
+                            <button
+                              title={isExpanded ? 'Collapse' : 'Show disruption detail'}
+                              className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-muted hover:text-foreground"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setExpanded(isExpanded ? null : p.id)
+                              }}
+                            >
+                              {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                     {isExpanded && p.disruption_description && (
