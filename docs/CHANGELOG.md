@@ -1,5 +1,17 @@
 # Freight Hub Changelog
 
+## 2026-06-20 - UX: Vessel deep-links + pipeline map-link
+
+**Pipeline label fix:** "Disrupted pipelines" layer toggle renamed to "Pipelines" (it always showed all 618, not just disrupted).
+
+**Pipeline map-link:** MapPin button added to each row in `/pipelines` table. Clicking navigates to `/?pipeline_id=X`, which enables the pipelines layer, highlights the pipeline with a white halo + thicker colored line, calls `map.fitBounds` to the pipeline endpoints (max zoom 6, 80px padding), and opens the popup 600ms later. The `pipeline_id` search param is new in the tracker's `validateSearch`.
+
+**Vessel deep-links from analytics:** Every vessel row in the Intelligence, Ports & Cargo, and Fleet analytics tabs is now clickable and navigates to the tracker map with the vessel selected (and zoomed if lat/lon available). Covers: Anomaly Watchlist, Destination Changes, STS Proximity, STS Offenders, Reroutes, Risk Event Feed, Shadow Fleet Monitor (Intelligence tab); Port Arrivals, Cargo Transitions, Cargo State Changes (Ports & Cargo tab); Speed Anomalies, Slow Steamers (Fleet tab); Vessel Risk Leaderboard (Risk tab). Uses a `useGoToTracker()` hook pattern (`?mmsi=X&lat=Y&lon=Z` when coordinates available, `?mmsi=X` only when not).
+
+**Artifacts:** `frontend/src/components/tracker/{LayerToggles,PipelineLayer,VesselMap}.tsx`, `frontend/src/routes/{index,pipelines}.tsx`, `frontend/src/routes/analytics/{-IntelligenceCards,-RiskCards,-PortsCargoCards,-FleetCards}.tsx`.
+
+---
+
 ## 2026-06-20 - Phase 55+56: Owner fleet status card + Pipelines page
 
 **Tried:** Two backlog items: (1) live laden/ballast breakdown per beneficial owner by joining live_positions -> vessel_registry (via IMO) -> vessel_state; (2) dedicated /pipelines page showing all 618 World Monitor pipelines in a searchable/sortable table.
