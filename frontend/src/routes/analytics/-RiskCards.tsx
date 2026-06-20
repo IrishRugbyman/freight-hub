@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from '@tanstack/react-router'
 import {
   Bar, CartesianGrid, ComposedChart, Legend, Line,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -75,6 +76,7 @@ export function VesselRiskLeaderboardCard() {
   const [kindFilter, setKindFilter] = useState('')
   const { data, isLoading } = useVesselRiskScores(topN, days, '', kindFilter, 5)
   const rows = data?.rows ?? []
+  const navigate = useNavigate()
 
   return (
     <Card>
@@ -132,7 +134,7 @@ export function VesselRiskLeaderboardCard() {
                 {rows.map((row, i) => {
                   const label = riskScoreLabel(row.total_score)
                   return (
-                    <tr key={row.mmsi} className="border-b border-border/20 hover:bg-muted/20">
+                    <tr key={row.mmsi} className="cursor-pointer border-b border-border/20 hover:bg-muted/20" onClick={() => { const s: Record<string, unknown> = { mmsi: row.mmsi }; if (row.lat != null && row.lon != null) { s.lat = row.lat; s.lon = row.lon } navigate({ to: '/', search: s as never }) }}>
                       <td className="py-1.5 pr-2 text-right text-xs text-muted-foreground tabular-nums">{i + 1}</td>
                       <td className="py-1.5 pr-3">
                         <span className="font-medium text-foreground/90">{row.name ?? '-'}</span>

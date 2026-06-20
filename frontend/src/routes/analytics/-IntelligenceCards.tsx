@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { useNavigate } from '@tanstack/react-router'
 import {
   Bar, CartesianGrid, ComposedChart, Legend, Line,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -11,6 +12,15 @@ import {
   type RerouteRiskEvent,
 } from '@/lib/api'
 import { EmptyState, TOOLTIP_STYLE, LEGEND_STYLE } from './-analyticsShared'
+
+function useGoToTracker() {
+  const navigate = useNavigate()
+  return (mmsi: number, lat?: number | null, lon?: number | null) => {
+    const search: Record<string, unknown> = { mmsi }
+    if (lat != null && lon != null) { search.lat = lat; search.lon = lon }
+    navigate({ to: '/', search: search as never })
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Local helpers (Intelligence tab only)
@@ -53,6 +63,7 @@ export function AnomalyWatchlistCard() {
   const [minScore, setMinScore] = useState(50)
   const [limit, setLimit] = useState(25)
   const { data, isLoading } = useAnomalyWatchlist(minScore, limit)
+  const goToTracker = useGoToTracker()
   const rows = data?.rows ?? []
 
   return (
@@ -87,7 +98,7 @@ export function AnomalyWatchlistCard() {
         ) : (
           <div className="space-y-1">
             {rows.map((row) => (
-              <div key={row.mmsi} className={`rounded px-2 py-1.5 ${anomalyBg(row.risk_level)}`}>
+              <div key={row.mmsi} className={`cursor-pointer rounded px-2 py-1.5 ${anomalyBg(row.risk_level)}`} onClick={() => goToTracker(row.mmsi, row.lat, row.lon)}>
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5 flex-wrap">
@@ -124,6 +135,7 @@ export function DestinationChangesCard() {
   const [hours, setHours] = useState(72)
   const [kind, setKind] = useState('')
   const { data, isLoading } = useDestinationChanges(hours, kind)
+  const goToTracker = useGoToTracker()
   const rows = data?.rows ?? []
 
   return (
@@ -158,7 +170,7 @@ export function DestinationChangesCard() {
         ) : (
           <div className="space-y-0.5 max-h-72 overflow-y-auto pr-1">
             {rows.map(row => (
-              <div key={row.mmsi} className="flex items-center gap-2 rounded bg-muted/15 px-2 py-1 text-xs hover:bg-muted/30">
+              <div key={row.mmsi} className="flex cursor-pointer items-center gap-2 rounded bg-muted/15 px-2 py-1 text-xs hover:bg-muted/30" onClick={() => goToTracker(row.mmsi, row.lat, row.lon)}>
                 <div className="min-w-0 flex-1">
                   <span className="font-medium">{row.name ?? `MMSI ${row.mmsi}`}</span>
                   {row.segment && <span className="ml-1 text-muted-foreground">{row.segment}</span>}
@@ -186,6 +198,7 @@ export function StsProximityCard() {
   const [maxDistM, setMaxDistM] = useState(2000)
   const [maxSog, setMaxSog] = useState(3.0)
   const { data, isLoading } = useStsProximity(maxDistM, maxSog)
+  const goToTracker = useGoToTracker()
   const pairs = data?.pairs ?? []
   const riskPairs = pairs.filter(p => p.risk_region)
   const normalPairs = pairs.filter(p => !p.risk_region)
@@ -225,7 +238,7 @@ export function StsProximityCard() {
         ) : (
           <div className="space-y-1">
             {[...riskPairs, ...normalPairs].slice(0, 30).map((pair, i) => (
-              <div key={i} className={`rounded px-2 py-1.5 ${pair.risk_region ? 'border-l-2 border-orange-500/60 bg-orange-500/8' : 'bg-muted/20'}`}>
+              <div key={i} className={`cursor-pointer rounded px-2 py-1.5 ${pair.risk_region ? 'border-l-2 border-orange-500/60 bg-orange-500/8' : 'bg-muted/20 hover:bg-muted/30'}`} onClick={() => goToTracker(pair.mmsi_a, pair.lat, pair.lon)}>
                 <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0 flex-1 text-sm">
                     <span className="font-medium">{pair.name_a ?? `MMSI ${pair.mmsi_a}`}</span>
@@ -258,6 +271,7 @@ export function StsOffendersCard() {
   const [days, setDays] = useState(30)
   const [limit, setLimit] = useState(30)
   const { data, isLoading } = useStsOffenders(days, limit)
+  const goToTracker = useGoToTracker()
   const rows = data?.rows ?? []
 
   return (
@@ -292,7 +306,7 @@ export function StsOffendersCard() {
         ) : (
           <div className="space-y-0.5">
             {rows.map((row, i) => (
-              <div key={row.mmsi} className={`flex items-center gap-2 rounded px-2 py-1 text-xs ${row.ofac ? 'bg-red-500/10 border-l-2 border-red-500/50' : 'bg-muted/15 hover:bg-muted/30'}`}>
+              <div key={row.mmsi} className={`flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-xs ${row.ofac ? 'bg-red-500/10 border-l-2 border-red-500/50' : 'bg-muted/15 hover:bg-muted/30'}`} onClick={() => goToTracker(row.mmsi, row.lat, row.lon)}>
                 <span className="w-5 shrink-0 text-muted-foreground/60 tabular-nums">{i + 1}</span>
                 <div className="min-w-0 flex-1">
                   <span className="font-medium">{row.name ?? `MMSI ${row.mmsi}`}</span>
@@ -320,6 +334,7 @@ export function ReroutesCard() {
   const [days, setDays] = useState(7)
   const [minRisk, setMinRisk] = useState(0)
   const { data, isLoading } = useReroutes(days, minRisk)
+  const goToTracker = useGoToTracker()
   const rows = data?.rows ?? []
 
   return (
@@ -354,7 +369,7 @@ export function ReroutesCard() {
         ) : (
           <div className="space-y-0.5 max-h-72 overflow-y-auto pr-1">
             {rows.map((row: RerouteRiskEvent, i: number) => (
-              <div key={`${row.mmsi}-${i}`} className="flex items-center gap-2 rounded bg-muted/15 px-2 py-1 text-xs hover:bg-muted/30">
+              <div key={`${row.mmsi}-${i}`} className="flex cursor-pointer items-center gap-2 rounded bg-muted/15 px-2 py-1 text-xs hover:bg-muted/30" onClick={() => goToTracker(row.mmsi)}>
                 <div className="min-w-0 flex-1">
                   <span className="font-medium">{row.name ?? `MMSI ${row.mmsi}`}</span>
                   {row.segment && <span className="ml-1 text-muted-foreground">{row.segment}</span>}
@@ -397,6 +412,7 @@ export function RiskEventsCard() {
   const [minRisk, setMinRisk] = useState(25)
   const [days, setDays] = useState(2)
   const { data, isLoading } = useRiskEvents(minRisk, days)
+  const goToTracker = useGoToTracker()
   const rows = data?.rows ?? []
 
   return (
@@ -432,7 +448,7 @@ export function RiskEventsCard() {
         ) : (
           <div className="space-y-0.5 max-h-80 overflow-y-auto pr-1">
             {rows.map(ev => (
-              <div key={ev.event_id} className="flex items-center gap-2 rounded bg-muted/15 px-2 py-1 text-xs hover:bg-muted/30">
+              <div key={ev.event_id} className="flex cursor-pointer items-center gap-2 rounded bg-muted/15 px-2 py-1 text-xs hover:bg-muted/30" onClick={() => goToTracker(ev.mmsi, ev.lat, ev.lon)}>
                 <span className={`w-16 shrink-0 text-[10px] font-semibold ${alertColor(ev.event_type)}`}>
                   {EVENT_TYPE_LABELS[ev.event_type] ?? ev.event_type}
                 </span>
@@ -531,6 +547,7 @@ export function ShadowFleetCard() {
   const [days, setDays] = useState(7)
   const [limit, setLimit] = useState(50)
   const { data, isLoading } = useShadowFleet(days, limit)
+  const goToTracker = useGoToTracker()
   const rows = data?.rows ?? []
 
   return (
@@ -567,7 +584,8 @@ export function ShadowFleetCard() {
             {rows.map((row, i) => (
               <div
                 key={row.mmsi}
-                className={`rounded px-2 py-1.5 ${row.ofac ? 'border-l-2 border-red-500/60 bg-red-500/10' : 'bg-muted/15 hover:bg-muted/30'}`}
+                className={`cursor-pointer rounded px-2 py-1.5 ${row.ofac ? 'border-l-2 border-red-500/60 bg-red-500/10' : 'bg-muted/15 hover:bg-muted/30'}`}
+                onClick={() => goToTracker(row.mmsi)}
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
