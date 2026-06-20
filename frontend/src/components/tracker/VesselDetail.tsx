@@ -220,7 +220,7 @@ export function VesselDetail({
 
       {/* Motion */}
       <Section>
-        <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1 flex items-center gap-2">
+        <div className="text-[11px] font-semibold text-muted-foreground mb-1 flex items-center gap-2">
           <span>Motion</span>
           {vesselState?.laden && (
             <span className={`rounded px-1.5 py-px text-[9px] font-medium uppercase tracking-wide ${
@@ -247,7 +247,7 @@ export function VesselDetail({
 
       {/* Voyage */}
       <Section>
-        <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Voyage</div>
+        <div className="text-[11px] font-semibold text-muted-foreground mb-1">Voyage</div>
         <Row label="Destination" value={vessel.destination} />
         <Row label="ETA" value={vessel.eta} />
         <Row label="Draught" value={vessel.draught != null ? `${vessel.draught.toFixed(1)} m` : null} />
@@ -256,7 +256,7 @@ export function VesselDetail({
       {/* Voyage history (port calls, transits, reroutes) */}
       {voyages && voyages.events.length > 0 && (
         <Section>
-          <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1.5">History (14d)</div>
+          <div className="text-[11px] font-semibold text-muted-foreground mb-1.5">History (14d)</div>
           <div className="space-y-1">
             {voyages.events.slice(-8).map((ev, i) => (
               <VoyageEventRow key={i} ev={ev} />
@@ -268,7 +268,7 @@ export function VesselDetail({
       {/* Behavioral risk */}
       {behavioralRisk && (behavioralRisk.total_score > 0 || behavioralRisk.sts_count > 0 || behavioralRisk.reroute_count > 0) && (
         <Section>
-          <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1 flex items-center gap-1.5">
+          <div className="text-[11px] font-semibold text-muted-foreground mb-1 flex items-center gap-1.5">
             <AlertTriangle size={9} className={
               behavioralRisk.risk_level === 'Critical' ? 'text-red-400' :
               behavioralRisk.risk_level === 'High' ? 'text-orange-400' :
@@ -315,7 +315,7 @@ export function VesselDetail({
 
       {/* Identity */}
       <Section>
-        <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Identity</div>
+        <div className="text-[11px] font-semibold text-muted-foreground mb-1">Identity</div>
         <Row label="MMSI" value={vessel.mmsi} />
         {vessel.imo != null && <Row label="IMO" value={vessel.imo} />}
         <Row label="Region" value={vessel.region?.replace(/_/g, ' ')} />
@@ -326,7 +326,7 @@ export function VesselDetail({
       {/* Equasis registry data (only shown when IMO present) */}
       {vessel.imo != null && (
         <Section>
-          <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">
+          <div className="text-[11px] font-semibold text-muted-foreground mb-1">
             Registry (Equasis)
           </div>
           {eqLoading && (
@@ -416,7 +416,7 @@ export function VesselDetail({
 
       {/* Trail window toggle */}
       <div className="flex items-center gap-2 border-t border-border/60 px-3 py-2">
-        <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Trail</span>
+        <span className="text-[11px] font-semibold text-muted-foreground">Trail</span>
         <div className="flex gap-1 ml-auto">
           {([24, 168] as const).map((h) => (
             <button

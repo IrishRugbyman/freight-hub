@@ -105,7 +105,7 @@ function KpiTile({
       disabled={!onClick}
       className={`flex min-w-[7rem] flex-col rounded-lg border border-border bg-muted/30 px-3 py-2 text-left transition-colors ${onClick ? 'hover:bg-muted/60 cursor-pointer' : 'cursor-default'}`}
     >
-      <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground uppercase tracking-wide">
+      <div className="flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground">
         {icon}
         {label}
       </div>

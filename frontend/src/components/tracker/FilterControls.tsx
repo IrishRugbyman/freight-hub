@@ -7,7 +7,7 @@ const selectCls =
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-xs uppercase tracking-wide text-muted-foreground">{label}</span>
+      <span className="mb-1 block text-[11px] font-medium text-muted-foreground">{label}</span>
       {children}
     </label>
   )

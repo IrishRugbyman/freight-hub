@@ -1,23 +1,23 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap");
 @import "tailwindcss";
 
 @theme {
-  --color-background: hsl(222 20% 5%);
+  --color-background: hsl(222 22% 5%);
   --color-foreground: hsl(210 14% 93%);
-  --color-card: hsl(222 16% 8%);
+  --color-card: hsl(222 18% 8%);
   --color-card-foreground: hsl(210 14% 93%);
-  --color-primary: hsl(200 85% 58%);
-  --color-primary-foreground: hsl(222 20% 5%);
-  --color-secondary: hsl(222 12% 13%);
+  --color-primary: hsl(200 60% 52%);
+  --color-primary-foreground: hsl(222 22% 5%);
+  --color-secondary: hsl(222 14% 13%);
   --color-secondary-foreground: hsl(210 14% 93%);
-  --color-muted: hsl(222 12% 12%);
-  --color-muted-foreground: hsl(220 8% 52%);
-  --color-destructive: hsl(0 68% 58%);
-  --color-accent: hsl(222 12% 13%);
-  --color-border: hsl(222 12% 16%);
-  --color-ring: hsl(200 85% 58%);
+  --color-muted: hsl(222 14% 12%);
+  --color-muted-foreground: hsl(220 10% 50%);
+  --color-destructive: hsl(0 62% 55%);
+  --color-accent: hsl(222 14% 13%);
+  --color-border: hsl(222 14% 15%);
+  --color-ring: hsl(200 60% 52%);
 
-  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', 'Cascadia Code', monospace;
 
   --radius: 0.375rem;
@@ -25,6 +25,10 @@
 
 * {
   border-color: var(--color-border);
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 html,
@@ -38,6 +42,21 @@ body {
   background: var(--color-background);
   color: var(--color-foreground);
   font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Subtle film-grain texture to break digital flatness */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+  background-size: 300px 300px;
+  opacity: 0.025;
+  mix-blend-mode: overlay;
 }
 
 /* Leaflet dark-mode polish */

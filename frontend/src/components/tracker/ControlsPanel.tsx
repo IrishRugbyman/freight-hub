@@ -43,7 +43,7 @@ export function ControlsPanel({
     <Panel className="flex w-56 max-h-[calc(100vh-5rem)] flex-col overflow-hidden">
       {/* sticky header */}
       <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-2">
-        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Controls</span>
+        <span className="text-[11px] font-semibold text-muted-foreground">Controls</span>
         <button
           onClick={() => setOpen(false)}
           className="text-muted-foreground hover:text-foreground"

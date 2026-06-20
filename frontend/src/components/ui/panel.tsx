@@ -18,7 +18,7 @@ export function Panel({
       )}
     >
       {title && (
-        <div className="border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        <div className="border-b border-border px-3 py-2 text-[11px] font-semibold text-muted-foreground">
           {title}
         </div>
       )}
