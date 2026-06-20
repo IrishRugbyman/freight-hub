@@ -5247,7 +5247,7 @@ def analytics_crude_on_water():
     Live laden tanker count and estimated million barrels on water.
     Breaks down by segment and destination import region.
     """
-    now_dt = datetime.utcnow()
+    now_dt = datetime.now(UTC).replace(tzinfo=None)
 
     # 1. Get laden state from analytics DB (vessel_state)
     vs_df = db.query(
@@ -5392,7 +5392,7 @@ def analytics_chokepoint_status():
     Live vessel counts and transit statistics per major chokepoint.
     Combines live_positions (current traffic) with transit_events (historical throughput).
     """
-    now_dt = datetime.utcnow()
+    now_dt = datetime.now(UTC).replace(tzinfo=None)
     cutoff_24h = now_dt - timedelta(hours=24)
     cutoff_7d = now_dt - timedelta(days=7)
 
