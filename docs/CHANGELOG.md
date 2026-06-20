@@ -1,5 +1,17 @@
 # Freight Hub Changelog
 
+## 2026-06-20 - Phase 55+56: Owner fleet status card + Pipelines page
+
+**Tried:** Two backlog items: (1) live laden/ballast breakdown per beneficial owner by joining live_positions -> vessel_registry (via IMO) -> vessel_state; (2) dedicated /pipelines page showing all 618 World Monitor pipelines in a searchable/sortable table.
+
+**Found:** Owner fleet status JOIN works cleanly - vessel_state (analytics DB) holds laden/ballast per MMSI, vessel_registry (Equasis registry DB) holds owner per IMO. Only ~30-40% of live vessels have a matched Equasis entry (IMO required), so the card shows a subset of the fleet. Pipeline data (disrupted_only=false) returns 618 rows in ~1s via existing endpoint - fully feasible for client-side filtering with no pagination. Physical states: flowing, offline, reduced, unknown. Disruption descriptions are long-form prose averaging ~80 chars.
+
+**Decision:** Owner fleet card placed first on Fleet analytics tab (most useful daily view for who is moving cargo). Pipelines page added as dedicated nav item between Fleet and Routes - table with KPI bar, state/commodity filters, name search, sortable columns, inline expand for full disruption description. No backend changes needed for pipelines page. 3 new backend tests (326 total passing).
+
+**Artifacts:** `backend/app/main.py` (owner-fleet-status endpoint), `backend/app/schemas.py` (OwnerFleetStatusRow/Response), `backend/tests/test_endpoints.py` (+3 tests), `frontend/src/lib/api.ts` (useOwnerFleetStatus), `frontend/src/routes/analytics/-FleetCards.tsx` (OwnerFleetStatusCard), `frontend/src/routes/pipelines.tsx` (new page), `frontend/src/routes/__root.tsx` (nav link).
+
+---
+
 ## 2026-06-19 - Phase 54: Pipeline disruption map layer
 
 **Added:** Toggleable "Disrupted pipelines" layer on the vessel tracker map. Draws the 37
