@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
+import { MapPin } from 'lucide-react'
 import { useEvents, type AisEvent } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { SubscribeFeed } from '@/components/SubscribeFeed'
@@ -192,11 +193,9 @@ function EventRow({ ev, onSelect }: { ev: AisEvent; onSelect: (ev: AisEvent) => 
         </div>
       </div>
 
-      <div className="shrink-0 text-right text-xs text-muted-foreground">
+      <div className="shrink-0 flex flex-col items-end gap-1 text-xs text-muted-foreground">
         <div>{timeAgo(ev.start_ts)}</div>
-        <div className="mt-0.5 font-mono text-[10px]">
-          {ev.lat.toFixed(2)}, {ev.lon.toFixed(2)}
-        </div>
+        <MapPin size={11} className="text-muted-foreground/40" />
       </div>
     </button>
   )

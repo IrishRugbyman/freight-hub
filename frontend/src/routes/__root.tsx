@@ -32,12 +32,11 @@ function RootLayout() {
           <Ship size={18} className="text-primary" />
           Freight Hub
         </div>
-        <nav className="flex items-center">
+        <nav className="flex items-center gap-0.5">
           <NavItem to="/">Tracker</NavItem>
           <NavItem to="/fleet">Fleet</NavItem>
           <NavItem to="/pipelines">Pipelines</NavItem>
-          <NavItem to="/routes">Routes</NavItem>
-          <NavItem to="/dispersion">Dispersion</NavItem>
+          <span className="mx-1 h-4 w-px bg-border/60" />
           <NavItem to="/analytics">Analytics</NavItem>
           <NavItem to="/events">
             <span className="flex items-center gap-1.5">
@@ -49,6 +48,9 @@ function RootLayout() {
               )}
             </span>
           </NavItem>
+          <span className="mx-1 h-4 w-px bg-border/60" />
+          <NavItem to="/routes">Routes</NavItem>
+          <NavItem to="/dispersion">Dispersion</NavItem>
         </nav>
         <a
           href="https://quant.lbzgiu.xyz"

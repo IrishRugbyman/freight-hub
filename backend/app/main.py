@@ -4312,7 +4312,7 @@ def analytics_owner_intelligence(min_vessels: int = 2, min_risk: int = 0, limit:
     for _, r in reg_df.iterrows():
         owner = str(r["owner"]).strip()
         imo_val = r.get("imo")
-        live_info = live_map.get(int(imo_val)) if imo_val and not pd.isna(imo_val) else {}
+        live_info = (live_map.get(int(imo_val)) or {}) if imo_val and not pd.isna(imo_val) else {}
         kind_val = live_info.get("kind") or ""
         risk_val = r.get("risk_score")
         risk_int = int(risk_val) if risk_val is not None and not pd.isna(risk_val) else 0

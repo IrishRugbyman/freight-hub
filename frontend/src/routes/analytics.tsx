@@ -66,12 +66,11 @@ function KpiBar() {
     {
       label: 'Reroutes 24h',
       value: summary?.reroutes_24h != null ? summary.reroutes_24h.toLocaleString() : '-',
-      cls: summary?.reroutes_24h && summary.reroutes_24h > 5 ? 'text-yellow-400' : undefined,
     },
     {
       label: 'STS 24h',
       value: summary?.sts_24h != null ? summary.sts_24h.toLocaleString() : '-',
-      cls: summary?.sts_24h && summary.sts_24h > 10 ? 'text-orange-400' : undefined,
+      cls: summary?.sts_24h && summary.sts_24h > 50 ? 'text-orange-400' : undefined,
     },
   ]
 

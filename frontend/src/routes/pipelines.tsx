@@ -6,20 +6,70 @@ export const Route = createFileRoute('/pipelines')({
   component: PipelinesPage,
 })
 
-function stateBg(state: string): string {
-  if (state === 'offline') return 'bg-red-500/15 text-red-300'
-  if (state === 'reduced') return 'bg-orange-500/15 text-orange-300'
-  if (state === 'flowing') return 'bg-emerald-500/15 text-emerald-400'
-  return 'bg-muted text-muted-foreground'
+const COUNTRY: Record<string, string> = {
+  AF: 'Afghanistan', AL: 'Albania', DZ: 'Algeria', AO: 'Angola', AR: 'Argentina',
+  AM: 'Armenia', AU: 'Australia', AZ: 'Azerbaijan', BH: 'Bahrain', BD: 'Bangladesh',
+  BY: 'Belarus', BE: 'Belgium', BO: 'Bolivia', BA: 'Bosnia', BR: 'Brazil',
+  BG: 'Bulgaria', CM: 'Cameroon', CA: 'Canada', CL: 'Chile', CN: 'China',
+  CO: 'Colombia', CD: 'DR Congo', CG: 'Congo', CR: 'Costa Rica', HR: 'Croatia',
+  CZ: 'Czechia', DK: 'Denmark', EC: 'Ecuador', EG: 'Egypt', ET: 'Ethiopia',
+  FI: 'Finland', FR: 'France', GA: 'Gabon', GE: 'Georgia', DE: 'Germany',
+  GH: 'Ghana', GR: 'Greece', GN: 'Guinea', HU: 'Hungary', IN: 'India',
+  ID: 'Indonesia', IR: 'Iran', IQ: 'Iraq', IE: 'Ireland', IL: 'Israel',
+  IT: 'Italy', CI: 'Ivory Coast', JP: 'Japan', JO: 'Jordan', KZ: 'Kazakhstan',
+  KE: 'Kenya', KW: 'Kuwait', KG: 'Kyrgyzstan', LV: 'Latvia', LB: 'Lebanon',
+  LY: 'Libya', LT: 'Lithuania', MY: 'Malaysia', ML: 'Mali', MX: 'Mexico',
+  MD: 'Moldova', MN: 'Mongolia', MA: 'Morocco', MZ: 'Mozambique', MM: 'Myanmar',
+  NL: 'Netherlands', NG: 'Nigeria', NO: 'Norway', OM: 'Oman', PK: 'Pakistan',
+  PE: 'Peru', PH: 'Philippines', PL: 'Poland', PT: 'Portugal', QA: 'Qatar',
+  RO: 'Romania', RU: 'Russia', SA: 'Saudi Arabia', SN: 'Senegal', SK: 'Slovakia',
+  ZA: 'South Africa', KR: 'South Korea', SS: 'South Sudan', ES: 'Spain',
+  SD: 'Sudan', SE: 'Sweden', CH: 'Switzerland', SY: 'Syria', TW: 'Taiwan',
+  TJ: 'Tajikistan', TZ: 'Tanzania', TH: 'Thailand', TN: 'Tunisia', TR: 'Turkey',
+  TM: 'Turkmenistan', UG: 'Uganda', UA: 'Ukraine', AE: 'UAE', GB: 'UK',
+  US: 'USA', UZ: 'Uzbekistan', VE: 'Venezuela', VN: 'Vietnam', YE: 'Yemen',
+  ZM: 'Zambia', ZW: 'Zimbabwe',
 }
 
-function commodityColor(c: string): string {
-  return c === 'oil' ? 'text-amber-400' : 'text-blue-400'
+function countryName(iso2: string): string {
+  return COUNTRY[iso2.toUpperCase()] ?? iso2
+}
+
+// Only show a badge for disrupted states; flowing/unknown shown as plain text
+function StateBadge({ state }: { state: string }) {
+  if (state === 'offline') {
+    return (
+      <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-red-500/15 text-red-300">
+        Offline
+      </span>
+    )
+  }
+  if (state === 'reduced') {
+    return (
+      <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-orange-500/15 text-orange-300">
+        Reduced
+      </span>
+    )
+  }
+  return (
+    <span className="text-[10px] text-muted-foreground/60 uppercase tracking-wide">
+      {state}
+    </span>
+  )
+}
+
+function commodityDot(c: string) {
+  return (
+    <span className={`inline-flex items-center gap-1 text-xs font-medium ${c === 'oil' ? 'text-amber-400' : 'text-sky-400'}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${c === 'oil' ? 'bg-amber-400' : 'bg-sky-400'}`} />
+      {c}
+    </span>
+  )
 }
 
 function formatCap(p: PipelineSegment): string {
   if (p.commodity === 'oil' && p.capacity_mbd && p.capacity_mbd > 0) {
-    return `${p.capacity_mbd.toFixed(2)} mbd`
+    return `${p.capacity_mbd.toFixed(1)} mbd`
   }
   if (p.capacity_bcm_yr && p.capacity_bcm_yr > 0) {
     return `${p.capacity_bcm_yr.toFixed(1)} bcm/yr`
@@ -149,7 +199,6 @@ export default function PipelinesPage() {
           <KpiTile
             label="Flowing"
             value={pipelines.filter(p => p.physical_state === 'flowing').length.toString()}
-            color="text-emerald-400"
           />
         </div>
       </div>
@@ -252,50 +301,51 @@ export default function PipelinesPage() {
               {filtered.map(p => {
                 const since = sinceStr(p.disruption_since)
                 const isExpanded = expanded === p.id
+                const disrupted = p.physical_state === 'offline' || p.physical_state === 'reduced'
                 return (
                   <>
                     <tr
                       key={p.id}
-                      className="cursor-pointer border-b border-border/30 hover:bg-muted/30 transition-colors"
+                      className={`cursor-pointer border-b border-border/20 transition-colors ${disrupted ? 'hover:bg-muted/40' : 'hover:bg-muted/20'}`}
                       onClick={() => setExpanded(isExpanded ? null : p.id)}
                     >
-                      <td className="max-w-[220px] px-4 py-2">
-                        <span className="block truncate font-medium" title={p.name}>
+                      <td className="px-4 py-2.5" style={{ minWidth: '240px', maxWidth: '320px' }}>
+                        <span
+                          className={`block font-medium leading-snug ${disrupted ? '' : 'text-foreground/70'}`}
+                          title={p.name}
+                          style={{ overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}
+                        >
                           {p.name}
                         </span>
                       </td>
-                      <td className="px-4 py-2 font-mono text-muted-foreground">
-                        {p.from_country}
+                      <td className="px-4 py-2.5 text-muted-foreground">
+                        {countryName(p.from_country)}
                       </td>
-                      <td className="px-4 py-2 font-mono text-muted-foreground">
-                        {p.to_country}
+                      <td className="px-4 py-2.5 text-muted-foreground">
+                        {countryName(p.to_country)}
                       </td>
-                      <td className="px-4 py-2">
-                        <span className={`font-medium ${commodityColor(p.commodity)}`}>
-                          {p.commodity}
-                        </span>
+                      <td className="px-4 py-2.5">
+                        {commodityDot(p.commodity)}
                       </td>
-                      <td className="px-4 py-2 text-right tabular-nums">
+                      <td className="px-4 py-2.5 text-right tabular-nums text-muted-foreground">
                         {formatCap(p)}
                       </td>
-                      <td className="px-4 py-2">
-                        <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${stateBg(p.physical_state)}`}>
-                          {p.physical_state}
-                        </span>
+                      <td className="px-4 py-2.5">
+                        <StateBadge state={p.physical_state} />
                       </td>
-                      <td className="px-4 py-2 tabular-nums text-muted-foreground">
+                      <td className="px-4 py-2.5 tabular-nums text-muted-foreground/70 text-[11px]">
                         {since}
                       </td>
-                      <td className="max-w-[260px] px-4 py-2">
+                      <td className="px-4 py-2.5" style={{ maxWidth: '280px' }}>
                         {p.disruption_event_type && (
-                          <span className="mr-1.5 rounded bg-muted px-1 py-px text-[9px] uppercase tracking-wide">
+                          <span className="mr-1.5 rounded bg-muted/80 px-1 py-px text-[9px] uppercase tracking-wide text-muted-foreground">
                             {p.disruption_event_type}
                           </span>
                         )}
                         {p.disruption_description && (
                           <span
-                            className="truncate text-muted-foreground/70"
-                            style={{ display: 'block', maxWidth: '260px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                            className="text-muted-foreground/60 text-[11px]"
+                            style={{ overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}
                           >
                             {p.disruption_description}
                           </span>
