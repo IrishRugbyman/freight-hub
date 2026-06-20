@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, useNavigate } from '@tanstack/react-router'
+import { MapPin } from 'lucide-react'
 import { usePipelines, type PipelineSegment } from '@/lib/api'
 
 export const Route = createFileRoute('/pipelines')({
@@ -132,6 +133,7 @@ function sortPipelines(rows: PipelineSegment[], key: SortKey, dir: SortDir): Pip
 export default function PipelinesPage() {
   const { data, isLoading } = usePipelines(false, true)
   const pipelines = data?.pipelines ?? []
+  const navigate = useNavigate({ from: '/pipelines' })
 
   const [q, setQ] = useState('')
   const [stateFilter, setStateFilter] = useState<string>('all')
@@ -295,6 +297,7 @@ export default function PipelinesPage() {
                   Since<SortIcon k="since" />
                 </th>
                 <th className="px-4 py-2 font-medium">Disruption</th>
+                <th className="w-8 px-2 py-2" />
               </tr>
             </thead>
             <tbody>
@@ -351,10 +354,22 @@ export default function PipelinesPage() {
                           </span>
                         )}
                       </td>
+                      <td className="px-2 py-2.5">
+                        <button
+                          title="View on map"
+                          className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-muted hover:text-primary"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            navigate({ to: '/', search: { pipeline_id: p.id } as never })
+                          }}
+                        >
+                          <MapPin size={13} />
+                        </button>
+                      </td>
                     </tr>
                     {isExpanded && p.disruption_description && (
                       <tr key={`${p.id}-detail`} className="border-b border-border/30 bg-muted/20">
-                        <td colSpan={8} className="px-6 py-3">
+                        <td colSpan={9} className="px-6 py-3">
                           <div className="max-w-2xl">
                             <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
                               {p.disruption_event_type ?? 'Disruption'} details

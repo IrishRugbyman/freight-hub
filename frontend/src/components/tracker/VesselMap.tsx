@@ -31,6 +31,7 @@ export function VesselMap({
   trailVessel,
   trailPoints,
   focusTarget,
+  highlightPipelineId,
 }: {
   vessels: Vessel[]
   layers: LayerState
@@ -38,6 +39,7 @@ export function VesselMap({
   trailVessel?: Vessel | null
   trailPoints?: TrackPoint[]
   focusTarget?: { lat: number; lon: number } | null
+  highlightPipelineId?: string | null
 }) {
   const { data: riskData } = useHighRiskPositions(60, layers.riskOverlay)
   const riskPositions = layers.riskOverlay ? (riskData?.rows ?? []) : []
@@ -86,7 +88,7 @@ export function VesselMap({
       )}
       {layers.chokepoints && <ChokepointLayer />}
       <EventPinsLayer visible={layers.eventPins} />
-      <PipelineLayer visible={layers.pipelines} />
+      <PipelineLayer visible={layers.pipelines} highlightId={highlightPipelineId} />
       {layers.riskOverlay && riskPositions.length > 0 && (
         <RiskLayer
           positions={riskPositions}

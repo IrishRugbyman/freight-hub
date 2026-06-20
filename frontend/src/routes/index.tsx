@@ -14,6 +14,7 @@ export const Route = createFileRoute('/')({
     mmsi: typeof search.mmsi === 'number' ? search.mmsi : undefined,
     lat: typeof search.lat === 'number' ? search.lat : undefined,
     lon: typeof search.lon === 'number' ? search.lon : undefined,
+    pipeline_id: typeof search.pipeline_id === 'string' ? search.pipeline_id : undefined,
   }),
   component: TrackerPage,
 })
@@ -24,20 +25,25 @@ function TrackerPage() {
   const [selected, setSelected] = useState<Vessel | null>(null)
   const [trailHours, setTrailHours] = useState<24 | 168>(24)
   const [focusTarget, setFocusTarget] = useState<{ lat: number; lon: number } | null>(null)
+  const [highlightPipelineId, setHighlightPipelineId] = useState<string | null>(null)
 
   const { data: vessels = [], isLoading, isError, dataUpdatedAt, isPlaceholderData } = useVessels(filters)
   useVesselStream(filters, layers.deckgl)
   const { data: meta } = useMeta()
   const { data: trailPoints } = useVesselTrack(selected?.mmsi ?? null, trailHours)
 
-  // URL params passed from the events page (mmsi, lat, lon)
-  const { mmsi: urlMmsi, lat: urlLat, lon: urlLon } = Route.useSearch()
+  // URL params passed from the events/fleet/pipelines pages
+  const { mmsi: urlMmsi, lat: urlLat, lon: urlLon, pipeline_id: urlPipelineId } = Route.useSearch()
   const urlRef = useRef({ mmsi: urlMmsi, lat: urlLat, lon: urlLon, handled: false })
 
-  // Zoom to event location immediately on mount
+  // Zoom to event location immediately on mount; or activate pipeline highlight
   useEffect(() => {
     const { lat, lon } = urlRef.current
     if (lat != null && lon != null) setFocusTarget({ lat, lon })
+    if (urlPipelineId) {
+      setHighlightPipelineId(urlPipelineId)
+      setLayers((l) => ({ ...l, pipelines: true }))
+    }
   }, [])
 
   // Once vessels load, select the vessel by mmsi from URL
@@ -65,6 +71,7 @@ function TrackerPage() {
         trailVessel={selected}
         trailPoints={trailPoints ?? []}
         focusTarget={focusTarget}
+        highlightPipelineId={highlightPipelineId}
       />
 
       {/* left: unified controls panel */}

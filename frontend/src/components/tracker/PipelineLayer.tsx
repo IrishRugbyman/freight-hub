@@ -51,44 +51,69 @@ function popupHtml(p: PipelineSegment): string {
   return html
 }
 
+function makeLine(p: PipelineSegment, highlight = false): L.Polyline {
+  const color = STATE_COLOR[p.physical_state] ?? '#9ca3af'
+  const line = L.polyline(
+    [[p.start_lat, p.start_lon], [p.end_lat, p.end_lon]],
+    {
+      color,
+      weight: highlight ? 5 : (STATE_WEIGHT[p.physical_state] ?? 1),
+      opacity: highlight ? 1 : 0.85,
+      dashArray: p.physical_state === 'offline' && !highlight ? '6 4' : undefined,
+    },
+  )
+  line.bindPopup(popupHtml(p), { maxWidth: 300 })
+  return line
+}
+
 /** Renders pipeline lines on the Leaflet map. Controlled by the pipelines layer toggle. */
-export function PipelineLayer({ visible }: { visible: boolean }) {
+export function PipelineLayer({ visible, highlightId }: { visible: boolean; highlightId?: string | null }) {
   const map = useMap()
   const { data } = usePipelines(false, visible)
   const linesRef = useRef<L.Polyline[]>([])
+  const haloRef = useRef<L.Polyline | null>(null)
 
   useEffect(() => {
-    // Remove existing lines
     linesRef.current.forEach((l) => map.removeLayer(l))
     linesRef.current = []
+    if (haloRef.current) { map.removeLayer(haloRef.current); haloRef.current = null }
 
     if (!visible || !data) return
 
+    // Draw all non-highlighted pipelines first
     for (const p of data.pipelines) {
-      const color = STATE_COLOR[p.physical_state] ?? '#9ca3af'
-      const weight = STATE_WEIGHT[p.physical_state] ?? 1
-      const line = L.polyline(
-        [
-          [p.start_lat, p.start_lon],
-          [p.end_lat, p.end_lon],
-        ],
-        {
-          color,
-          weight,
-          opacity: 0.85,
-          dashArray: p.physical_state === 'offline' ? '6 4' : undefined,
-        },
-      )
-      line.bindPopup(popupHtml(p), { maxWidth: 300 })
+      if (highlightId && p.id === highlightId) continue
+      const line = makeLine(p)
       line.addTo(map)
       linesRef.current.push(line)
+    }
+
+    // Draw highlighted pipeline last (on top) with halo + precise fitBounds
+    if (highlightId) {
+      const hp = data.pipelines.find((p) => p.id === highlightId)
+      if (hp) {
+        const coords: L.LatLngTuple[] = [[hp.start_lat, hp.start_lon], [hp.end_lat, hp.end_lon]]
+        const bounds = L.latLngBounds(coords)
+
+        const halo = L.polyline(coords, { color: '#ffffff', weight: 10, opacity: 0.2, interactive: false })
+        halo.addTo(map)
+        haloRef.current = halo
+
+        const line = makeLine(hp, true)
+        line.addTo(map)
+        linesRef.current.push(line)
+
+        map.fitBounds(bounds, { padding: [80, 80], maxZoom: 6, animate: true })
+        setTimeout(() => line.openPopup(bounds.getCenter()), 600)
+      }
     }
 
     return () => {
       linesRef.current.forEach((l) => map.removeLayer(l))
       linesRef.current = []
+      if (haloRef.current) { map.removeLayer(haloRef.current); haloRef.current = null }
     }
-  }, [map, visible, data])
+  }, [map, visible, data, highlightId])
 
   return null
 }
