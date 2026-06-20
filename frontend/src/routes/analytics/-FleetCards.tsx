@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   useSpeedAnomalies, useSpeedTrend, useFleetSpeed,
   useRegionUtil, useFleetUtilization, useSlowSteamers,
+  useOwnerFleetStatus,
 } from '@/lib/api'
 import { fmt, EmptyState, TOOLTIP_STYLE, LEGEND_STYLE } from './-analyticsShared'
 
@@ -373,11 +374,116 @@ export function SlowSteamersCard() {
 }
 
 // ---------------------------------------------------------------------------
+// OwnerFleetStatusCard
+// ---------------------------------------------------------------------------
+
+function riskColor(score: number | null): string {
+  if (score == null) return 'text-muted-foreground'
+  if (score >= 50) return 'text-red-400'
+  if (score >= 25) return 'text-yellow-400'
+  return 'text-emerald-400'
+}
+
+export function OwnerFleetStatusCard() {
+  const [kind, setKind] = useState<string>('tanker')
+  const { data, isLoading } = useOwnerFleetStatus(kind, 1, 30)
+  const rows = data?.rows ?? []
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex flex-wrap items-center justify-between gap-2">
+          <span>Owner Fleet Status</span>
+          <div className="flex items-center gap-2">
+            <select
+              className="rounded border border-border bg-background px-2 py-1 text-xs"
+              value={kind}
+              onChange={e => setKind(e.target.value)}
+            >
+              <option value="tanker">Tankers</option>
+              <option value="bulk">Bulk carriers</option>
+              <option value="">All vessels</option>
+            </select>
+          </div>
+        </CardTitle>
+        {data && (
+          <p className="text-xs text-muted-foreground">
+            {data.total_owners} owners with live positions
+          </p>
+        )}
+      </CardHeader>
+      <CardContent>
+        {isLoading && <EmptyState message="Loading..." />}
+        {!isLoading && rows.length === 0 && <EmptyState message="No registry-matched vessels" />}
+        {rows.length > 0 && (
+          <div className="space-y-2">
+            {rows.map(row => {
+              const ladenPct = row.live_count > 0 ? (row.laden / row.live_count) * 100 : 0
+              const ballastPct = row.live_count > 0 ? (row.ballast / row.live_count) * 100 : 0
+              return (
+                <div key={row.owner} className="space-y-0.5">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span
+                      className="truncate text-xs font-medium max-w-[55%]"
+                      title={row.owner}
+                    >
+                      {row.owner}
+                    </span>
+                    <div className="flex shrink-0 items-center gap-2 text-[10px] tabular-nums text-muted-foreground">
+                      {row.top_segment && (
+                        <span className="rounded bg-muted px-1 py-px text-[9px] uppercase tracking-wide">
+                          {row.top_segment}
+                        </span>
+                      )}
+                      <span className="text-blue-400 font-medium">{row.laden}L</span>
+                      <span>{row.ballast}B</span>
+                      {row.unknown > 0 && <span>{row.unknown}?</span>}
+                      {row.avg_risk != null && (
+                        <span className={riskColor(row.avg_risk)}>
+                          r{row.avg_risk.toFixed(0)}
+                        </span>
+                      )}
+                      <span className="text-muted-foreground/60">{row.live_count}</span>
+                    </div>
+                  </div>
+                  <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-muted/60">
+                    <div
+                      className="h-full bg-blue-500/70 transition-all"
+                      style={{ width: `${ladenPct}%` }}
+                    />
+                    <div
+                      className="h-full bg-slate-500/60 transition-all"
+                      style={{ width: `${ballastPct}%` }}
+                    />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+        <div className="mt-3 flex items-center gap-4 text-[10px] text-muted-foreground">
+          <span className="flex items-center gap-1">
+            <span className="inline-block h-2 w-2 rounded-sm bg-blue-500/70" />
+            Laden
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="inline-block h-2 w-2 rounded-sm bg-slate-500/60" />
+            Ballast
+          </span>
+          <span className="ml-auto">L=laden B=ballast r=avg risk</span>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Default export: Fleet tab component
 // ---------------------------------------------------------------------------
 export default function FleetTab() {
   return (
     <div className="space-y-6">
+      <OwnerFleetStatusCard />
       <SpeedAnomaliesCard />
       <div className="grid gap-4 lg:grid-cols-2">
         <SpeedTrendCard />

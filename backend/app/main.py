@@ -137,6 +137,8 @@ from .schemas import (
     ShadowFleetResponse,
     PipelineSegment,
     PipelinesResponse,
+    OwnerFleetStatusRow,
+    OwnerFleetStatusResponse,
 )
 
 _STATIC = Path(__file__).parent / "static"
@@ -4371,6 +4373,145 @@ def analytics_owner_intelligence(min_vessels: int = 2, min_risk: int = 0, limit:
     return OwnerIntelResponse(
         as_of=now_dt.isoformat(),
         total_owners=len(owners),
+        rows=rows,
+    )
+
+
+@app.get("/api/analytics/owner-fleet-status", response_model=OwnerFleetStatusResponse)
+def analytics_owner_fleet_status(
+    kind: str | None = None,
+    min_vessels: int = 1,
+    limit: int = 30,
+):
+    """Live laden/ballast status per beneficial owner.
+
+    Joins live_positions (imo) -> vessel_registry (owner) -> vessel_state (laden).
+    kind: filter to 'tanker' or 'bulk' (omit for all).
+    min_vessels: minimum number of live vessels the owner must have (clamped 1-20).
+    limit: max rows (clamped 1-100).
+    """
+    min_vessels = max(1, min(min_vessels, 20))
+    limit = max(1, min(limit, 100))
+    now_dt = datetime.now(UTC).replace(tzinfo=None)
+
+    # Live positions: keep only vessels with an IMO (registry join requires it)
+    live_q = "SELECT mmsi, imo, kind, segment, region FROM live_positions WHERE imo IS NOT NULL"
+    live_params: list = []
+    if kind:
+        live_q += " AND kind = ?"
+        live_params.append(kind)
+    live_df = db.query(live_q, live_params)
+
+    if live_df.empty:
+        return OwnerFleetStatusResponse(
+            as_of=now_dt.isoformat(), kind=kind, total_owners=0, rows=[]
+        )
+
+    # Vessel state (laden/ballast) keyed by mmsi
+    state_df = db.query(
+        "SELECT mmsi, laden FROM vessel_state",
+        [],
+        db=db.analytics_db_path(),
+    )
+    laden_map: dict[int, str] = {}
+    if not state_df.empty:
+        for _, r in state_df.iterrows():
+            laden_val = r.get("laden")
+            if laden_val and not (isinstance(laden_val, float) and pd.isna(laden_val)):
+                laden_map[int(r["mmsi"])] = str(laden_val)
+
+    # Registry: imo -> owner, risk_score, flag
+    imos = live_df["imo"].dropna().astype(int).unique().tolist()
+    if not imos:
+        return OwnerFleetStatusResponse(
+            as_of=now_dt.isoformat(), kind=kind, total_owners=0, rows=[]
+        )
+    ph = ",".join("?" for _ in imos)
+    reg_df = db.query(
+        f"SELECT imo, owner, risk_score, flag FROM vessel_registry "
+        f"WHERE imo IN ({ph}) AND fetch_ok = true AND owner IS NOT NULL AND owner != ''",
+        imos,
+        db=db.registry_db_path(),
+    )
+    imo_to_reg: dict[int, dict] = {}
+    if not reg_df.empty:
+        for _, r in reg_df.iterrows():
+            imo_val = r.get("imo")
+            if imo_val is not None and not (isinstance(imo_val, float) and pd.isna(imo_val)):
+                imo_to_reg[int(imo_val)] = {
+                    "owner": str(r["owner"]).strip(),
+                    "risk_score": r.get("risk_score"),
+                    "flag": _str_or_none(r.get("flag")),
+                }
+
+    # Aggregate by owner
+    owners_agg: dict[str, dict] = {}
+    for _, r in live_df.iterrows():
+        imo_val = r.get("imo")
+        if imo_val is None or (isinstance(imo_val, float) and pd.isna(imo_val)):
+            continue
+        reg = imo_to_reg.get(int(imo_val))
+        if not reg:
+            continue
+        owner = reg["owner"]
+        mmsi_int = int(r["mmsi"])
+        laden_str = laden_map.get(mmsi_int)
+        seg = _str_or_none(r.get("segment"))
+        region = _str_or_none(r.get("region"))
+        risk = reg.get("risk_score")
+        flag = reg.get("flag") or ""
+
+        if owner not in owners_agg:
+            owners_agg[owner] = {
+                "laden": 0, "ballast": 0, "unknown": 0,
+                "segments": [], "risks": [], "flags": set(), "regions": set(),
+            }
+        o = owners_agg[owner]
+        if laden_str == "laden":
+            o["laden"] += 1
+        elif laden_str == "ballast":
+            o["ballast"] += 1
+        else:
+            o["unknown"] += 1
+        if seg:
+            o["segments"].append(seg)
+        if risk is not None and not (isinstance(risk, float) and pd.isna(risk)):
+            o["risks"].append(int(risk))
+        if flag:
+            o["flags"].add(flag)
+        if region:
+            o["regions"].add(region.replace("_", " "))
+
+    rows: list[OwnerFleetStatusRow] = []
+    for owner, o in owners_agg.items():
+        live_count = o["laden"] + o["ballast"] + o["unknown"]
+        if live_count < min_vessels:
+            continue
+        segs = o["segments"]
+        top_seg = max(set(segs), key=segs.count) if segs else None
+        risks = o["risks"]
+        avg_risk = round(sum(risks) / len(risks), 1) if risks else None
+        rows.append(
+            OwnerFleetStatusRow(
+                owner=owner,
+                live_count=live_count,
+                laden=o["laden"],
+                ballast=o["ballast"],
+                unknown=o["unknown"],
+                top_segment=top_seg,
+                avg_risk=avg_risk,
+                flags=sorted(o["flags"])[:4],
+                regions=sorted(o["regions"])[:5],
+            )
+        )
+
+    rows.sort(key=lambda r: r.live_count, reverse=True)
+    rows = rows[:limit]
+
+    return OwnerFleetStatusResponse(
+        as_of=now_dt.isoformat(),
+        kind=kind,
+        total_owners=len(owners_agg),
         rows=rows,
     )
 

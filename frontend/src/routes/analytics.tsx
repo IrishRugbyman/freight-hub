@@ -35,7 +35,7 @@ const TABS = [
   { id: 'ports'         as const, label: 'Ports & Cargo',  count: 10 },
   { id: 'risk'          as const, label: 'Risk',           count: 8  },
   { id: 'intelligence'  as const, label: 'Intelligence',   count: 7  },
-  { id: 'fleet'         as const, label: 'Fleet',          count: 6  },
+  { id: 'fleet'         as const, label: 'Fleet',          count: 7  },
 ]
 
 // ---------------------------------------------------------------------------

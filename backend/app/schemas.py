@@ -1196,3 +1196,22 @@ class PipelinesResponse(BaseModel):
     total_offline_bcm: float
     pipelines: list[PipelineSegment]
 
+
+class OwnerFleetStatusRow(BaseModel):
+    owner: str
+    live_count: int          # vessels currently in live feed (joined via IMO)
+    laden: int
+    ballast: int
+    unknown: int
+    top_segment: str | None
+    avg_risk: float | None
+    flags: list[str]
+    regions: list[str]
+
+
+class OwnerFleetStatusResponse(BaseModel):
+    as_of: str
+    kind: str | None
+    total_owners: int
+    rows: list[OwnerFleetStatusRow]
+

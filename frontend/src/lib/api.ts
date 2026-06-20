@@ -1980,3 +1980,37 @@ export function usePipelines(enabled = true) {
     enabled,
   })
 }
+
+// ---------------------------------------------------------------------------
+// Phase 55: Owner Fleet Status
+// ---------------------------------------------------------------------------
+
+export interface OwnerFleetStatusRow {
+  owner: string
+  live_count: number
+  laden: number
+  ballast: number
+  unknown: number
+  top_segment: string | null
+  avg_risk: number | null
+  flags: string[]
+  regions: string[]
+}
+
+export interface OwnerFleetStatusResponse {
+  as_of: string
+  kind: string | null
+  total_owners: number
+  rows: OwnerFleetStatusRow[]
+}
+
+export function useOwnerFleetStatus(kind?: string, minVessels = 1, limit = 30) {
+  const qs = new URLSearchParams({ min_vessels: String(minVessels), limit: String(limit) })
+  if (kind) qs.set('kind', kind)
+  return useQuery({
+    queryKey: ['owner-fleet-status', kind, minVessels, limit],
+    queryFn: () => getJSON<OwnerFleetStatusResponse>(`/api/analytics/owner-fleet-status?${qs}`),
+    staleTime: 5 * 60_000,
+    refetchInterval: 5 * 60_000,
+  })
+}

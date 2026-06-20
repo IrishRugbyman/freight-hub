@@ -4514,3 +4514,146 @@ def test_pipelines_all_mode(client):
     r2 = client.get("/api/pipelines")
     body2 = r2.json()
     assert len(body["pipelines"]) > len(body2["pipelines"])
+
+
+# ---------------------------------------------------------------------------
+# Phase 55: Owner Fleet Status
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def owner_fleet_client(tmp_path, monkeypatch):
+    """Seed: 3 live vessels (2 tankers for SHADOW FLEET LLC, 1 bulk for CLEAN OWNER)
+    with laden/ballast state; owner-fleet-status should aggregate correctly."""
+    import duckdb
+    from fastapi.testclient import TestClient
+    from datetime import UTC, datetime
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+
+    ais_file = tmp_path / "ais_ofs.duckdb"
+    conn = duckdb.connect(str(ais_file))
+    conn.execute("""
+    CREATE TABLE live_positions (
+        mmsi BIGINT PRIMARY KEY, name VARCHAR, lat DOUBLE, lon DOUBLE,
+        sog DOUBLE, cog DOUBLE, heading DOUBLE, destination VARCHAR,
+        ship_type INTEGER, length_m DOUBLE, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, updated_ts TIMESTAMP,
+        imo BIGINT, draught DOUBLE, nav_status INTEGER, eta VARCHAR
+    );
+    CREATE TABLE ais_snapshots (
+        snapshot_ts TIMESTAMP, mmsi BIGINT, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, lat DOUBLE, lon DOUBLE, ship_type INTEGER, length_m DOUBLE,
+        sog DOUBLE, nav_status INTEGER, draught DOUBLE, destination VARCHAR,
+        PRIMARY KEY (snapshot_ts, mmsi)
+    );
+    CREATE TABLE vessels (
+        mmsi BIGINT PRIMARY KEY, imo BIGINT, name VARCHAR, flag VARCHAR,
+        flag_iso2 VARCHAR, mid INTEGER, call_sign VARCHAR, vessel_type VARCHAR,
+        dwt INTEGER, grt INTEGER, build_year INTEGER, length_m DOUBLE, beam_m DOUBLE,
+        owner VARCHAR, manager VARCHAR, class_society VARCHAR, enriched_at TIMESTAMP, equasis_ok BOOLEAN
+    );
+    """)
+    conn.executemany("INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [
+        (7001, "T1", 25.0, 56.0, 12.0, 90.0, 90.0, "CNSHA", 80, 330.0, "tanker", "VLCC", "hormuz", now, 2000001, 18.5, 0, None),
+        (7002, "T2", 25.1, 56.1, 13.0, 91.0, 91.0, "NLRTM", 80, 330.0, "tanker", "VLCC", "hormuz", now, 2000002, 8.5, 0, None),
+        (7003, "B1", 3.5, 5.0, 8.0, 180.0, 180.0, "CNQIN", 74, 300.0, "bulk", "Capesize", "ara", now, 2000003, 15.0, 0, None),
+    ])
+    conn.close()
+
+    an_file = tmp_path / "analytics_ofs.duckdb"
+    an_conn = duckdb.connect(str(an_file))
+    an_conn.execute("""
+    CREATE TABLE meta_watermark (key VARCHAR PRIMARY KEY, ts TIMESTAMP);
+    CREATE TABLE ais_events (
+        event_id VARCHAR PRIMARY KEY, type VARCHAR, mmsi BIGINT, mmsi2 BIGINT,
+        start_ts TIMESTAMP, end_ts TIMESTAMP, lat DOUBLE, lon DOUBLE,
+        region VARCHAR, kind VARCHAR, segment VARCHAR, details VARCHAR
+    );
+    CREATE TABLE transit_events (
+        mmsi BIGINT, chokepoint VARCHAR, entered_ts TIMESTAMP, exited_ts TIMESTAMP,
+        direction VARCHAR, kind VARCHAR, segment VARCHAR, laden BOOLEAN,
+        PRIMARY KEY (mmsi, chokepoint, entered_ts)
+    );
+    CREATE TABLE anchored_episodes (
+        mmsi BIGINT, zone VARCHAR, start_ts TIMESTAMP, end_ts TIMESTAMP,
+        kind VARCHAR, segment VARCHAR, PRIMARY KEY (mmsi, zone, start_ts)
+    );
+    CREATE TABLE fleet_density (
+        ts TIMESTAMP, region VARCHAR, kind VARCHAR, segment VARCHAR,
+        laden_count INTEGER, ballast_count INTEGER, unknown_count INTEGER,
+        PRIMARY KEY (ts, region, kind, segment)
+    );
+    CREATE TABLE vessel_state (
+        mmsi BIGINT PRIMARY KEY, max_draught_seen DOUBLE, last_draught DOUBLE,
+        laden VARCHAR, updated_ts TIMESTAMP
+    );
+    """)
+    # T1 laden, T2 ballast, B1 laden
+    an_conn.executemany("INSERT INTO vessel_state VALUES (?,?,?,?,?)", [
+        (7001, 19.0, 18.5, "laden", now),
+        (7002, 19.0, 8.5, "ballast", now),
+        (7003, 16.0, 15.0, "laden", now),
+    ])
+    an_conn.close()
+
+    reg_file = tmp_path / "reg_ofs.duckdb"
+    reg_conn = duckdb.connect(str(reg_file))
+    reg_conn.execute("""
+    CREATE TABLE vessel_registry (
+        imo BIGINT PRIMARY KEY, ship_name VARCHAR, flag VARCHAR, flag_code VARCHAR,
+        call_sign VARCHAR, gross_tonnage INTEGER, dwt INTEGER, ship_type VARCHAR,
+        year_built INTEGER, ship_status VARCHAR, owner VARCHAR, ism_manager VARCHAR,
+        ship_manager VARCHAR, class_society VARCHAR, pi_club VARCHAR,
+        detention_rate_pct DOUBLE, paris_mou VARCHAR, tokyo_mou VARCHAR,
+        uscg_targeting VARCHAR, fetched_ts TIMESTAMP, fetch_ok BOOLEAN,
+        risk_score INTEGER, risk_indicators VARCHAR, ofac_sanctioned BOOLEAN
+    );
+    """)
+    reg_conn.executemany(
+        "INSERT INTO vessel_registry VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            (2000001, "T1", "Russia", "RU", None, 200000, 300000, "Tanker", 2005, "In Service", "SHADOW FLEET LLC", None, None, "RMRS", None, None, "Black", "Black", None, None, True, 72, None, True),
+            (2000002, "T2", "Nauru", "NR", None, 200000, 300000, "Tanker", 2004, "In Service", "SHADOW FLEET LLC", None, None, "RMRS", None, None, "Black", "Black", None, None, True, 75, None, False),
+            (2000003, "B1", "Marshall Islands", "MH", None, 150000, 200000, "Bulk Carrier", 2018, "In Service", "CLEAN OWNER PTE", None, None, "ABS (IACS)", None, None, "White", "White", None, None, True, 10, None, False),
+        ],
+    )
+    reg_conn.close()
+
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
+    monkeypatch.setenv("ANALYTICS_DB", str(an_file))
+    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
+
+    from app.main import app as freight_app
+    return TestClient(freight_app)
+
+
+def test_owner_fleet_status_structure(owner_fleet_client):
+    r = owner_fleet_client.get("/api/analytics/owner-fleet-status")
+    assert r.status_code == 200
+    d = r.json()
+    assert "total_owners" in d
+    assert "rows" in d
+    assert d["total_owners"] >= 1
+    row = d["rows"][0]
+    for key in ("owner", "live_count", "laden", "ballast", "unknown", "flags", "regions"):
+        assert key in row
+
+
+def test_owner_fleet_status_laden_ballast(owner_fleet_client):
+    r = owner_fleet_client.get("/api/analytics/owner-fleet-status?min_vessels=1")
+    d = r.json()
+    owners = {row["owner"]: row for row in d["rows"]}
+    assert "SHADOW FLEET LLC" in owners
+    sf = owners["SHADOW FLEET LLC"]
+    assert sf["live_count"] == 2
+    assert sf["laden"] == 1
+    assert sf["ballast"] == 1
+
+
+def test_owner_fleet_status_kind_filter(owner_fleet_client):
+    r = owner_fleet_client.get("/api/analytics/owner-fleet-status?kind=tanker&min_vessels=1")
+    d = r.json()
+    # Bulk owner should not appear when filtering to tankers
+    owner_names = {row["owner"] for row in d["rows"]}
+    assert "SHADOW FLEET LLC" in owner_names
+    assert "CLEAN OWNER PTE" not in owner_names
