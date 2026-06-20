@@ -1,5 +1,28 @@
 # Freight Hub Changelog
 
+## 2026-06-20 - EU + global pipeline full route geometry (IGGIELGN)
+
+**Added:** Full polyline geometry for 147 World Monitor EU/global pipelines using the
+SciGRID_gas IGGIELGN dataset (Zenodo CC-BY, 6323 gas network segments covering Europe,
+Russia, MENA, and the Caucasus). One-shot ingest script (`backend/ingest_eu_pipeline_routes.py`)
+downloads the zip, builds a graph, runs Dijkstra shortest-path routing from each WM
+pipeline's start/end coordinates, RDP-simplifies at epsilon=0.02 degrees, and stores
+routes in `eu_pipeline_routes` table in `freight_analytics.duckdb`.
+
+Previously only 85 US pipelines had full EIA polylines. Now 232 of 722 total pipelines
+have route_coords in the API. Notable routes: Nord Stream 1&2 (Baltic crossing,
+52-61N,13-30E), Yamal-Europe (Siberia to Germany, 52-66N), BTC (Azerbaijan through
+Georgia to Turkey), Druzhba North/South, TAP (Turkey to Italy via Adriatic submarine),
+TANAP, Kirkuk-Ceyhan, Transalpine (TAL), and 140+ others.
+
+**Loader:** `shared/market-data/loaders/worldmonitor.py` updated to LEFT JOIN
+`eu_pipeline_routes` in `load_pipelines_for_map()`. EIA US routes take priority;
+EU routes fill all others. No frontend changes needed.
+
+**Artifacts:** `backend/ingest_eu_pipeline_routes.py` (new), `shared/market-data/loaders/worldmonitor.py`.
+
+---
+
 ## 2026-06-20 - UX: Vessel deep-links + pipeline map-link
 
 **Pipeline label fix:** "Disrupted pipelines" layer toggle renamed to "Pipelines" (it always showed all 618, not just disrupted).
