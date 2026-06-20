@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { useNavigate } from '@tanstack/react-router'
 import {
   Bar, BarChart, CartesianGrid, Legend, Line, LineChart,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -10,6 +11,15 @@ import {
   useCargoStateChanges, useLaden, useDensity,
 } from '@/lib/api'
 import { fmt, EmptyState, TOOLTIP_STYLE, LEGEND_STYLE, REGION_LABELS } from './-analyticsShared'
+
+function useGoToTracker() {
+  const navigate = useNavigate()
+  return (mmsi: number, lat?: number | null, lon?: number | null) => {
+    const search: Record<string, unknown> = { mmsi }
+    if (lat != null && lon != null) { search.lat = lat; search.lon = lon }
+    navigate({ to: '/', search: search as never })
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Local constants (Ports & Cargo tab only)
@@ -126,6 +136,7 @@ export function PortArrivalForecastCard() {
   const [expandedPort, setExpandedPort] = useState<string | null>(null)
   const { data, isLoading } = usePortArrivals(kind, horizonH)
   const ports = data?.ports ?? []
+  const goToTracker = useGoToTracker()
 
   return (
     <Card>
@@ -176,7 +187,7 @@ export function PortArrivalForecastCard() {
                 {expandedPort === port.port && (
                   <div className="border-t border-border/30 divide-y divide-border/20">
                     {port.vessels.map((v) => (
-                      <div key={v.mmsi} className="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-muted/20">
+                      <div key={v.mmsi} className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-xs hover:bg-muted/20" onClick={() => goToTracker(v.mmsi)}>
                         <div className="min-w-0 flex-1">
                           <span className="font-medium">{v.name ?? `MMSI ${v.mmsi}`}</span>
                           {v.segment && <span className="ml-1 text-muted-foreground">{v.segment}</span>}
@@ -637,6 +648,7 @@ export function CargoTransitionsCard() {
   const [seg, setSeg] = React.useState('')
   const { data, isLoading } = useCargoTransitions(days, 2.0, seg)
   const rows = data?.rows ?? []
+  const goToTracker = useGoToTracker()
 
   return (
     <Card>
@@ -687,7 +699,7 @@ export function CargoTransitionsCard() {
               </thead>
               <tbody>
                 {rows.map((r, i) => (
-                  <tr key={`${r.mmsi}-${i}`} className="border-t border-border/30">
+                  <tr key={`${r.mmsi}-${i}`} className="cursor-pointer border-t border-border/30 hover:bg-muted/20" onClick={() => goToTracker(r.mmsi, r.lat, r.lon)}>
                     <td className="max-w-[8rem] truncate py-0.5 pr-2">{r.name ?? r.mmsi}</td>
                     <td className="py-0.5 pr-2 text-muted-foreground">{r.segment ?? r.kind ?? '-'}</td>
                     <td className="max-w-[7rem] truncate py-0.5 pr-2 text-muted-foreground">{r.region ? r.region.replace(/_/g, ' ') : '-'}</td>
@@ -726,6 +738,7 @@ export function CargoStateChangesCard() {
   const [minChange, setMinChange] = useState(1.5)
   const { data, isLoading } = useCargoStateChanges(days, kind, minChange)
   const rows = data?.rows ?? []
+  const goToTracker = useGoToTracker()
   const loaded = rows.filter(r => r.cargo_state === 'loaded').length
   const discharged = rows.filter(r => r.cargo_state === 'discharged').length
 
@@ -771,7 +784,8 @@ export function CargoStateChangesCard() {
             {rows.map((row) => (
               <div
                 key={`${row.mmsi}-${row.start_ts}`}
-                className={`flex items-center gap-2 rounded px-2 py-1 text-xs ${row.cargo_state === 'loaded' ? 'bg-green-500/8 hover:bg-green-500/15' : 'bg-blue-500/8 hover:bg-blue-500/15'}`}
+                className={`flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-xs ${row.cargo_state === 'loaded' ? 'bg-green-500/8 hover:bg-green-500/15' : 'bg-blue-500/8 hover:bg-blue-500/15'}`}
+                onClick={() => goToTracker(row.mmsi, row.lat, row.lon)}
               >
                 <span className={`w-16 shrink-0 rounded px-1 py-0.5 text-center text-[10px] font-bold ${row.cargo_state === 'loaded' ? 'bg-green-500/20 text-green-400' : 'bg-blue-500/20 text-blue-400'}`}>
                   {row.cargo_state === 'loaded' ? 'LOADED' : 'DISCHRG'}
