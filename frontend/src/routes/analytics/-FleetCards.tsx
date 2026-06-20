@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from '@tanstack/react-router'
 import {
   Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -10,6 +11,15 @@ import {
   useOwnerFleetStatus,
 } from '@/lib/api'
 import { fmt, EmptyState, TOOLTIP_STYLE, LEGEND_STYLE } from './-analyticsShared'
+
+function useGoToTracker() {
+  const navigate = useNavigate()
+  return (mmsi: number, lat?: number | null, lon?: number | null) => {
+    const search: Record<string, unknown> = { mmsi }
+    if (lat != null && lon != null) { search.lat = lat; search.lon = lon }
+    navigate({ to: '/', search: search as never })
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Local helpers (Fleet tab only)
@@ -41,6 +51,7 @@ export function SpeedAnomaliesCard() {
   const rows = data?.rows ?? []
   const fast = rows.filter(r => r.anomaly_type === 'fast').length
   const slow = rows.filter(r => r.anomaly_type === 'slow').length
+  const goToTracker = useGoToTracker()
 
   return (
     <Card>
@@ -77,7 +88,7 @@ export function SpeedAnomaliesCard() {
         ) : (
           <div className="space-y-0.5 max-h-80 overflow-y-auto pr-1">
             {rows.map(row => (
-              <div key={row.mmsi} className={`flex items-center gap-2 rounded px-2 py-1 text-xs ${row.anomaly_type === 'fast' ? 'bg-orange-500/8 hover:bg-orange-500/15' : 'bg-blue-500/8 hover:bg-blue-500/15'}`}>
+              <div key={row.mmsi} className={`flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-xs ${row.anomaly_type === 'fast' ? 'bg-orange-500/8 hover:bg-orange-500/15' : 'bg-blue-500/8 hover:bg-blue-500/15'}`} onClick={() => goToTracker(row.mmsi, row.lat, row.lon)}>
                 <span className={`w-12 shrink-0 rounded px-1 py-0.5 text-center text-[10px] font-bold ${row.anomaly_type === 'fast' ? 'bg-orange-500/20 text-orange-400' : 'bg-blue-500/20 text-blue-400'}`}>
                   {row.anomaly_type === 'fast' ? 'FAST' : 'SLOW'}
                 </span>
@@ -321,6 +332,7 @@ export function SlowSteamersCard() {
   const [kind, setKind] = useState('')
   const { data, isLoading } = useSlowSteamers(kind)
   const rows = data?.rows ?? []
+  const goToTracker = useGoToTracker()
 
   return (
     <Card>
@@ -348,7 +360,7 @@ export function SlowSteamersCard() {
         ) : (
           <div className="space-y-0.5 max-h-80 overflow-y-auto pr-1">
             {rows.map(row => (
-              <div key={row.mmsi} className="flex items-center gap-2 rounded bg-muted/15 px-2 py-1 text-xs hover:bg-muted/30">
+              <div key={row.mmsi} className="flex cursor-pointer items-center gap-2 rounded bg-muted/15 px-2 py-1 text-xs hover:bg-muted/30" onClick={() => goToTracker(row.mmsi)}>
                 <div className="min-w-0 flex-1">
                   <span className="font-medium">{row.name ?? `MMSI ${row.mmsi}`}</span>
                   {row.segment && <span className="ml-1 text-muted-foreground">{row.segment}</span>}
