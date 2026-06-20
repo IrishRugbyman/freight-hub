@@ -5482,17 +5482,19 @@ _PIPELINES_TTL = 3600.0  # 1 hour
 
 @app.get("/api/pipelines", response_model=PipelinesResponse)
 def get_pipelines(disrupted_only: bool = True):
-    """Pipeline segments for the map layer.
+    """Pipeline segments for the map layer and table.
 
-    By default returns only disrupted pipelines (offline + reduced, currently ~37).
-    Pass disrupted_only=false for all 618 pipelines.
-    Data source: World Monitor (Global Energy Monitor, CC-BY 4.0) via market_data PostgreSQL.
+    By default returns only disrupted pipelines (offline + reduced, ~37 rows).
+    Pass disrupted_only=false for all pipelines: 618 World Monitor globals + 104
+    RexTag US domestic FERC gas pipelines (no GPS coords, table-only).
+    World Monitor records that match RexTag are enriched with owner/length/states.
+    Data sources: World Monitor (CC-BY 4.0) + RexTag.com (public informational pages).
     """
     import math
     import time
 
     import pandas as pd
-    from loaders.worldmonitor import load_pipelines_for_map
+    from loaders.worldmonitor import load_pipelines_for_map, load_rextag_us_only_pipelines
 
     now = time.monotonic()
     if disrupted_only in _pipelines_cache:
@@ -5526,14 +5528,46 @@ def get_pipelines(disrupted_only: bool = True):
             capacity_bcm_yr=_float(r.get("capacity_bcm_yr")),
             from_country=str(r["from_country"]),
             to_country=str(r["to_country"]),
-            start_lat=float(r["start_lat"]),
-            start_lon=float(r["start_lon"]),
-            end_lat=float(r["end_lat"]),
-            end_lon=float(r["end_lon"]),
+            start_lat=_float(r.get("start_lat")),
+            start_lon=_float(r.get("start_lon")),
+            end_lat=_float(r.get("end_lat")),
+            end_lon=_float(r.get("end_lon")),
             disruption_description=_str(r.get("disruption_description")),
             disruption_event_type=_str(r.get("disruption_event_type")),
             disruption_since=str(r["disruption_since"]) if r.get("disruption_since") else None,
+            owner=_str(r.get("owner")),
+            length_miles=_float(r.get("length_miles")),
+            states_served=_str(r.get("states_served")),
+            data_source="worldmonitor",
         ))
+
+    # Append RexTag-only US domestic pipelines (table-only, no GPS)
+    if not disrupted_only:
+        try:
+            rt_df = load_rextag_us_only_pipelines()
+        except Exception:
+            rt_df = pd.DataFrame()
+
+        for _, r in rt_df.iterrows():
+            rows.append(PipelineSegment(
+                id=str(r["id"]),
+                name=str(r["name"]),
+                commodity="gas",
+                physical_state="flowing",
+                capacity_bcm_yr=None,
+                capacity_mbd=None,
+                capacity_bcfd=_float(r.get("capacity_bcfd")),
+                from_country="US",
+                to_country="US",
+                start_lat=None,
+                start_lon=None,
+                end_lat=None,
+                end_lon=None,
+                owner=_str(r.get("owner")),
+                length_miles=_float(r.get("length_miles")),
+                states_served=_str(r.get("states_served")),
+                data_source="rextag",
+            ))
 
     total_offline_mbd = sum(
         (p.capacity_mbd or 0.0) for p in rows if p.physical_state == "offline"

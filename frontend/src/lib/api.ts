@@ -1952,13 +1952,19 @@ export interface PipelineSegment {
   capacity_bcm_yr: number | null
   from_country: string
   to_country: string
-  start_lat: number
-  start_lon: number
-  end_lat: number
-  end_lon: number
+  start_lat: number | null
+  start_lon: number | null
+  end_lat: number | null
+  end_lon: number | null
   disruption_description: string | null
   disruption_event_type: string | null
   disruption_since: string | null
+  // RexTag enrichment (US pipelines)
+  owner: string | null
+  length_miles: number | null
+  states_served: string | null
+  capacity_bcfd: number | null
+  data_source: 'worldmonitor' | 'rextag'
 }
 
 export interface PipelinesResponse {

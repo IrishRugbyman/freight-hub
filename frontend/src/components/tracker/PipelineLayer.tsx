@@ -18,12 +18,15 @@ const STATE_WEIGHT: Record<string, number> = {
 }
 
 function popupHtml(p: PipelineSegment): string {
-  const cap =
-    p.commodity === 'gas' && p.capacity_bcm_yr
-      ? `${p.capacity_bcm_yr} bcm/yr`
-      : p.capacity_mbd
-        ? `${p.capacity_mbd} mbd`
-        : 'unknown capacity'
+  const capParts: string[] = []
+  if (p.commodity === 'gas') {
+    if (p.capacity_bcfd) capParts.push(`${p.capacity_bcfd} Bcf/d`)
+    else if (p.capacity_bcm_yr) capParts.push(`${p.capacity_bcm_yr} bcm/yr`)
+  } else if (p.capacity_mbd) {
+    capParts.push(`${p.capacity_mbd} mbd`)
+  }
+  if (p.length_miles) capParts.push(`${p.length_miles.toLocaleString()} mi`)
+  const cap = capParts.join(' &middot; ') || 'capacity unknown'
 
   const stateLabel =
     p.physical_state === 'offline'
@@ -34,16 +37,25 @@ function popupHtml(p: PipelineSegment): string {
 
   const route = `${p.from_country} → ${p.to_country}`
 
-  let html = `<div style="min-width:220px;max-width:280px;font-size:12px;line-height:1.5">
-    <div style="font-weight:700;margin-bottom:4px">${p.name}</div>
-    <div style="margin-bottom:2px">${route} &middot; ${p.commodity.toUpperCase()} &middot; ${cap}</div>
-    <div style="margin-bottom:6px">Status: ${stateLabel}</div>`
+  let html = `<div style="min-width:220px;max-width:300px;font-size:12px;line-height:1.5">
+    <div style="font-weight:700;margin-bottom:4px">${p.name}</div>`
+
+  if (p.owner) {
+    html += `<div style="color:#9ca3af;margin-bottom:2px">${p.owner}</div>`
+  }
+
+  html += `<div style="margin-bottom:2px">${route} &middot; ${p.commodity.toUpperCase()}</div>
+    <div style="margin-bottom:2px">${cap}</div>`
+
+  if (p.states_served) {
+    html += `<div style="margin-bottom:2px;color:#d1d5db">States: ${p.states_served}</div>`
+  }
+
+  html += `<div style="margin-bottom:6px">Status: ${stateLabel}</div>`
 
   if (p.disruption_description) {
     const since = p.disruption_since ? ` (since ${p.disruption_since})` : ''
-    const evtType = p.disruption_event_type
-      ? ` [${p.disruption_event_type}]`
-      : ''
+    const evtType = p.disruption_event_type ? ` [${p.disruption_event_type}]` : ''
     html += `<div style="border-top:1px solid #555;padding-top:6px;color:#ccc">${p.disruption_description}${evtType}${since}</div>`
   }
 
@@ -54,7 +66,7 @@ function popupHtml(p: PipelineSegment): string {
 function makeLine(p: PipelineSegment, highlight = false): L.Polyline {
   const color = STATE_COLOR[p.physical_state] ?? '#9ca3af'
   const line = L.polyline(
-    [[p.start_lat, p.start_lon], [p.end_lat, p.end_lon]],
+    [[p.start_lat!, p.start_lon!], [p.end_lat!, p.end_lon!]],
     {
       color,
       weight: highlight ? 5 : (STATE_WEIGHT[p.physical_state] ?? 1),
@@ -80,9 +92,10 @@ export function PipelineLayer({ visible, highlightId }: { visible: boolean; high
 
     if (!visible || !data) return
 
-    // Draw all non-highlighted pipelines first
+    // Draw all non-highlighted pipelines first (skip RexTag-only records with no coords)
     for (const p of data.pipelines) {
       if (highlightId && p.id === highlightId) continue
+      if (p.start_lat == null || p.end_lat == null) continue
       const line = makeLine(p)
       line.addTo(map)
       linesRef.current.push(line)
@@ -91,7 +104,7 @@ export function PipelineLayer({ visible, highlightId }: { visible: boolean; high
     // Draw highlighted pipeline last (on top) with halo + precise fitBounds
     if (highlightId) {
       const hp = data.pipelines.find((p) => p.id === highlightId)
-      if (hp) {
+      if (hp && hp.start_lat != null && hp.start_lon != null && hp.end_lat != null && hp.end_lon != null) {
         const coords: L.LatLngTuple[] = [[hp.start_lat, hp.start_lon], [hp.end_lat, hp.end_lon]]
         const bounds = L.latLngBounds(coords)
 

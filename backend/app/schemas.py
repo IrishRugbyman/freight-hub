@@ -1178,13 +1178,19 @@ class PipelineSegment(BaseModel):
     capacity_bcm_yr: float | None = None
     from_country: str
     to_country: str
-    start_lat: float
-    start_lon: float
-    end_lat: float
-    end_lon: float
+    start_lat: float | None = None
+    start_lon: float | None = None
+    end_lat: float | None = None
+    end_lon: float | None = None
     disruption_description: str | None = None
     disruption_event_type: str | None = None
     disruption_since: str | None = None
+    # RexTag enrichment fields (US pipelines)
+    owner: str | None = None
+    length_miles: float | None = None
+    states_served: str | None = None
+    capacity_bcfd: float | None = None
+    data_source: str = "worldmonitor"
 
 
 class PipelinesResponse(BaseModel):

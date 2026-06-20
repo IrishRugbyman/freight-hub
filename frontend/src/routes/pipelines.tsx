@@ -36,7 +36,6 @@ function countryName(iso2: string): string {
   return COUNTRY[iso2.toUpperCase()] ?? iso2
 }
 
-// Only show a badge for disrupted states; flowing/unknown shown as plain text
 function StateBadge({ state }: { state: string }) {
   if (state === 'offline') {
     return (
@@ -69,13 +68,15 @@ function commodityDot(c: string) {
 }
 
 function formatCap(p: PipelineSegment): string {
-  if (p.commodity === 'oil' && p.capacity_mbd && p.capacity_mbd > 0) {
-    return `${p.capacity_mbd.toFixed(1)} mbd`
+  const parts: string[] = []
+  if (p.commodity === 'gas') {
+    if (p.capacity_bcfd && p.capacity_bcfd > 0) parts.push(`${p.capacity_bcfd.toFixed(2)} Bcf/d`)
+    else if (p.capacity_bcm_yr && p.capacity_bcm_yr > 0) parts.push(`${p.capacity_bcm_yr.toFixed(1)} bcm/yr`)
+  } else if (p.capacity_mbd && p.capacity_mbd > 0) {
+    parts.push(`${p.capacity_mbd.toFixed(1)} mbd`)
   }
-  if (p.capacity_bcm_yr && p.capacity_bcm_yr > 0) {
-    return `${p.capacity_bcm_yr.toFixed(1)} bcm/yr`
-  }
-  return '-'
+  if (p.length_miles && p.length_miles > 0) parts.push(`${p.length_miles.toLocaleString()} mi`)
+  return parts.join(' · ') || '-'
 }
 
 function sinceStr(s: string | null): string {
@@ -105,7 +106,7 @@ function KpiTile({
   )
 }
 
-type SortKey = 'name' | 'from_country' | 'to_country' | 'capacity' | 'state' | 'commodity' | 'since'
+type SortKey = 'name' | 'owner' | 'from_country' | 'to_country' | 'capacity' | 'state' | 'commodity' | 'since'
 type SortDir = 'asc' | 'desc'
 
 function sortPipelines(rows: PipelineSegment[], key: SortKey, dir: SortDir): PipelineSegment[] {
@@ -113,17 +114,24 @@ function sortPipelines(rows: PipelineSegment[], key: SortKey, dir: SortDir): Pip
   return [...rows].sort((a, b) => {
     let cmp = 0
     if (key === 'name') cmp = a.name.localeCompare(b.name)
+    else if (key === 'owner') cmp = (a.owner ?? '').localeCompare(b.owner ?? '')
     else if (key === 'from_country') cmp = a.from_country.localeCompare(b.from_country)
     else if (key === 'to_country') cmp = a.to_country.localeCompare(b.to_country)
     else if (key === 'commodity') cmp = a.commodity.localeCompare(b.commodity)
     else if (key === 'state') cmp = a.physical_state.localeCompare(b.physical_state)
     else if (key === 'since') {
-      const as = sinceStr(a.disruption_since)
-      const bs = sinceStr(b.disruption_since)
-      cmp = as.localeCompare(bs)
+      cmp = sinceStr(a.disruption_since).localeCompare(sinceStr(b.disruption_since))
     } else if (key === 'capacity') {
-      const ac = a.commodity === 'oil' ? (a.capacity_mbd ?? 0) : (a.capacity_bcm_yr ?? 0) / 10
-      const bc = b.commodity === 'oil' ? (b.capacity_mbd ?? 0) : (b.capacity_bcm_yr ?? 0) / 10
+      const ac = a.capacity_bcfd
+        ? a.capacity_bcfd * 10
+        : a.commodity === 'oil'
+          ? (a.capacity_mbd ?? 0)
+          : (a.capacity_bcm_yr ?? 0)
+      const bc = b.capacity_bcfd
+        ? b.capacity_bcfd * 10
+        : b.commodity === 'oil'
+          ? (b.capacity_mbd ?? 0)
+          : (b.capacity_bcm_yr ?? 0)
       cmp = ac - bc
     }
     return cmp * mult
@@ -138,6 +146,7 @@ export default function PipelinesPage() {
   const [q, setQ] = useState('')
   const [stateFilter, setStateFilter] = useState<string>('all')
   const [commodityFilter, setCommodityFilter] = useState<string>('all')
+  const [sourceFilter, setSourceFilter] = useState<string>('all')
   const [sortKey, setSortKey] = useState<SortKey>('capacity')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -147,13 +156,16 @@ export default function PipelinesPage() {
     let rows = pipelines.filter(p => {
       if (stateFilter !== 'all' && p.physical_state !== stateFilter) return false
       if (commodityFilter !== 'all' && p.commodity !== commodityFilter) return false
+      if (sourceFilter !== 'all' && p.data_source !== sourceFilter) return false
       if (qLower && !p.name.toLowerCase().includes(qLower) &&
           !p.from_country.toLowerCase().includes(qLower) &&
-          !p.to_country.toLowerCase().includes(qLower)) return false
+          !p.to_country.toLowerCase().includes(qLower) &&
+          !(p.owner ?? '').toLowerCase().includes(qLower) &&
+          !(p.states_served ?? '').toLowerCase().includes(qLower)) return false
       return true
     })
     return sortPipelines(rows, sortKey, sortDir)
-  }, [pipelines, q, stateFilter, commodityFilter, sortKey, sortDir])
+  }, [pipelines, q, stateFilter, commodityFilter, sourceFilter, sortKey, sortDir])
 
   const offline = pipelines.filter(p => p.physical_state === 'offline')
   const reduced = pipelines.filter(p => p.physical_state === 'reduced')
@@ -161,6 +173,7 @@ export default function PipelinesPage() {
   const offlineBcm = offline.reduce((s, p) => s + (p.capacity_bcm_yr ?? 0), 0)
   const reducedMbd = reduced.reduce((s, p) => s + (p.capacity_mbd ?? 0), 0)
   const reducedBcm = reduced.reduce((s, p) => s + (p.capacity_bcm_yr ?? 0), 0)
+  const rextagCount = pipelines.filter(p => p.data_source === 'rextag').length
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) {
@@ -184,7 +197,7 @@ export default function PipelinesPage() {
           <KpiTile
             label="Total pipelines"
             value={pipelines.length.toLocaleString()}
-            sub="with coordinates"
+            sub={rextagCount > 0 ? `incl. ${rextagCount} US FERC` : 'with coordinates'}
           />
           <KpiTile
             label="Offline"
@@ -209,7 +222,7 @@ export default function PipelinesPage() {
       <div className="shrink-0 border-b border-border/60 bg-background/95 px-4 py-2 flex flex-wrap items-center gap-3">
         <input
           className="h-7 w-56 rounded border border-border bg-muted/40 px-2.5 text-xs placeholder:text-muted-foreground focus:border-primary/60 focus:outline-none"
-          placeholder="Search by name or country..."
+          placeholder="Search name, owner, states..."
           value={q}
           onChange={e => setQ(e.target.value)}
         />
@@ -232,6 +245,15 @@ export default function PipelinesPage() {
           <option value="all">All commodities</option>
           <option value="oil">Oil</option>
           <option value="gas">Gas</option>
+        </select>
+        <select
+          className="h-7 rounded border border-border bg-background px-2 text-xs"
+          value={sourceFilter}
+          onChange={e => setSourceFilter(e.target.value)}
+        >
+          <option value="all">All sources</option>
+          <option value="worldmonitor">World Monitor</option>
+          <option value="rextag">RexTag US</option>
         </select>
         <span className="ml-auto text-xs text-muted-foreground">
           {filtered.length} of {pipelines.length}
@@ -262,6 +284,12 @@ export default function PipelinesPage() {
                 </th>
                 <th
                   className="cursor-pointer px-4 py-2 font-medium hover:text-foreground"
+                  onClick={() => toggleSort('owner')}
+                >
+                  Owner<SortIcon k="owner" />
+                </th>
+                <th
+                  className="cursor-pointer px-4 py-2 font-medium hover:text-foreground"
                   onClick={() => toggleSort('from_country')}
                 >
                   From<SortIcon k="from_country" />
@@ -282,7 +310,7 @@ export default function PipelinesPage() {
                   className="cursor-pointer px-4 py-2 font-medium hover:text-foreground text-right"
                   onClick={() => toggleSort('capacity')}
                 >
-                  Capacity<SortIcon k="capacity" />
+                  Capacity / Length<SortIcon k="capacity" />
                 </th>
                 <th
                   className="cursor-pointer px-4 py-2 font-medium hover:text-foreground"
@@ -305,14 +333,15 @@ export default function PipelinesPage() {
                 const since = sinceStr(p.disruption_since)
                 const isExpanded = expanded === p.id
                 const disrupted = p.physical_state === 'offline' || p.physical_state === 'reduced'
+                const hasMap = p.start_lat != null && p.start_lon != null
                 return (
                   <>
                     <tr
                       key={p.id}
-                      className={`cursor-pointer border-b border-border/20 transition-colors ${disrupted ? 'hover:bg-muted/40' : 'hover:bg-muted/20'}`}
-                      onClick={() => navigate({ to: '/', search: { pipeline_id: p.id } as never })}
+                      className={`border-b border-border/20 transition-colors ${hasMap ? 'cursor-pointer' : ''} ${disrupted ? 'hover:bg-muted/40' : 'hover:bg-muted/20'}`}
+                      onClick={() => hasMap && navigate({ to: '/', search: { pipeline_id: p.id } as never })}
                     >
-                      <td className="px-4 py-2.5" style={{ minWidth: '240px', maxWidth: '320px' }}>
+                      <td className="px-4 py-2.5" style={{ minWidth: '200px', maxWidth: '300px' }}>
                         <span
                           className={`block font-medium leading-snug ${disrupted ? '' : 'text-foreground/70'}`}
                           title={p.name}
@@ -320,6 +349,21 @@ export default function PipelinesPage() {
                         >
                           {p.name}
                         </span>
+                        {p.states_served && (
+                          <span className="text-[10px] text-muted-foreground/50 leading-tight block mt-0.5">
+                            {p.states_served.split(',').slice(0, 4).join(', ')}{p.states_served.split(',').length > 4 ? '…' : ''}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5 text-muted-foreground" style={{ maxWidth: '200px' }}>
+                        {p.owner && (
+                          <span
+                            title={p.owner}
+                            style={{ overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}
+                          >
+                            {p.owner}
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-2.5 text-muted-foreground">
                         {countryName(p.from_country)}
@@ -356,16 +400,25 @@ export default function PipelinesPage() {
                       </td>
                       <td className="px-2 py-2.5">
                         <div className="flex items-center gap-1">
-                          <button
-                            title="View on map"
-                            className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-muted hover:text-primary"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              navigate({ to: '/', search: { pipeline_id: p.id } as never })
-                            }}
-                          >
-                            <MapPin size={13} />
-                          </button>
+                          {hasMap ? (
+                            <button
+                              title="View on map"
+                              className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-muted hover:text-primary"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                navigate({ to: '/', search: { pipeline_id: p.id } as never })
+                              }}
+                            >
+                              <MapPin size={13} />
+                            </button>
+                          ) : (
+                            <span
+                              className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground/20"
+                              title="US domestic (no map coordinates)"
+                            >
+                              <MapPin size={13} />
+                            </span>
+                          )}
                           {p.disruption_description && (
                             <button
                               title={isExpanded ? 'Collapse' : 'Show disruption detail'}
@@ -383,7 +436,7 @@ export default function PipelinesPage() {
                     </tr>
                     {isExpanded && p.disruption_description && (
                       <tr key={`${p.id}-detail`} className="border-b border-border/30 bg-muted/20">
-                        <td colSpan={9} className="px-6 py-3">
+                        <td colSpan={10} className="px-6 py-3">
                           <div className="max-w-2xl">
                             <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
                               {p.disruption_event_type ?? 'Disruption'} details
