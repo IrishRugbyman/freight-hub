@@ -54,7 +54,7 @@ function popupHtml(p: PipelineSegment): string {
 /** Renders pipeline lines on the Leaflet map. Controlled by the pipelines layer toggle. */
 export function PipelineLayer({ visible }: { visible: boolean }) {
   const map = useMap()
-  const { data } = usePipelines(visible)
+  const { data } = usePipelines(true, visible)
   const linesRef = useRef<L.Polyline[]>([])
 
   useEffect(() => {

@@ -1971,10 +1971,10 @@ export interface PipelinesResponse {
   pipelines: PipelineSegment[]
 }
 
-export function usePipelines(enabled = true) {
+export function usePipelines(disruptedOnly = true, enabled = true) {
   return useQuery({
-    queryKey: ['pipelines'],
-    queryFn: () => getJSON<PipelinesResponse>('/api/pipelines'),
+    queryKey: ['pipelines', disruptedOnly],
+    queryFn: () => getJSON<PipelinesResponse>(`/api/pipelines?disrupted_only=${disruptedOnly}`),
     staleTime: 60 * 60_000,
     refetchInterval: 60 * 60_000,
     enabled,

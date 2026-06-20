@@ -80,7 +80,7 @@ function sortPipelines(rows: PipelineSegment[], key: SortKey, dir: SortDir): Pip
 }
 
 export default function PipelinesPage() {
-  const { data, isLoading } = usePipelines(false)
+  const { data, isLoading } = usePipelines(false, true)
   const pipelines = data?.pipelines ?? []
 
   const [q, setQ] = useState('')
