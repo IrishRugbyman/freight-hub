@@ -14,6 +14,15 @@ import { fmt, EmptyState, TOOLTIP_STYLE, LEGEND_STYLE } from './-analyticsShared
 // ---------------------------------------------------------------------------
 // Local helpers (Risk tab only)
 // ---------------------------------------------------------------------------
+function useGoToTracker() {
+  const navigate = useNavigate()
+  return (mmsi: number, lat?: number | null, lon?: number | null) => {
+    const search: Record<string, unknown> = { mmsi }
+    if (lat != null && lon != null) { search.lat = lat; search.lon = lon }
+    navigate({ to: '/', search: search as never })
+  }
+}
+
 function riskColor(score: number): string {
   if (score >= 70) return 'text-red-400'
   if (score >= 50) return 'text-orange-400'
@@ -76,7 +85,7 @@ export function VesselRiskLeaderboardCard() {
   const [kindFilter, setKindFilter] = useState('')
   const { data, isLoading } = useVesselRiskScores(topN, days, '', kindFilter, 5)
   const rows = data?.rows ?? []
-  const navigate = useNavigate()
+  const goToTracker = useGoToTracker()
 
   return (
     <Card>
@@ -134,7 +143,7 @@ export function VesselRiskLeaderboardCard() {
                 {rows.map((row, i) => {
                   const label = riskScoreLabel(row.total_score)
                   return (
-                    <tr key={row.mmsi} className="cursor-pointer border-b border-border/20 hover:bg-muted/20" onClick={() => { const s: Record<string, unknown> = { mmsi: row.mmsi }; if (row.lat != null && row.lon != null) { s.lat = row.lat; s.lon = row.lon } navigate({ to: '/', search: s as never }) }}>
+                    <tr key={row.mmsi} className="cursor-pointer border-b border-border/20 hover:bg-muted/20" onClick={() => goToTracker(row.mmsi, row.lat, row.lon)}>
                       <td className="py-1.5 pr-2 text-right text-xs text-muted-foreground tabular-nums">{i + 1}</td>
                       <td className="py-1.5 pr-3">
                         <span className="font-medium text-foreground/90">{row.name ?? '-'}</span>
@@ -414,6 +423,7 @@ export function TransitRiskCard() {
   const { data, isLoading } = useTransitRisk(chokepoint, days, 0)
   const rows = data?.rows ?? []
   const showing = rows.slice(0, 15)
+  const goToTracker = useGoToTracker()
 
   return (
     <Card>
@@ -453,7 +463,7 @@ export function TransitRiskCard() {
               </thead>
               <tbody>
                 {showing.map((ev, i) => (
-                  <tr key={`${ev.mmsi}-${ev.entered_ts}-${i}`} className="border-t border-border/30">
+                  <tr key={`${ev.mmsi}-${ev.entered_ts}-${i}`} className="cursor-pointer border-t border-border/30 hover:bg-muted/20" onClick={() => goToTracker(ev.mmsi)}>
                     <td className="py-0.5 pr-2 text-muted-foreground">{ev.entered_ts.slice(5, 16).replace('T', ' ')}</td>
                     <td className="max-w-[8rem] truncate py-0.5 pr-2">{ev.name ?? ev.mmsi}</td>
                     <td className="py-0.5 pr-2 text-muted-foreground">{ev.segment ?? ev.kind ?? '-'}</td>
@@ -481,6 +491,7 @@ export function AnchorageDwellCard() {
   const [zone, setZone] = useState('singapore_west')
   const { data, isLoading } = useAnchorageDwell(zone, 20)
   const rows = data?.rows ?? []
+  const goToTracker = useGoToTracker()
 
   return (
     <Card>
@@ -511,7 +522,7 @@ export function AnchorageDwellCard() {
               </thead>
               <tbody>
                 {rows.map((v, i) => (
-                  <tr key={`${v.mmsi}-${i}`} className="border-t border-border/30">
+                  <tr key={`${v.mmsi}-${i}`} className="cursor-pointer border-t border-border/30 hover:bg-muted/20" onClick={() => goToTracker(v.mmsi)}>
                     <td className="max-w-[9rem] truncate py-0.5 pr-2">{v.name ?? v.mmsi}</td>
                     <td className="py-0.5 pr-2 text-muted-foreground">{v.segment ?? v.kind ?? '-'}</td>
                     <td className="py-0.5 pr-2 tabular-nums">
@@ -539,6 +550,7 @@ export function StsRiskCard() {
   const { data, isLoading } = useStsRisk(30, 0)
   const rows = data?.rows ?? []
   const showing = rows.slice(0, 15)
+  const goToTracker = useGoToTracker()
 
   return (
     <Card>
@@ -571,7 +583,7 @@ export function StsRiskCard() {
               </thead>
               <tbody>
                 {showing.map((ev) => (
-                  <tr key={ev.event_id} className="border-t border-border/30">
+                  <tr key={ev.event_id} className="cursor-pointer border-t border-border/30 hover:bg-muted/20" onClick={() => goToTracker(ev.mmsi)}>
                     <td className="py-0.5 pr-2 text-muted-foreground">{ev.start_ts.slice(5, 16).replace('T', ' ')}</td>
                     <td className="py-0.5 pr-2">{ev.region ? fmt(ev.region) : '-'}</td>
                     <td className="max-w-[8rem] truncate py-0.5 pr-2">{ev.name ?? ev.mmsi}</td>
