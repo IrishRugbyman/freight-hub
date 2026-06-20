@@ -5519,6 +5519,15 @@ def get_pipelines(disrupted_only: bool = True):
 
     rows: list[PipelineSegment] = []
     for _, r in df.iterrows():
+        route_json = r.get("route_json")
+        route_coords = None
+        if route_json and isinstance(route_json, str):
+            try:
+                import json as _json
+                route_coords = _json.loads(route_json)
+            except Exception:
+                pass
+
         rows.append(PipelineSegment(
             id=str(r["id"]),
             name=str(r["name"]),
@@ -5539,6 +5548,7 @@ def get_pipelines(disrupted_only: bool = True):
             length_miles=_float(r.get("length_miles")),
             states_served=_str(r.get("states_served")),
             data_source="worldmonitor",
+            route_coords=route_coords,
         ))
 
     # Append RexTag-only US domestic pipelines (table-only, no GPS)
@@ -5549,6 +5559,15 @@ def get_pipelines(disrupted_only: bool = True):
             rt_df = pd.DataFrame()
 
         for _, r in rt_df.iterrows():
+            rt_route_json = r.get("route_json")
+            rt_route_coords = None
+            if rt_route_json and isinstance(rt_route_json, str):
+                try:
+                    import json as _json
+                    rt_route_coords = _json.loads(rt_route_json)
+                except Exception:
+                    pass
+
             rows.append(PipelineSegment(
                 id=str(r["id"]),
                 name=str(r["name"]),
@@ -5567,6 +5586,7 @@ def get_pipelines(disrupted_only: bool = True):
                 length_miles=_float(r.get("length_miles")),
                 states_served=_str(r.get("states_served")),
                 data_source="rextag",
+                route_coords=rt_route_coords,
             ))
 
     total_offline_mbd = sum(

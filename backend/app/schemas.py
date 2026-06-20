@@ -1191,6 +1191,9 @@ class PipelineSegment(BaseModel):
     states_served: str | None = None
     capacity_bcfd: float | None = None
     data_source: str = "worldmonitor"
+    # EIA full route geometry: list of segments, each [[lat, lon], ...]
+    # None = only the two-point WM start/end is available
+    route_coords: list[list[list[float]]] | None = None
 
 
 class PipelinesResponse(BaseModel):

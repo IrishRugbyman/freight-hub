@@ -1965,6 +1965,8 @@ export interface PipelineSegment {
   states_served: string | null
   capacity_bcfd: number | null
   data_source: 'worldmonitor' | 'rextag'
+  // EIA full route geometry: list of segments, each [[lat, lon], ...]
+  route_coords: number[][][] | null
 }
 
 export interface PipelinesResponse {

@@ -63,17 +63,29 @@ function popupHtml(p: PipelineSegment): string {
   return html
 }
 
-function makeLine(p: PipelineSegment, highlight = false): L.Polyline {
+/** Return the best available latlngs for a pipeline: EIA full route or WM two-point fallback. */
+function pipelineLatLngs(p: PipelineSegment): L.LatLngExpression[][] {
+  if (p.route_coords && p.route_coords.length > 0) {
+    return p.route_coords as L.LatLngExpression[][]
+  }
+  if (p.start_lat != null && p.start_lon != null && p.end_lat != null && p.end_lon != null) {
+    return [[[p.start_lat, p.start_lon], [p.end_lat, p.end_lon]]]
+  }
+  return []
+}
+
+function makeLine(p: PipelineSegment, highlight = false): L.Polyline | null {
+  const latlngs = pipelineLatLngs(p)
+  if (latlngs.length === 0) return null
+
   const color = STATE_COLOR[p.physical_state] ?? '#9ca3af'
-  const line = L.polyline(
-    [[p.start_lat!, p.start_lon!], [p.end_lat!, p.end_lon!]],
-    {
-      color,
-      weight: highlight ? 5 : (STATE_WEIGHT[p.physical_state] ?? 1),
-      opacity: highlight ? 1 : 0.85,
-      dashArray: p.physical_state === 'offline' && !highlight ? '6 4' : undefined,
-    },
-  )
+  // L.polyline accepts LatLngExpression[][] for multi-segment rendering
+  const line = L.polyline(latlngs as L.LatLngExpression[][], {
+    color,
+    weight: highlight ? 5 : (STATE_WEIGHT[p.physical_state] ?? 1),
+    opacity: highlight ? 1 : 0.85,
+    dashArray: p.physical_state === 'offline' && !highlight ? '6 4' : undefined,
+  })
   line.bindPopup(popupHtml(p), { maxWidth: 300 })
   return line
 }
@@ -95,29 +107,34 @@ export function PipelineLayer({ visible, highlightId }: { visible: boolean; high
     // Draw all non-highlighted pipelines first (skip RexTag-only records with no coords)
     for (const p of data.pipelines) {
       if (highlightId && p.id === highlightId) continue
-      if (p.start_lat == null || p.end_lat == null) continue
       const line = makeLine(p)
+      if (!line) continue
       line.addTo(map)
       linesRef.current.push(line)
     }
 
-    // Draw highlighted pipeline last (on top) with halo + precise fitBounds
+    // Draw highlighted pipeline last (on top) with halo + fitBounds on full route
     if (highlightId) {
       const hp = data.pipelines.find((p) => p.id === highlightId)
-      if (hp && hp.start_lat != null && hp.start_lon != null && hp.end_lat != null && hp.end_lon != null) {
-        const coords: L.LatLngTuple[] = [[hp.start_lat, hp.start_lon], [hp.end_lat, hp.end_lon]]
-        const bounds = L.latLngBounds(coords)
+      if (hp) {
+        const latlngs = pipelineLatLngs(hp)
+        if (latlngs.length > 0) {
+          const allPts = latlngs.flat() as [number, number][]
+          const bounds = L.latLngBounds(allPts)
 
-        const halo = L.polyline(coords, { color: '#ffffff', weight: 10, opacity: 0.2, interactive: false })
-        halo.addTo(map)
-        haloRef.current = halo
+          const halo = L.polyline(latlngs as L.LatLngExpression[][], {
+            color: '#ffffff', weight: 10, opacity: 0.2, interactive: false,
+          })
+          halo.addTo(map)
+          haloRef.current = halo
 
-        const line = makeLine(hp, true)
-        line.addTo(map)
-        linesRef.current.push(line)
+          const line = makeLine(hp, true)!
+          line.addTo(map)
+          linesRef.current.push(line)
 
-        map.fitBounds(bounds, { padding: [80, 80], maxZoom: 6, animate: true })
-        setTimeout(() => line.openPopup(bounds.getCenter()), 600)
+          map.fitBounds(bounds, { padding: [80, 80], maxZoom: 6, animate: true })
+          setTimeout(() => line.openPopup(bounds.getCenter()), 600)
+        }
       }
     }
 

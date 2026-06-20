@@ -334,7 +334,7 @@ export default function PipelinesPage() {
                 const since = sinceStr(p.disruption_since)
                 const isExpanded = expanded === p.id
                 const disrupted = p.physical_state === 'offline' || p.physical_state === 'reduced'
-                const hasMap = p.start_lat != null && p.start_lon != null
+                const hasMap = (p.start_lat != null && p.start_lon != null) || (p.route_coords != null && p.route_coords.length > 0)
                 return (
                   <>
                     <tr
