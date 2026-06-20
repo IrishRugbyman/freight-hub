@@ -1,5 +1,36 @@
 # Freight Hub Changelog
 
+## 2026-06-20 - Global pipeline route geometry (OSM Overpass Dijkstra)
+
+**Added:** Full polyline geometry for an additional 40 World Monitor pipelines
+covering Russia/Central Asia, East Asia, Middle East, Africa, South America,
+and Oceania using OSM Overpass API Dijkstra routing. Two-pass ingest:
+
+- Pass 1 (`ingest_global_pipeline_routes.py`): 20 regional bbox Overpass queries,
+  per-region DuckDB saves (idempotent on resume), rate-limit auto-retry.
+- Pass 2 (`ingest_global_pipeline_routes_pass2.py`): merges sub-region graphs into
+  super-regions to handle trans-regional pipelines (e.g. ESPO spans East + Far East
+  Russia boxes). Adds a further 4 routes.
+
+Notable new routes: ESPO (4,436 km, 270 pts), West-East Gas Pipeline China
+(2,811 km), GASBOL Bolivia (2,428 km), Power of Siberia (634 km), Central
+Asia-China Line C (1,838 km), Dampier-Bunbury AU (1,544 km), Express CA
+(1,258 km), Chad-Cameroon (1,067 km), Mozambique-SA Gas (858 km).
+
+Combined with EU IGGIELGN (147) and EIA US gas (85 RexTag + 20 WM-linked),
+total with full polyline routes: 272/722 (38%). Remaining gaps are mostly US/CA
+oil pipelines (TAPS, Enbridge, Keystone, Colonial) where OSM network lacks
+connected endpoint topology for Dijkstra routing.
+
+**Loader:** `worldmonitor.py` `load_pipelines_for_map()` now JOINs three route
+tables in priority order: EIA -> EU -> global.
+
+**Artifacts:** `backend/ingest_global_pipeline_routes.py`,
+`backend/ingest_global_pipeline_routes_pass2.py`,
+`shared/market-data/loaders/worldmonitor.py`.
+
+---
+
 ## 2026-06-20 - EU + global pipeline full route geometry (IGGIELGN)
 
 **Added:** Full polyline geometry for 147 World Monitor EU/global pipelines using the
