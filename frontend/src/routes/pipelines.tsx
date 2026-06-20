@@ -324,6 +324,7 @@ export default function PipelinesPage() {
                 >
                   Since<SortIcon k="since" />
                 </th>
+                <th className="px-4 py-2 font-medium">States</th>
                 <th className="px-4 py-2 font-medium">Disruption</th>
                 <th className="w-8 px-2 py-2" />
               </tr>
@@ -349,11 +350,6 @@ export default function PipelinesPage() {
                         >
                           {p.name}
                         </span>
-                        {p.states_served && (
-                          <span className="text-[10px] text-muted-foreground/50 leading-tight block mt-0.5">
-                            {p.states_served.split(',').slice(0, 4).join(', ')}{p.states_served.split(',').length > 4 ? '…' : ''}
-                          </span>
-                        )}
                       </td>
                       <td className="px-4 py-2.5 text-muted-foreground" style={{ maxWidth: '200px' }}>
                         {p.owner && (
@@ -382,6 +378,13 @@ export default function PipelinesPage() {
                       </td>
                       <td className="px-4 py-2.5 tabular-nums text-muted-foreground/70 text-[11px]">
                         {since}
+                      </td>
+                      <td className="px-4 py-2.5 text-muted-foreground/70 text-[11px]" style={{ maxWidth: '180px' }}>
+                        {p.states_served && (
+                          <span title={p.states_served}>
+                            {p.states_served.split(',').slice(0, 4).join(', ')}{p.states_served.split(',').length > 4 ? ` +${p.states_served.split(',').length - 4}` : ''}
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-2.5" style={{ maxWidth: '280px' }}>
                         {p.disruption_event_type && (
@@ -436,7 +439,7 @@ export default function PipelinesPage() {
                     </tr>
                     {isExpanded && p.disruption_description && (
                       <tr key={`${p.id}-detail`} className="border-b border-border/30 bg-muted/20">
-                        <td colSpan={10} className="px-6 py-3">
+                        <td colSpan={11} className="px-6 py-3">
                           <div className="max-w-2xl">
                             <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
                               {p.disruption_event_type ?? 'Disruption'} details
