@@ -1,5 +1,45 @@
 # Freight Hub Changelog
 
+## 2026-06-21 - OSM Chinese name map, proximity fix, US sub-regions (366/618 total)
+
+**Added:** 23 more WM pipeline routes, bringing the total to **366/618** (was 343 at session
+start after WM dataset was updated from 700 to 618 entries; pipeline-count delta is unrelated
+to routing work).
+
+**Code changes (commit f6bd9d1):**
+- `_FOREIGN_NAME_MAP`: translates 20+ Chinese-character and Cyrillic OSM `name` tags to
+  WM-matchable English. Chinese characters reduce to empty ASCII through NFKD normalization,
+  so they were silently dropped without this map. Covered: West-East Gas Pipeline 1-4 and
+  subsections, China-Russia East Pipeline phases 1-3, Shaan-Jing 1-4, Sino-Myanmar crude
+  and gas, Kazakhstan-China Oil, ESPO-China spur.
+- Proximity check switched from centroid to nearest-point sampling over 600 evenly-spaced
+  points: a 5000 km pipeline's centroid is 2500 km from sub-section WM endpoint pairs,
+  causing all sub-section matches to fail the 600 km guard.
+- `_norm()` now keeps single-digit tokens: "2", "3", "4" were being filtered by `len > 1`,
+  making all numbered pipeline variants (West-East Gas Pipeline 2 vs 3 vs 4) produce
+  identical token sets and prevent specific numbered matches.
+- Bboxes: split `us_lower48` into 6 sub-regions (northeast, southeast, gulf, midcontinent,
+  rockies_north, west) and `canada` into `canada_west` + `canada_east` to avoid Overpass
+  timeouts on large bboxes.
+- EIA oil: added `keystone` WM ID to TRANSCANADA Keystone override, added Seminole Red
+  Pipeline override for Enterprise and Phillips 66 variants.
+
+**Routes added this session (global_pipeline_routes: 116 -> 137, EIA oil: 45 -> 47):**
+- China: WEGP 1/2/3/4 + middle/west subsections, China-Russia East phases 1/2/3, Power of
+  Siberia, ESPO-China spur (x2 WM IDs), Sino-Myanmar gas trunk - 14 routes
+- India: HVJ (Hazira-Vijaipur-Jagdishpur) Gas Pipeline - 1 route
+- US (OSM): Mariner East 2 NGL, Aegis Pipeline, Whistler Pipeline, Atmos Pipeline Texas - 4 routes
+- EIA oil: Keystone mainline, Seminole Red Pipeline - 2 routes
+- Canada (Enbridge Line 65): +1 route (from canada_east)
+
+**Remaining gaps (252 unrouted):** China domestic (42, need CNPC GIS), US NGL gathering
+systems (31, PHMSA NPMS needed), India domestic (25, PNGRB/GAIL), Iran (22, no public GIS),
+Canada gas/oil sands (16, NRCan/CER shapefiles), Russia domestic (15).
+
+**Artifacts:** `backend/ingest_osm_named_pipeline_routes.py`, `backend/ingest_eia_oil_routes.py`.
+
+---
+
 ## 2026-06-21 - EIA oil manual overrides expanded (374/700 total)
 
 **Added:** 16 more WM pipeline routes by expanding `_MANUAL` in `ingest_eia_oil_routes.py`
