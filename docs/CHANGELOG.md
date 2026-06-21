@@ -1,5 +1,25 @@
 # Freight Hub Changelog
 
+## 2026-06-21 - EIA oil manual overrides expanded (374/700 total)
+
+**Added:** 16 more WM pipeline routes by expanding `_MANUAL` in `ingest_eia_oil_routes.py`
+from 29 to 45 entries. Key change: converted `_MANUAL` values from `str` to `list[str]`
+so one EIA `(opername, pipename)` entry can populate multiple WM IDs sharing the same
+physical corridor (aliases, phases, same operator).
+
+New WM IDs covered: `alberta-clipper-oil-pipeline-ca` (Enbridge Line 67/Alberta Clipper),
+`diamond-oil-pipeline-us` (Plains All American Patoka-Memphis), `enbridge-line-14-64-oil-pipeline-us`
+(North Dakota system), `frontier-oil-pipeline-us` (Holly Energy Big Spring-Denver), `grand-mesa-oil-pipeline-us`
+(Magellan DJ Basin-Cushing), `kaw-oil-pipeline-us` (CHS Energy Kansas crude),
+`midland-to-echo-pipeline-system-*-us` x2 (Enterprise Midland-ECHO), `ozark-crude-oil-pipeline-patoka-to-lima-expansion-us`,
+`permian-express-oil-pipeline-phase-i/ii/iv-us` x3, `seaway-oil-pipeline-system-us`,
+`spearhead-oil-pipeline-us`, `teppco-pipeline-us` (Enterprise Gulf Coast-Great Lakes products),
+`western-corridor-oil-pipeline-system-glacier-pipeline-bearto-us` (Phillips 66 Glacier).
+
+**Combined total: 374/700 WM pipelines now routed** (from 358 after OSM named-way pass).
+
+---
+
 ## 2026-06-21 - OSM named-way pipeline routes (global, 56 new routes; 358/700 total)
 
 **Added:** 56 WM pipeline routes via OSM Overpass named-way assembly, on top of the
