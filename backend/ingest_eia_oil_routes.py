@@ -53,35 +53,28 @@ _MANUAL: dict[tuple[str, str], str] = {
     ("ENBRIDGE", "Southern Access"): "enbridge-mainline",
     ("ENTERPRISE PRODUCTS PARTNERS", "Seaway"): "seaway",
     ("KINDER MORGAN", "TransMountain"): "trans-mountain",
-    ("TRANSCANADA", "Keystone"): "keystone-oil-pipeline-ca-us",
-    ("TRANSCANADA", "Gulf Coast Project"): "keystone-oil-pipeline-ca-us",
-    ("ENERGY TRANSFER", "Dakota Access Pipeline (DAPL)"): "dapl-oil-pipeline-us",
+    # Keystone: Phase 1 = Hardisty->Patoka mainline, Gulf Coast = Phase 2
+    ("TRANSCANADA", "Keystone"): "keystone-oil-pipeline-mainline-phase-1-ca",
+    ("TRANSCANADA", "Gulf Coast Project"): "keystone-oil-pipeline-phase-2-us",
+    ("ENERGY TRANSFER", "Dakota Access Pipeline (DAPL)"): "dakota-access-oil-pipeline-dapl-us",
     ("PHILLIPS 66 PIPELINE", "Gray Oak Pipeline"): "gray-oak-oil-pipeline-us",
     ("PHILLIPS  66 PIPELINE", "Gray Oak Pipeline"): "gray-oak-oil-pipeline-us",
     ("MAGELLAN MIDSTREAM PARTNERS", "BridgeTex"): "bridgetex-oil-pipeline-us",
-    ("MAGELLAN MIDSTREAM PARTNERS", "Longhorn"): "longhorn-crude-oil-pipeline-us",
-    ("SHELL PIPELINE COMPANY", "Capline"): "capline-crude-oil-pipeline-us",
-    ("PLAINS ALL AMERICAN PIPELINE", "Basin"): "basin-crude-oil-pipeline-us",
-    ("PLAINS ALL AMERICAN PIPELINE", "Cactus Pipeline"): "cactus-crude-oil-pipeline-us",
-    ("SPECTRA ENERGY", "Express System"): "express-pipeline-ca-us",
+    ("MAGELLAN MIDSTREAM PARTNERS", "Longhorn"): "longhorn-oil-pipeline-crude-oil-system-us",
+    ("SHELL PIPELINE COMPANY", "Capline"): "capline-oil-pipeline-us",
+    ("PLAINS ALL AMERICAN PIPELINE", "Basin"): "basin-oil-pipeline-us",
+    ("PLAINS ALL AMERICAN PIPELINE", "Cactus Pipeline"): "cactus-oil-pipeline-us",
+    ("SPECTRA ENERGY", "Express System"): "express-oil-pipeline-system-ca",
     ("SPECTRA ENERGY", "Platte Pipeline"): "platte-crude-oil-pipeline-us",
-    ("TALLGRASS ENERGY", "Pony Express Pipeline"): "pony-express-crude-oil-pipeline-us",
-    ("ENERGY TRANSFER", "Bayou Bridge Pipeline"): "bayou-bridge-crude-oil-pipeline-us",
-    ("MAGELLAN MIDSTREAM PARTNERS", "Saddlehorn Pipeline"): "saddlehorn-crude-oil-pipeline-us",
-    ("LOOP", "LOOP"): "louisiana-offshore-oil-port-loop-us",
-    ("PORTLAND PIPELINE", "Portland Pipeline"): "portland-montreal-pipe-line-us-ca",
-    # Petroleum products (Colonial, Explorer, Plantation, etc.)
-    # Will be fuzzy-matched
+    ("TALLGRASS ENERGY", "Pony Express Pipeline"): "pony-express-oil-pipeline-us",
+    ("MAGELLAN MIDSTREAM PARTNERS", "Saddlehorn Pipeline"): "saddlehorn-oil-pipeline-expansion-us",
+    # Note: Bayou Bridge, LOOP, Portland Montreal not in WM pipeline_registry
 }
 
-# Also match these operator keywords for fuzzy override
+# Operator keyword overrides for fuzzy matching - only include WM-registered IDs
 _OP_SLUG_MAP: dict[str, str] = {
-    "colonial pipeline": "colonial-pipeline-petroleum-us",
-    "plantation pipe line": "plantation-pipeline-petroleum-us",
-    "explorer pipeline": "explorer-pipeline-petroleum-us",
-    "buckeye partners": "buckeye-pipeline-petroleum-us",
-    "magellan pipeline": "magellan-petroleum-pipeline-us",
-    "sunoco logistics": "sunoco-pipeline-petroleum-us",
+    # Petroleum products companies are generally not tracked by WM (US domestic only)
+    # Leave empty to rely on fuzzy matching alone
 }
 
 
