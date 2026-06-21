@@ -117,10 +117,21 @@ def _norm(s: str) -> set[str]:
     return {w for w in s.split() if len(w) > 1 and w not in _STOP}
 
 
+_GENERIC_TOKENS = {
+    "pipeline", "gas", "oil", "crude", "natural", "petroleum",
+    "system", "main", "line", "pipe", "ngl", "products", "refined",
+}
+
+
 def _jaccard(a: set, b: set) -> float:
     if not a or not b:
         return 0.0
-    return len(a & b) / len(a | b)
+    inter = a & b
+    # Require at least one distinctive (non-generic) shared token so that two
+    # pipelines whose names share only "Pipeline System" don't score > 0.
+    if not (inter - _GENERIC_TOKENS):
+        return 0.0
+    return len(inter) / len(a | b)
 
 
 # ---------------------------------------------------------------------------
