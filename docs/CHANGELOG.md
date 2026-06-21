@@ -1,5 +1,25 @@
 # Freight Hub Changelog
 
+## 2026-06-21 - EIA HGL NGL pipeline routes (+8 routes, 417/618 total)
+
+**Routes added (via new `ingest_eia_hgl_routes.py`, stored in eia_oil_pipeline_routes, 56 total there):**
+
+US NGL/Y-grade/ethane pipelines from EIA Hydrocarbon Gas Liquids Pipelines FeatureServer:
+- `overland-pass-ngl-pipeline-us` - ONEOK Overland Pass (Opal WY to Conway KS), 1427 km
+- `elk-creek-ngl-pipeline-us` - ONEOK Elk Creek Pipeline (Powder River Basin to Conway KS), 1362 km
+- `grand-prix-y-grade-pipeline-north-texas-mont-belvieu-us` - Targa Resources Grand Prix (Permian/Mid-Con to Mont Belvieu TX), 1569 km
+- `sterling-ngl-pipelines-lines-i-ii-and-iii-us` - ONEOK Sterling III (Elk City OK to Conway KS), 831 km
+- `bakken-ngl-pipeline-us` - ONEOK Bakken NGL Pipeline (Williston Basin to Medford OK), 774 km
+- `skelly-belvieu-pipeline-us` - Enterprise Products Skelly-Belvieu (Skellytown TX to Mont Belvieu TX), 751 km
+- `mariner-west-pipeline-us` - Sunoco/MPLX Mariner West (Appalachian Basin to Sarnia Ontario), 638 km
+- `utopia-ethane-pipeline-us` - Kinder Morgan Utopia East (Harrison County OH to Windsor Ontario), 319 km
+
+**Source:** `Hydrocarbon_Gas_Liquids_Pipelines_1/FeatureServer/0` (EIA ArcGIS, same org as crude/products endpoints).
+133 segments, 70 operator+name groups, 8 WM matches via manual overrides in `_MANUAL` dict.
+
+**Remaining US unrouted (21 of original 29):** Cameron Highway, Lone Star Express Y-Grade, BANGL, Matterhorn Express,
+Acadian Gas, HPL, SoCalGas, KPC, Tejas, Oasis, Bridgeline, LIG - not in EIA HGL dataset.
+
 ## 2026-06-21 - OSM pipeline routes (continuation: Middle East/SE Asia/Africa session) (409/618 total)
 
 **Routes added (+5 net, 178 total in global_pipeline_routes, 409/618 = 66.2% WM coverage):**
