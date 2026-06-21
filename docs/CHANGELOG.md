@@ -1,5 +1,32 @@
 # Freight Hub Changelog
 
+## 2026-06-21 - Alberta intra-provincial pipeline routes via AER GIS (377/618 total)
+
+**Added:** 4 Alberta oil-sands pipeline routes via a new script
+`backend/ingest_aer_pipeline_routes.py` using the Alberta Energy Regulator GIS layer at
+`gis.energy.gov.ab.ca/arcgis/rest/services/Geoview/ERCB_Ext_PROD/MapServer/10`.
+
+The AER layer has 324,617 segments covering every licensed pipeline in Alberta. The script
+filters tightly by `CompanyName LIKE '%..%' AND SubstanceCode1 AND PipelineStatus = 'Operating'`,
+applies a `min_km` threshold to drop short gathering laterals, and requests output in WGS84
+via `outSR=4326`. Supports optional geographic bbox filtering (used for the Horizon attempt).
+Paginates automatically via `resultOffset` when result counts exceed `MAX_RECORDS=2000`.
+
+**Routes added:**
+- Enbridge Athabasca Oil Pipeline - `athabasca-oil-pipeline-ca` - 37 segs, 1181 km (min_km=15)
+- Grand Rapids Oil Pipeline (Grand Rapids Pipeline GP Ltd.) - `grand-rapids-oil-pipeline-ca` - 16 segs, 297 km (min_km=12)
+- Cold Lake Pipeline System (Cold Lake Pipeline Ltd.) - `cold-lake-pipeline-system-ca` - 23 segs, 776 km (min_km=20)
+- Corridor Oil Pipeline (Inter Pipeline (Corridor) Inc.) - `corridor-oil-pipeline-ca` - 35 segs, 508 km
+
+**Investigated but not stored (3 pipelines):**
+- `horizon-crude-oil-pipeline-ca`: CNRL's Horizon mine has only pump station spurs (<10 km each) in AER at large diameter; no continuous trunk exists in the AER data. Corridor largely duplicates the Enbridge Athabasca entry.
+- `alberta-ethane-gathering-system-aegs-ca`: NOVA Chemicals holds <1 km of ethane pipe in AER (Joffre plant connections only). Main AEGS gathering infrastructure is part of CER-regulated NGTL, already stored.
+- `co-ed-system-ngl-pipeline-ca`: AER NGL operators don't reach the WM start coordinate at Cochrane (51.19°N); historical pipeline now fragmented across Pembina/Keyera/Wolf operators.
+
+**Artifact:** `backend/ingest_aer_pipeline_routes.py`
+
+---
+
 ## 2026-06-21 - CER pipeline routes via NRCan ArcGIS FeatureServer (373/618 total)
 
 **Added:** 7 Canadian federally-regulated pipeline routes via a new script
