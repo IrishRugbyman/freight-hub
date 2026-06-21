@@ -1,5 +1,39 @@
 # Freight Hub Changelog
 
+## 2026-06-21 - CER pipeline routes via NRCan ArcGIS FeatureServer (373/618 total)
+
+**Added:** 7 Canadian federally-regulated pipeline routes via a new script
+`backend/ingest_cer_pipeline_routes.py` that queries the Canada Energy Regulator
+ArcGIS Online FeatureServer (public, no auth).
+
+The CER service at `services5.arcgis.com/.../CER_Pipeline_Systems_WGS84_view/FeatureServer/3`
+returns all 28 CER-regulated pipeline systems as GeoJSON MultiLineString features, each
+with `PipelineID`, `Pipeline_Name`, `Company`, and `Commodity` fields. A manual
+`_CER_TO_WM` mapping converts `PipelineID` to WM IDs.
+
+**Routes added:**
+- NGTL (Nova Gas Transmission / NGTL System) - `nova-gas-transmission-ngtl-...` - 55 segs, 3205 km
+- Westcoast (Enbridge BC Pipeline) - `bc-gas-pipeline-westcoast-pipeline-ca` - 41 segs, 1743 km
+- Foothills System - `foothills-system-gas-pipeline-ca` - 9 segs, 896 km
+- TCPL (TC Canadian Mainline) - `canadian-mainline-gas-pipeline-ca` - 59 segs, 4430 km
+- Cochin Pipeline - `cochin-pipeline-system-ca` - 3 segs, 976 km
+- Enbridge Bakken System - `enbridge-line-65-oil-pipeline-ca` - 1 seg, 152 km
+- Wascana Pipeline (Plains Midstream) - `saskatchewan-oil-pipeline-ca` - 1 seg, 171 km
+
+**Implementation notes:** NGTL raw geometry has 1483 paths (entire Alberta gas grid).
+`_MIN_PATH_KM` filter (40 km for NGTL) drops gathering laterals, keeping major
+transmission corridors. `_EPSILON_OVERRIDE` gives NGTL eps=0.10 deg (~10 km) to
+further reduce to 55 renderable segments. Coordinates swapped from GeoJSON
+`[lng,lat]` to WM storage convention `[lat,lon]`.
+
+**Remaining unrouted Canadian (9):** Cold Lake, Grand Rapids, Athabasca, Corridor,
+Horizon, AEGS, Co-Ed (all intra-provincial Alberta - AER regulated, not CER);
+Keystone XL (cancelled, no geometry); Prince Rupert Gas Transmission (not built).
+
+**Artifact:** `backend/ingest_cer_pipeline_routes.py`
+
+---
+
 ## 2026-06-21 - OSM Chinese name map, proximity fix, US sub-regions (366/618 total)
 
 **Added:** 23 more WM pipeline routes, bringing the total to **366/618** (was 343 at session
