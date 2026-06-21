@@ -86,6 +86,52 @@ _FOREIGN_NAME_MAP: dict[str, str] = {
     "中哈原油管道":     "Kazakhstan China crude oil pipeline",
     # Russia ESPO spur to China (ВСТО - Китай) - Cyrillic tag on some cross-border ways
     'Отвод "ВСТО - Китай"': "Eastern Siberia Pacific Ocean China spur crude oil pipeline",
+    # Trans-Sakhalin (Sakhalin-2 crude export pipeline, Gazprom/Shell JV)
+    "Транссахалинская трубопроводная система": "Trans-Sakhalin pipeline system Sakhalin 2 crude oil export",
+    # Sakhalin-Khabarovsk-Vladivostok gas pipeline (main line)
+    "Магистральный газопровод Сахалин-Хабаровск-Владивосток": "Sakhalin Khabarovsk Vladivostok gas pipeline",
+    # SHV gas pipeline - abbreviated name used on Amur Oblast / Khabarovsk ways (Belogorsk section)
+    "Газопровод \"СХВ\"": "Belogorsk Khabarovsk Amur gas pipeline SHV",
+    # Okha-Komsomolsk crude pipeline (Soviet-era, Sakhalin to mainland)
+    "Оха — Комсомольск-на-Амуре": "Okha Komsomolsk crude oil pipeline Sakhalin",
+    # Kuyumba-Taishet oil pipeline (Krasnoyarsk, Transneft)
+    "Магистральный нефтепровод Куюмба-Тайшет": "Kuyumba Taishet oil pipeline",
+    # SRTO-Ural gas pipelines (Northern Tyumen Oblast to Ural, Gazprom)
+    "СРТО — Урал":   "SRTO Ural gas pipeline",
+    "СРТО — Урал 2": "SRTO Ural gas pipeline 2",
+    # Igrim-Serov-Nizhny Tagil gas pipeline (older Soviet-era trunk)
+    "Игрим — Серов — Нижний Тагил":           "Igrim Serov Nizhny Tagil gas pipeline",
+    "Игрим — Серов — Нижний Тагил (лупинг)":  "Igrim Serov Nizhny Tagil gas pipeline looping",
+    # Bukhara-Ural gas pipeline (Uzbekistan to Russian Urals, Gazprom/Transneft era)
+    "Бухара - Урал":            "Bukhara Ural gas pipeline",
+    "Бухара — Урал 1":          "Bukhara Ural gas pipeline 1",
+    "Бухара — Урал 1 (лупинг)": "Bukhara Ural gas pipeline 1 looping",
+    # Beineu-Shymkent gas pipeline (Kazakhstan, connects Caspian to south)
+    "Газопровод бейнеу - шымкент": "Beineu Shymkent gas pipeline Kazakhstan",
+    # Vuktyl-Ukhta gas pipeline (Komi Republic / Timan-Pechora)
+    "Вуктыл — Ухта 1": "Vuktyl Ukhta gas pipeline 1",
+    "Вуктыл — Ухта 2": "Vuktyl Ukhta gas pipeline 2",
+    # India - KKBMPL GAIL pipeline (Kochi-Koottanad-Bangalore-Mangalore Pipeline)
+    # OSM uses the acronym; expand so it matches the WM full-name entry
+    "KKBMPL GAIL Pipeline": "Kochi Koottanad Bangalore Mangalore gas pipeline phase 2 India",
+    # Assaluyeh-Iranshahr gas pipeline (Iran, southern IGAT leg to Baluchestan)
+    "خط لوله گاز عسلویه - ایرانشهر": "Assaluyeh Iranshahr gas pipeline Iran",
+    # Iran First National Gas Pipeline (IGAT-1) - may be already routed; included for completeness
+    "خط لوله اول سراسری گاز ایران": "Iran gas trunk line 1 IGAT first national",
+    # TAPI - Turkmenistan-Afghanistan-Pakistan-India pipeline (abbreviated in OSM as "TAPI")
+    "TAPI": "Turkmenistan Afghanistan Pakistan India gas pipeline",
+    # Central Asia-Center gas pipeline (Turkmenistan/Uzbekistan to Russia, Russian name)
+    "Средняя Азия - Центр": "Central Asia Center gas pipeline",
+    # Bukhara-Tashkent-Bishkek-Almaty gas pipeline (Uzbek/Russian OSM names)
+    "Бухара - Ташкент - Бишкек - Алматы": "Bukhara Tashkent Bishkek Almaty gas pipeline",
+    "Газопровод Бухара - Ташкент - Бишкек - Алматы": "Bukhara Tashkent Bishkek Almaty gas pipeline",
+    # SRTO-Surgut-Omsk (SAC) - if OSM has a different Cyrillic name
+    "СРТО — Центр 1": "SRTO Center gas pipeline 1",
+    "СРТО — Центр 2": "SRTO Center gas pipeline 2",
+    # Bolivia: OSM uses endpoint-pair name; WM uses GIJA/Yacuiba formulation
+    "Gasoducto Yacuiba Río Grande": "Bolivia Argentina Yacuiba GIJA gas pipeline",
+    # Argentina Cordillerano: OSM short name has only 1 distinctive token vs WM's 3
+    "Gasoducto Cordillerano": "Cordillerano Patagónico north Argentina gas pipeline",
 }
 
 OVERPASS_ENDPOINTS = [
@@ -122,6 +168,7 @@ REGIONS = [
     ("us_northeast",        37.0, -83.0,  48.0, -66.0),  # PA, OH, NY, NE - Mariner, Utopia, Dominion
     ("us_southeast",        25.0, -92.0,  37.0, -75.0),  # VA, KY, TN, NC, SC, GA, FL
     ("us_gulf",             24.0,-100.0,  33.0, -87.0),  # TX/LA/MS/AL Gulf Coast - NGL, offshore
+    ("us_permian",          28.0,-107.0,  34.0, -88.0),  # West TX/NM Permian Basin gap coverage
     ("us_midcontinent",     33.0,-104.0,  40.0, -90.0),  # OK, KS, AR, MO, IL - intrastate
     ("us_rockies_north",    40.0,-116.0,  50.0, -96.0),  # WY, MT, ND, SD, CO north, NE - Overland Pass, Bakken
     ("us_west",             32.0,-125.0,  49.0,-109.0),  # CA, OR, WA, NV, AZ, NM, UT, ID
@@ -152,11 +199,36 @@ _EXPAND = {
     r"\beste\b": "east",
     r"\boeste\b": "west",
     r"\bandino\b": "andean",
+    r"\bbrasil\b": "brazil",             # Portuguese/Spanish -> English for Bolivia-Brazil match
+    r"\bneuba\b": "neuquen buenos aires",  # NEUBA = Neuquen-Buenos Aires gas pipeline
+    # Compound Spanish pipeline names - expand to final form directly (ordering: these run after
+    # \bandino\b already fired, so must include the andean substitution inline)
+    r"\bnorandino\b": "nor andean",       # NorAndino -> "nor andean" (pre-expanded)
+    r"\btransandino\b": "trans andean",   # Transandino -> "trans andean"
+    r"\btransecuatoriano\b": "trans ecuadorian",  # SOTE Transecuatoriano
+    r"\becuatoriano\b": "ecuadorian",             # standalone (after hyphen split: "Trans-Ecuatoriano")
+    r"\bnorperuano\b": "north peruvian",           # Oleoducto NorPeruano compound form
+    r"\bnororiental\b": "northeastern",            # nororiental in Venezuelan gas pipeline names
+    # SOTE abbreviation: expand to final form matching OSM's full Spanish name expanded tokens
+    r"\bsote\b": "system trans ecuadorian oil pipeline",
+
 }
 
 
 def _norm(s: str) -> set[str]:
-    s = unicodedata.normalize("NFKD", str(s)).encode("ascii", "ignore").decode()
+    s = unicodedata.normalize("NFKD", str(s))
+    # Non-ASCII chars: keep combining marks (they fuse harmlessly with base letters
+    # under ASCII encoding); replace everything else (en-dashes, foreign punctuation,
+    # etc.) with spaces so "Habshan–Fujairah" -> "Habshan Fujairah", not "habshanfujairah".
+    buf = []
+    for c in s:
+        if c.isascii():
+            buf.append(c)
+        elif unicodedata.category(c).startswith("M"):
+            buf.append(c)
+        else:
+            buf.append(" ")
+    s = "".join(buf).encode("ascii", "ignore").decode()
     s = s.lower()
     s = re.sub(r"[^a-z0-9\s]", " ", s)
     for pat, repl in _EXPAND.items():
@@ -175,12 +247,18 @@ _GENERIC_TOKENS = {
 def _jaccard(a: set, b: set) -> float:
     if not a or not b:
         return 0.0
-    inter = a & b
-    # Require at least one distinctive (non-generic) shared token so that two
-    # pipelines whose names share only "Pipeline System" don't score > 0.
-    if not (inter - _GENERIC_TOKENS):
+    # Score only on distinctive tokens - generic terms (gas, oil, pipeline...) inflate
+    # scores for pipelines that share only commodity/type words, causing false positives.
+    # Example: "SRTO Surgut Omsk Gas Pipeline" vs "SRTO Ural Gas Pipeline" would score
+    # 0.43 if gas+pipeline count, but 0.20 on filtered tokens (correctly rejected).
+    af = a - _GENERIC_TOKENS
+    bf = b - _GENERIC_TOKENS
+    if not af or not bf:
         return 0.0
-    return len(inter) / len(a | b)
+    inter = af & bf
+    if not inter:
+        return 0.0
+    return len(inter) / len(af | bf)
 
 
 # ---------------------------------------------------------------------------
@@ -459,7 +537,7 @@ def match_osm_to_wm(
         chained = greedy_chain(ways)
         total_pts = sum(len(s) for s in chained)
         if chained and total_pts >= 4:  # require at least 4 pts - rejects stub ways
-            results.append((pipe, best_name, best_score, chained))
+            results.append((pipe, best_name, best_score, chained, d_start_min, d_end_min))
 
     return results
 
@@ -541,7 +619,7 @@ def main():
         print(f"  Matched: {len(matches)}", flush=True)
 
         stored = 0
-        for pipe, osm_name, score, chained in matches:
+        for pipe, osm_name, score, chained, d_start_min, d_end_min in matches:
             simplified = _simplify_segs(chained)
             if not simplified:
                 continue
@@ -552,6 +630,9 @@ def main():
                 for seg in simplified
                 for i in range(len(seg) - 1)
             )
+            # Reject stub matches: a named pipeline should span at least 30km
+            if path_km < 30:
+                continue
             osm_short = osm_name[:35]
             print(
                 f"    {pipe['wm_id']!r:50} <- {osm_short!r} score={score:.2f} "
@@ -565,7 +646,7 @@ def main():
                 con_w = duckdb.connect(str(ANALYTICS_DB))
                 con_w.execute(
                     "INSERT OR REPLACE INTO global_pipeline_routes VALUES (?,?,?,?,?,?)",
-                    [pipe["wm_id"], n_pts, path_km, 0.0, 0.0, json.dumps(simplified)],
+                    [pipe["wm_id"], n_pts, path_km, d_start_min, d_end_min, json.dumps(simplified)],
                 )
                 con_w.close()
                 stored += 1

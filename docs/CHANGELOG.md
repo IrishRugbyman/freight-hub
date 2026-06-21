@@ -1,5 +1,43 @@
 # Freight Hub Changelog
 
+## 2026-06-21 - OSM pipeline routes (LatAm, Ecuador, Russia expansions) (391/618 total)
+
+**Routes added** (+12 net from OSM ingest, 167 total in global_pipeline_routes):
+
+LatAm South:
+- `gasbol` / `gasbol-gas-pipeline-bo` (duplicate pair) - Bolivia-Brazil gas pipeline via GASBOL, 3805 km
+- `san-martin-pipeline-ar` - Gasoducto San Martin, Argentina, 2527 km
+- `camisea-ngl-pipeline-pe` - Camisea Pipeline, Peru, 203 km
+- `norandino-gas-pipeline-ar` - Gasoducto Nor Andino (Argentina-Chile), 636 km
+- `bolivia-argentina-yacuiba` - Gasoducto Yacuiba Rio Grande (Bolivia-Argentina GIJA), 798 km
+- `cordillerano-patag-nico-gas-pipeline-cordillerano-north-ar` - Gasoducto Cordillerano, Argentina, 310 km
+
+Ecuador:
+- `sote-ecuador` / `sote-oil-pipeline-ec` (duplicate pair) - Sistema Oleducto Trans-Ecuatoriano (SOTE), 374 km
+
+Middle East (from prior sub-session):
+- `sumed` - SUMED pipeline (Egypt), 97 km
+- `bab-habshan-fujairah-oil-pipeline-ae` / `habshan-fujairah` - UAE Habshan-Fujairah oil pipeline, 338 km
+- `turkmenistan-afghanistan-pakistan-india-gas-pipeline-tm` - TAPI pipeline, 257 km
+- `kochi-koottanad-bangalore-mangalore-gas-pipeline-phase-ii-in` - KKBMPL GAIL, India, 1287 km
+
+**Script fixes and improvements (`ingest_osm_named_pipeline_routes.py`):**
+- Fixed Unicode en-dash bug in `_norm()`: non-ASCII non-combining chars now replaced with spaces
+  so "Habshan-Fujairah" tokenizes as {habshan, fujairah} not {habshanfujairah}
+- Snap km values now stored from computed haversine distances (were hardcoded 0.0)
+- Added minimum path_km >= 30 guard before storing, rejecting terminus stubs that pass snap check
+- Added `_FOREIGN_NAME_MAP` entries: TAPI, KKBMPL, Iranian pipelines (IGAT-1), SRTO Center,
+  Bukhara-Tashkent-Bishkek-Almaty, Gasoducto Yacuiba Rio Grande, Gasoducto Cordillerano
+- Added `_EXPAND` entries: norandino/transandino/transecuatoriano compound expansion,
+  ecuatoriano -> ecuadorian, nororiental -> northeastern, brasil -> brazil,
+  neuba -> neuquen buenos aires, SOTE -> "system trans ecuadorian oil pipeline"
+- Added `us_permian` bbox region (28-34N, 107-88W) covering West Texas/NM gap
+
+**Gasbol duplicate fix:** `gasbol-gas-pipeline-bo` had a stale 2428 km route from a prior OSM run;
+updated to share the current full `gasbol` geometry (3805 km, 129 pts).
+
+---
+
 ## 2026-06-21 - Alberta intra-provincial pipeline routes via AER GIS (377/618 total)
 
 **Added:** 4 Alberta oil-sands pipeline routes via a new script
