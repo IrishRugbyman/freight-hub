@@ -175,15 +175,16 @@ def _overpass_query(ql: str) -> dict | None:
     """Run an Overpass QL query via curl subprocess with retry/backoff.
 
     Uses curl to avoid Python urllib 406 rejections from Overpass servers.
-    Strategy: check slot availability, run query, retry up to 6 times.
+    On HTML response (rate limit or server rejection): wait 90s before retry.
+    On empty response: rotate endpoint, wait 15s.
     """
     global _ep_idx
-    for attempt in range(6):
+    for attempt in range(8):
         ep = OVERPASS_ENDPOINTS[_ep_idx % len(OVERPASS_ENDPOINTS)]
         _wait_for_slot(ep)
         r = subprocess.run(
             [
-                "curl", "-s", "--max-time", "150",
+                "curl", "-s", "--max-time", "180",
                 "-X", "POST", ep,
                 "--data", f"data={urllib.parse.quote(ql)}",
             ],
@@ -194,15 +195,22 @@ def _overpass_query(ql: str) -> dict | None:
             _ep_idx += 1
             time.sleep(15)
             continue
+        if r.stdout.lstrip().startswith("<"):
+            # HTML error page - rate limit or query rejected by server
+            wait = 90 + attempt * 30
+            print(f"    [attempt {attempt+1}] server returned HTML (rate limit/reject) - waiting {wait}s", flush=True)
+            time.sleep(wait)
+            # Don't rotate - same endpoint, rate limit is IP-based
+            continue
         try:
             d = json.loads(r.stdout)
             if "elements" in d:
                 return d
             remark = d.get("remark", "")
-            print(f"    [attempt {attempt+1}] no elements, remark={remark!r}", flush=True)
+            print(f"    [attempt {attempt+1}] no elements key, remark={remark!r}", flush=True)
         except json.JSONDecodeError:
             snippet = r.stdout[:200]
-            print(f"    [attempt {attempt+1}] JSON decode error, response: {snippet!r}", flush=True)
+            print(f"    [attempt {attempt+1}] JSON error, response: {snippet!r}", flush=True)
         _ep_idx += 1
         time.sleep(10)
     return None
@@ -222,9 +230,23 @@ def _is_generic_osm_name(name: str) -> bool:
     return len(words) < MIN_OSM_DISTINCTIVE_WORDS
 
 
+def _pick_osm_name(tags: dict) -> str:
+    """Pick the best matchable name from OSM tags.
+
+    Preference: name:en > int_name > alt_name > name
+    For non-Latin script regions (Russia, China, Iran, Arab), name:en is the
+    only matchable form since our Jaccard scoring uses ASCII tokens.
+    """
+    for key in ("name:en", "int_name", "alt_name", "name"):
+        val = (tags.get(key) or "").strip()
+        if val and not _is_generic_osm_name(val):
+            return val
+    return ""
+
+
 def fetch_named_pipeline_ways(s: float, w: float, n: float, e: float) -> dict[str, list[list[list[float]]]]:
     ql = f"""
-[out:json][timeout:90];
+[out:json][timeout:120][maxsize:536870912];
 way[man_made=pipeline][name]({s},{w},{n},{e});
 out geom;
 """
@@ -234,8 +256,9 @@ out geom;
 
     by_name: dict[str, list[list[list[float]]]] = defaultdict(list)
     for elem in result.get("elements", []):
-        name = (elem.get("tags", {}).get("name") or "").strip()
-        if not name or _is_generic_osm_name(name):
+        tags = elem.get("tags", {})
+        name = _pick_osm_name(tags)
+        if not name:
             continue
         geom = elem.get("geometry", [])
         pts = [[g["lat"], g["lon"]] for g in geom if "lat" in g and "lon" in g]
