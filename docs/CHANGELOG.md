@@ -1,5 +1,40 @@
 # Freight Hub Changelog
 
+## 2026-06-21 - EIA crude oil + petroleum product pipeline routes; extended WM-RexTag crosswalk
+
+**Added:** Full polyline geometry for an additional 36 WM pipelines (17 oil + 19 gas)
+via two parallel tracks:
+
+**Track 1 - EIA oil shapefile ingest (`ingest_eia_oil_routes.py`):**
+Downloads crude oil (231 segments, 40 operators) and petroleum product (329 segments)
+pipeline geometries from EIA ArcGIS FeatureServer endpoints. Fuzzy-matches EIA
+`(opername, pipename)` pairs to WM pipeline IDs; fuzzy scope restricted to US-endpoint
+WM pipelines to prevent false-positive matches to international WM entries. 19 WM oil
+pipelines now have full EIA shapefile routes, stored in new `eia_oil_pipeline_routes`
+table (wm_id PK). Priority in loader chain: EIA gas -> EIA oil -> EU IGGIELGN -> OSM global.
+
+Notable new oil routes: Enbridge Mainline System (3.15 mbd, 8 segments),
+Trans-Alaska Pipeline TAPS (2.1 mbd), Trans Mountain (3 segs), Gray Oak Pipeline,
+EPIC Crude Pipeline, Seaway Pipeline, BridgeTex, Southern Lights, Double H Pipeline,
+Energy Transfer ETCOP.
+
+**Track 2 - Extended rextag_wm_crosswalk (`ingest_extend_crosswalk.py`):**
+23 new WM ID -> RexTag slug mappings for major US/Canada gas pipelines that already
+had EIA route geometry but lacked a crosswalk entry. Zero new downloads. New entries
+include: ANR, El Paso, Rockies Express, Panhandle Eastern, Kern River, East Tennessee,
+NGPL, Alliance, Gulf South, Northwest, Northern Border, Mississippi River Transmission,
+WBI/Williston Basin, Enable Oklahoma (EOIT), MountainWest Overthrust, Midcontinent
+Express, Gulfstream, Maritimes & Northeast, Mojave, Iroquois, Empire, Ruby, Sabal Trail.
+
+**Combined result:** 286/700 WM pipelines now have full polyline routes (up from 207
+before this session), plus 65 RexTag-only US gas pipelines. Oil coverage now includes
+TAPS, Enbridge Mainline, Trans Mountain, Gray Oak, and 15 other US/CA crude routes.
+
+**Artifacts:** `backend/ingest_eia_oil_routes.py`, `backend/ingest_extend_crosswalk.py`,
+`shared/market-data/loaders/worldmonitor.py` (4th JOIN: eia_oil_pipeline_routes).
+
+---
+
 ## 2026-06-20 - Global pipeline route geometry (OSM Overpass Dijkstra)
 
 **Added:** Full polyline geometry for an additional 40 World Monitor pipelines
