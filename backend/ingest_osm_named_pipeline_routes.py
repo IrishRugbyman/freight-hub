@@ -48,7 +48,45 @@ _GENERIC_NAMES = frozenset({
     "petroleum pipeline", "natural gas pipeline", "gas", "oil", "pipe",
     "main gas pipeline", "main oil pipeline",
 })
-MIN_OSM_DISTINCTIVE_WORDS = 2  # need at least 2 non-generic non-stop words
+MIN_OSM_DISTINCTIVE_WORDS = 1  # 1 distinctive word is enough; acronyms (HVJ, JHBDPL) are valid
+
+# Translation map for non-Latin OSM name tags (Chinese, etc.) that would otherwise
+# produce empty ASCII token sets after normalisation.  Keys are the exact OSM `name`
+# strings as returned by Overpass; values are WM-matchable English equivalents.
+_FOREIGN_NAME_MAP: dict[str, str] = {
+    # West-East Gas Pipeline trunk lines (西气东输)
+    "西气东输":     "West-East Gas Pipeline",
+    "西气东输一线": "West-East Gas Pipeline 1",
+    "西气东输二线": "West-East Gas Pipeline 2",
+    "西气东输三线": "West-East Gas Pipeline 3",
+    "西气东输四线": "West-East Gas Pipeline 4",
+    # China-Russia East Gas Pipeline (中俄东线, called Power of Siberia on Russian side)
+    "中俄东线天然气管道":              "China Russia East Gas Pipeline",
+    "中俄东线天然气管道长岭-长春支线": "China Russia East Gas Pipeline Changling Changchun Branch",
+    # China-Central Asia Gas Pipeline (中国-中亚)
+    "中国—中亚天然气管道": "China Central Asia Gas Pipeline",
+    "中国-中亚天然气管道": "China Central Asia Gas Pipeline",
+    # Sino-Myanmar (Chinese name tag on some OSM ways in Yunnan)
+    "中缅油气管道":    "Sino Myanmar oil gas pipeline",
+    "中缅天然气管道":  "Sino Myanmar gas pipeline",
+    "中缅原油管道":    "Sino Myanmar crude oil pipeline",
+    # Shaan-Jing (Shaanxi-Beijing) gas pipeline lines 1-4
+    "陕京一线": "Shaan-Jing Pipeline 1",
+    "陕京二线": "Shaan-Jing Pipeline 2",
+    "陕京三线": "Shaan-Jing Pipeline 3",
+    "陕京四线": "Shaan-Jing Pipeline 4",
+    # Sichuan-Shanghai / Sichuan-to-East gas pipelines
+    "川气东送":     "Sichuan East Gas Pipeline",
+    "川气东送管道": "Sichuan East Gas Pipeline",
+    # Eastern Siberia - Pacific Ocean (ESPO): Russian side already has name:en;
+    # add the Chinese-character tags for Chinese territory ways
+    "中俄原油管道": "Eastern Siberia Pacific Ocean China crude oil pipeline",
+    # Kazakhstan-China oil pipeline (Atasu-Alashankou) - Chinese segment
+    "哈中管道":         "Kazakhstan China oil pipeline",
+    "中哈原油管道":     "Kazakhstan China crude oil pipeline",
+    # Russia ESPO spur to China (ВСТО - Китай) - Cyrillic tag on some cross-border ways
+    'Отвод "ВСТО - Китай"': "Eastern Siberia Pacific Ocean China spur crude oil pipeline",
+}
 
 OVERPASS_ENDPOINTS = [
     "https://overpass-api.de/api/interpreter",
@@ -69,15 +107,24 @@ REGIONS = [
     ("southeast_asia",     -15.0,  92.0,  25.0,  142.0), # Myanmar, Thailand, Indonesia, Malaysia, Vietnam
     ("china_w",             25.0,  73.0,  55.0,  108.0), # Xinjiang, Tibet, Sichuan, Gansu
     ("china_e",             18.0, 103.0,  45.0,  135.0), # Eastern China, NE China
+    ("china_ne",            42.0, 118.0,  55.0,  140.0), # Manchuria / NE China - China-Russia East Pipeline
     ("africa_n",            10.0, -18.0,  38.0,  38.0),  # North Africa, Horn, Sudan
     ("africa_w",            -5.0, -18.0,  18.0,  20.0),  # West Africa, Niger Delta
     ("africa_e",           -35.0,  20.0,  15.0,  55.0),  # East Africa, Southern Africa
     ("latam_n",             -5.0, -85.0,  18.0, -50.0),  # Colombia, Venezuela, Peru, Ecuador, Brazil N
     ("latam_s",            -60.0, -80.0,  -5.0, -30.0),  # Argentina, Chile, Brazil S, Bolivia
     ("mexico_ca",           14.0,-120.0,  34.0, -82.0),  # Mexico, Central America
-    ("canada",              42.0,-145.0,  72.0, -52.0),  # Canada
+    # Canada split into west/east to avoid Overpass timeout on the full-country bbox
+    ("canada_west",         48.0,-145.0,  65.0,-105.0),  # BC, Alberta, NWT west (NGTL, Westcoast, Cold Lake)
+    ("canada_east",         42.0,-110.0,  56.0, -52.0),  # Prairies, Ontario, Quebec, Maritimes
     ("oceania",            -50.0, 105.0,   5.0, 180.0),  # Australia + Pacific
-    ("us_lower48",          24.0,-125.0,  50.0, -65.0),  # Remaining US pipelines
+    # US split into sub-regions to avoid Overpass timeout on the full continental bbox
+    ("us_northeast",        37.0, -83.0,  48.0, -66.0),  # PA, OH, NY, NE - Mariner, Utopia, Dominion
+    ("us_southeast",        25.0, -92.0,  37.0, -75.0),  # VA, KY, TN, NC, SC, GA, FL
+    ("us_gulf",             24.0,-100.0,  33.0, -87.0),  # TX/LA/MS/AL Gulf Coast - NGL, offshore
+    ("us_midcontinent",     33.0,-104.0,  40.0, -90.0),  # OK, KS, AR, MO, IL - intrastate
+    ("us_rockies_north",    40.0,-116.0,  50.0, -96.0),  # WY, MT, ND, SD, CO north, NE - Overland Pass, Bakken
+    ("us_west",             32.0,-125.0,  49.0,-109.0),  # CA, OR, WA, NV, AZ, NM, UT, ID
 ]
 
 
@@ -114,7 +161,9 @@ def _norm(s: str) -> set[str]:
     s = re.sub(r"[^a-z0-9\s]", " ", s)
     for pat, repl in _EXPAND.items():
         s = re.sub(pat, repl, s)
-    return {w for w in s.split() if len(w) > 1 and w not in _STOP}
+    # Keep single-digit tokens (line numbers like "1", "2", "3") - they distinguish
+    # numbered pipeline variants (e.g. West-East Line 2 vs Line 3).
+    return {w for w in s.split() if (len(w) > 1 or w.isdigit()) and w not in _STOP}
 
 
 _GENERIC_TOKENS = {
@@ -259,14 +308,22 @@ def _is_generic_osm_name(name: str) -> bool:
 def _pick_osm_name(tags: dict) -> str:
     """Pick the best matchable name from OSM tags.
 
-    Preference: name:en > int_name > alt_name > name
-    For non-Latin script regions (Russia, China, Iran, Arab), name:en is the
-    only matchable form since our Jaccard scoring uses ASCII tokens.
+    Preference: name:en > int_name > alt_name > translated foreign name > name
+    For non-Latin script regions (China, Russia, Iran, Arab), name:en is checked
+    first; if absent, the raw `name` is looked up in _FOREIGN_NAME_MAP to get a
+    matchable English equivalent before falling back to the raw string.
     """
-    for key in ("name:en", "int_name", "alt_name", "name"):
+    for key in ("name:en", "int_name", "alt_name"):
         val = (tags.get(key) or "").strip()
         if val and not _is_generic_osm_name(val):
             return val
+    raw_name = (tags.get("name") or "").strip()
+    if raw_name:
+        translated = _FOREIGN_NAME_MAP.get(raw_name)
+        if translated and not _is_generic_osm_name(translated):
+            return translated
+    if raw_name and not _is_generic_osm_name(raw_name):
+        return raw_name
     return ""
 
 
@@ -384,16 +441,19 @@ def match_osm_to_wm(
         if best_score < JACCARD_THRESHOLD or best_name is None:
             continue
 
-        # Sanity check: centroid of matched ways should be near WM endpoints
+        # Sanity check: at least one WM endpoint must be within MAX_SNAP_KM_THRESHOLD
+        # of the NEAREST OSM way point (not the centroid, which fails for pipelines
+        # that are 3000+ km long where sub-section WM entries sit far from the centroid).
         ways = osm_groups[best_name]
         all_pts = [pt for w in ways for pt in w]
         if not all_pts:
             continue
-        c_lat = sum(p[0] for p in all_pts) / len(all_pts)
-        c_lon = sum(p[1] for p in all_pts) / len(all_pts)
-        d_start = _hav(pipe["start_lat"], pipe["start_lon"], c_lat, c_lon)
-        d_end = _hav(pipe["end_lat"], pipe["end_lon"], c_lat, c_lon)
-        if min(d_start, d_end) > MAX_SNAP_KM_THRESHOLD:
+        # Sample points evenly - full scan is too slow for 10k+ point pipelines
+        step = max(1, len(all_pts) // 600)
+        sample = all_pts[::step]
+        d_start_min = min(_hav(pipe["start_lat"], pipe["start_lon"], p[0], p[1]) for p in sample)
+        d_end_min = min(_hav(pipe["end_lat"], pipe["end_lon"], p[0], p[1]) for p in sample)
+        if min(d_start_min, d_end_min) > MAX_SNAP_KM_THRESHOLD:
             continue
 
         chained = greedy_chain(ways)

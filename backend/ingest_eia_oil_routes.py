@@ -73,7 +73,8 @@ _MANUAL: dict[tuple[str, str], list[str]] = {
     # Trans Mountain / Kinder Morgan Canada
     ("KINDER MORGAN", "TransMountain"): ["trans-mountain"],
     # Keystone Phase 1 (Hardisty->Patoka mainline) and Phase 2 (Gulf Coast leg)
-    ("TRANSCANADA", "Keystone"): ["keystone-oil-pipeline-mainline-phase-1-ca"],
+    # "keystone" is the aggregate WM ID for the full Phase 1-3 system
+    ("TRANSCANADA", "Keystone"): ["keystone", "keystone-oil-pipeline-mainline-phase-1-ca"],
     ("TRANSCANADA", "Gulf Coast Project"): ["keystone-oil-pipeline-phase-2-us"],
     # Dakota Access
     ("ENERGY TRANSFER", "Dakota Access Pipeline (DAPL)"): ["dakota-access-oil-pipeline-dapl-us"],
@@ -130,6 +131,9 @@ _MANUAL: dict[tuple[str, str], list[str]] = {
     # TEPPCO (Enterprise): refined products from Gulf Coast to Great Lakes
     ("ENTERPRISE", "TEPPCO"): ["teppco-pipeline-us"],
     ("ENTERPRISE PRODUCTS", "TEPPCO"): ["teppco-pipeline-us"],
+    # Seminole Red (Enterprise, NGL products Hobbs NM -> Longview TX)
+    ("ENTERPRISE PRODUCTS PARTNERS", "Seminole Red Pipeline"): ["seminole-red-pipeline-us"],
+    ("PHILLIPS 66 PIPELINE", "Seminole"): ["seminole-red-pipeline-us"],
     # Note: Colonial, Explorer, Plantation, Buckeye are not in WM oil registry
 }
 
