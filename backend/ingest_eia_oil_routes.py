@@ -42,40 +42,99 @@ RDP_EPSILON = 0.01  # ~1 km - tighter than gas since oil routes are shorter
 
 
 # ---------------------------------------------------------------------------
-# Manual overrides: (opername, pipename) -> WM pipeline id
+# Manual overrides: (opername, pipename) -> list of WM pipeline ids
+# One EIA entry can cover multiple WM IDs (aliases, phases, same corridor).
 # ---------------------------------------------------------------------------
-_MANUAL: dict[tuple[str, str], str] = {
-    # Crude oil
-    ("ALYESKA PIPELINE", "Trans Alaska Pipeline System (TAPS)"): "taps",
-    ("ENBRIDGE", "Mainline"): "enbridge-mainline",
-    ("ENBRIDGE", "Alberta Clipper"): "enbridge-line-93-oil-pipeline-ca",
-    ("ENBRIDGE", "Lakehead"): "enbridge-mainline",
-    ("ENBRIDGE", "Southern Access"): "enbridge-mainline",
-    ("ENTERPRISE PRODUCTS PARTNERS", "Seaway"): "seaway",
-    ("KINDER MORGAN", "TransMountain"): "trans-mountain",
-    # Keystone: Phase 1 = Hardisty->Patoka mainline, Gulf Coast = Phase 2
-    ("TRANSCANADA", "Keystone"): "keystone-oil-pipeline-mainline-phase-1-ca",
-    ("TRANSCANADA", "Gulf Coast Project"): "keystone-oil-pipeline-phase-2-us",
-    ("ENERGY TRANSFER", "Dakota Access Pipeline (DAPL)"): "dakota-access-oil-pipeline-dapl-us",
-    ("PHILLIPS 66 PIPELINE", "Gray Oak Pipeline"): "gray-oak-oil-pipeline-us",
-    ("PHILLIPS  66 PIPELINE", "Gray Oak Pipeline"): "gray-oak-oil-pipeline-us",
-    ("MAGELLAN MIDSTREAM PARTNERS", "BridgeTex"): "bridgetex-oil-pipeline-us",
-    ("MAGELLAN MIDSTREAM PARTNERS", "Longhorn"): "longhorn-oil-pipeline-crude-oil-system-us",
-    ("SHELL PIPELINE COMPANY", "Capline"): "capline-oil-pipeline-us",
-    ("PLAINS ALL AMERICAN PIPELINE", "Basin"): "basin-oil-pipeline-us",
-    ("PLAINS ALL AMERICAN PIPELINE", "Cactus Pipeline"): "cactus-oil-pipeline-us",
-    ("SPECTRA ENERGY", "Express System"): "express-oil-pipeline-system-ca",
-    ("SPECTRA ENERGY", "Platte Pipeline"): "platte-crude-oil-pipeline-us",
-    ("TALLGRASS ENERGY", "Pony Express Pipeline"): "pony-express-oil-pipeline-us",
-    ("MAGELLAN MIDSTREAM PARTNERS", "Saddlehorn Pipeline"): "saddlehorn-oil-pipeline-expansion-us",
-    # Note: Bayou Bridge, LOOP, Portland Montreal not in WM pipeline_registry
+_MANUAL: dict[tuple[str, str], list[str]] = {
+    # --- Crude oil ---
+    ("ALYESKA PIPELINE", "Trans Alaska Pipeline System (TAPS)"): ["taps"],
+    # Enbridge Mainline: Lakehead (US segment) + Southern Access all share corridor
+    ("ENBRIDGE", "Mainline"): ["enbridge-mainline"],
+    ("ENBRIDGE", "Lakehead"): ["enbridge-mainline"],
+    ("ENBRIDGE", "Southern Access"): ["enbridge-mainline"],
+    # Alberta Clipper (Line 67) / Line 93: two WM IDs for same physical pipe
+    ("ENBRIDGE", "Alberta Clipper"): ["enbridge-line-93-oil-pipeline-ca", "alberta-clipper-oil-pipeline-ca"],
+    # Enbridge North Dakota system = Lines 14/62/64 (Berthold ND -> Clearbrook MN)
+    ("ENBRIDGE", "North Dakota System"): ["enbridge-line-14-64-oil-pipeline-us"],
+    # Ozark / Midcontinent: Patoka IL -> Cushing OK (and Patoka-Lima expansion)
+    ("ENBRIDGE", "Midcontinent (Ozark)"): ["ozark-crude-oil-pipeline-patoka-to-lima-expansion-us"],
+    # Spearhead: two WM IDs for same Flanagan IL -> Cushing OK pipe
+    ("ENBRIDGE", "Spearhead"): ["spearhead", "spearhead-oil-pipeline-us"],
+    # Seaway: two WM IDs for same Cushing->Freeport TX pipe
+    ("ENTERPRISE PRODUCTS PARTNERS", "Seaway"): ["seaway", "seaway-oil-pipeline-system-us"],
+    # Midland-to-ECHO system: EIA splits into Midland->Sealy and Sealy->ECHO segments
+    ("ENTERPRISE PRODUCTS PARTNERS", "Midland to Sealy"): [
+        "midland-to-echo-pipeline-system-midland-to-echo-1-oil-pipeli-us",
+    ],
+    ("ENTERPRISE PRODUCTS PARTNERS", "Sealy to ECHO"): [
+        "midland-to-echo-pipeline-system-midland-to-echo-1-oil-pipeli-us",
+        "midland-to-echo-pipeline-system-pipeline-3-us",
+    ],
+    # Trans Mountain / Kinder Morgan Canada
+    ("KINDER MORGAN", "TransMountain"): ["trans-mountain"],
+    # Keystone Phase 1 (Hardisty->Patoka mainline) and Phase 2 (Gulf Coast leg)
+    ("TRANSCANADA", "Keystone"): ["keystone-oil-pipeline-mainline-phase-1-ca"],
+    ("TRANSCANADA", "Gulf Coast Project"): ["keystone-oil-pipeline-phase-2-us"],
+    # Dakota Access
+    ("ENERGY TRANSFER", "Dakota Access Pipeline (DAPL)"): ["dakota-access-oil-pipeline-dapl-us"],
+    # Gray Oak (both spellings appear in EIA data)
+    ("PHILLIPS 66 PIPELINE", "Gray Oak Pipeline"): ["gray-oak-oil-pipeline-us"],
+    ("PHILLIPS  66 PIPELINE", "Gray Oak Pipeline"): ["gray-oak-oil-pipeline-us"],
+    # Glacier Pipeline = western corridor Wyoming->Montana->ND (part of larger system)
+    ("PHILLIPS 66 PIPELINE", "Glacier Pipeline"): [
+        "western-corridor-oil-pipeline-system-glacier-pipeline-bearto-us",
+    ],
+    # BridgeTex and Longhorn (Magellan crude)
+    ("MAGELLAN MIDSTREAM PARTNERS", "BridgeTex"): ["bridgetex-oil-pipeline-us"],
+    ("MAGELLAN MIDSTREAM PARTNERS", "Longhorn"): ["longhorn-oil-pipeline-crude-oil-system-us"],
+    # Saddlehorn and Grand Mesa share same DJ Basin -> Cushing corridor
+    ("MAGELLAN MIDSTREAM PARTNERS", "Saddlehorn Pipeline"): ["saddlehorn-oil-pipeline-expansion-us"],
+    ("MAGELLAN MIDSTREAM PARTNERS", "Saddlehorn Grand Mesa Pipeline"): ["grand-mesa-oil-pipeline-us"],
+    # Capline (Shell, St James LA -> Patoka IL - reversed direction post-2021)
+    ("SHELL PIPELINE COMPANY", "Capline"): ["capline-oil-pipeline-us"],
+    # Basin and Cactus (Plains All American)
+    ("PLAINS ALL AMERICAN PIPELINE", "Basin"): ["basin-oil-pipeline-us"],
+    ("PLAINS ALL AMERICAN PIPELINE", "Cactus Pipeline"): ["cactus-oil-pipeline-us"],
+    # Diamond Pipeline (Plains/Valero Patoka IL -> Valero Memphis TN)
+    ("PLAINS ALL AMERICAN PIPELINE", "Diamond Pipeline"): ["diamond-oil-pipeline-us"],
+    # Express and Platte (Spectra/Pembina, Canada->Wyoming->Illinois)
+    ("SPECTRA ENERGY", "Express System"): ["express-oil-pipeline-system-ca"],
+    ("SPECTRA ENERGY", "Platte Pipeline"): ["platte-crude-oil-pipeline-us"],
+    # Pony Express (Tallgrass, Guernsey WY -> Cushing OK)
+    ("TALLGRASS ENERGY", "Pony Express Pipeline"): ["pony-express-oil-pipeline-us"],
+    # Kaw Pipeline (CHS Energy, Kansas crude gathering to Ponca City)
+    ("CHS ENERGY", "Kaw Pipeline"): ["kaw-oil-pipeline-us"],
+    # Frontier / Aspen (Holly Energy, Big Spring TX -> Artesia NM -> Denver CO)
+    ("HOLLY ENERGY", "Frontier Aspen Pipeline"): ["frontier-oil-pipeline-us"],
+    # Permian Express Phases I/II/IV (Permian Express Partners, Midland TX -> Gulf Coast)
+    ("PERMIAN EXPRESS PARTNERS", "Midland, TX - Corsicana, TX"): [
+        "permian-express-oil-pipeline-phase-i-us",
+        "permian-express-oil-pipeline-phase-ii-us",
+        "permian-express-oil-pipeline-phase-iv-us",
+    ],
+    ("PERMIAN EXPRESS PARTNERS", "Corsicana, TX - Nederland, TX"): [
+        "permian-express-oil-pipeline-phase-i-us",
+    ],
+    ("PERMIAN EXPRESS PARTNERS", "Corsicana, TX - Longview, TX"): [
+        "permian-express-oil-pipeline-phase-ii-us",
+        "permian-express-oil-pipeline-phase-iv-us",
+    ],
+    ("PERMIAN EXPRESS PARTNERS", "Longview, TX - Anchorage, LA"): [
+        "permian-express-oil-pipeline-phase-ii-us",
+        "permian-express-oil-pipeline-phase-iv-us",
+    ],
+    ("PERMIAN EXPRESS PARTNERS", "Witchia Falls, TX - Corsicana, TX"): [
+        "permian-express-oil-pipeline-phase-ii-us",
+    ],
+    # --- Petroleum products ---
+    # TEPPCO (Enterprise): refined products from Gulf Coast to Great Lakes
+    ("ENTERPRISE", "TEPPCO"): ["teppco-pipeline-us"],
+    ("ENTERPRISE PRODUCTS", "TEPPCO"): ["teppco-pipeline-us"],
+    # Note: Colonial, Explorer, Plantation, Buckeye are not in WM oil registry
 }
 
 # Operator keyword overrides for fuzzy matching - only include WM-registered IDs
-_OP_SLUG_MAP: dict[str, str] = {
-    # Petroleum products companies are generally not tracked by WM (US domestic only)
-    # Leave empty to rely on fuzzy matching alone
-}
+_OP_SLUG_MAP: dict[str, str] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -227,21 +286,23 @@ def match_to_wm(
     results: dict[str, list[list[list[float]]]] = defaultdict(list)
 
     for (opername, pipename), segs in eia_groups.items():
-        wm_id = None
+        wm_ids: list[str] = []
 
-        # 1. Manual override by exact (opername, pipename)
-        wm_id = _MANUAL.get((opername, pipename))
+        # 1. Manual override by exact (opername, pipename) -> list of WM IDs
+        manual = _MANUAL.get((opername, pipename))
+        if manual:
+            wm_ids = manual
 
-        # 2. Operator keyword override
-        if not wm_id:
+        # 2. Operator keyword override (single WM ID)
+        if not wm_ids:
             op_lower = opername.lower()
             for kw, slug in _OP_SLUG_MAP.items():
                 if kw in op_lower:
-                    wm_id = slug
+                    wm_ids = [slug]
                     break
 
         # 3. Fuzzy match composite string against WM ids + names
-        if not wm_id:
+        if not wm_ids:
             composite_words = _norm(opername + ' ' + pipename)
             best_score, best_id = 0.0, None
             for pid, pwords in wm_norm.items():
@@ -249,12 +310,13 @@ def match_to_wm(
                 if score > best_score:
                     best_score, best_id = score, pid
             if best_score >= 0.35:
-                wm_id = best_id
+                wm_ids = [best_id]
 
-        if wm_id and wm_id in wm_by_id:
-            results[wm_id].extend(segs)
-        elif wm_id:
-            print(f"  SKIP: ({opername!r}, {pipename!r}) -> {wm_id!r} (not in WM registry)")
+        for wm_id in wm_ids:
+            if wm_id in wm_by_id:
+                results[wm_id].extend(segs)
+            else:
+                print(f"  SKIP: ({opername!r}, {pipename!r}) -> {wm_id!r} (not in WM registry)")
 
     return dict(results)
 
