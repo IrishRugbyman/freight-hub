@@ -399,7 +399,8 @@ def _already_routed() -> set[str]:
 # ---------------------------------------------------------------------------
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--region", help="Only run this region (by name)")
+    parser.add_argument("--region", action="append", dest="regions",
+                        help="Run only this region (may be repeated)")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -427,7 +428,8 @@ def main():
         con.close()
 
     total_stored = 0
-    regions = REGIONS if not args.region else [r for r in REGIONS if r[0] == args.region]
+    region_filter = set(args.regions) if args.regions else None
+    regions = REGIONS if not region_filter else [r for r in REGIONS if r[0] in region_filter]
 
     for region_name, s, w, n, e in regions:
         # Filter pipelines in this region
