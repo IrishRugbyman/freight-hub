@@ -1,5 +1,50 @@
 # Freight Hub Changelog
 
+## 2026-06-21 - OSM named-way pipeline routes (global, 56 new routes; 358/700 total)
+
+**Added:** 56 WM pipeline routes via OSM Overpass named-way assembly, on top of the
+existing Dijkstra/IGGIELGN/EIA stack. New script `backend/ingest_osm_named_pipeline_routes.py`
+covers 21 global region bboxes, queries `way[man_made=pipeline][name]` per region, groups
+way segments by name tag, chains disconnected segments with a greedy nearest-endpoint
+algorithm (MAX_CHAIN_GAP_KM=300), fuzzy-matches to WM pipeline IDs by Jaccard score
+(threshold=0.38), and stores routes in `global_pipeline_routes`.
+
+Key implementation details:
+- Name resolution: prefer `name:en > int_name > alt_name > name` to handle Russian Cyrillic,
+  Chinese, and Arabic pipeline names whose bare `name` tag normalises to empty ASCII
+- Generic name filter: rejects OSM names with <2 distinctive words (e.g. "Gas Pipeline")
+- Centroid distance guard: rejects matches where OSM centroid is >600 km from WM endpoints
+- Rate-limit handling: polls Overpass `/api/status` before each query, waits on "Slot
+  available after:"; HTML (406) responses get 90s+ exponential backoff
+- RDP simplification at epsilon=0.02 deg (~2 km)
+- `--region` flag supports multiple invocations for targeted reruns
+
+Regional breakdown (routes stored):
+- Middle East West: 7 (East-West Saudi, Greater Nile, Iraq Strategic x3)
+- Central Asia: 6 (Kazakhstan-China Oil Pipeline variants)
+- Russia Central: 6 (Aleksandrovskoye-Anzhero, Vankor-Purpe, Omsk-Irkutsk)
+- Mexico/CA/US: 25 (Wink-to-Webster, Gulf Coast Express, Sur de Texas-Tuxpan, Sand Hills,
+  Sistema Nacional de Gasoductos MX, Energia Mayakan, Black Lake, Flanagan South, DAPL,
+  North System, Eastern Gas Transmission, Pony Express, Ozark Crude, Red River, etc.)
+- Canada: 15 (Enbridge Lines 1/2/3/4/5/6/9/61/78, Trans Mountain, Norman Wells, Minnesota)
+- Oceania: 5 (Moomba-Sydney, South West Queensland, Moomba-Adelaide, Dampier-Bunbury)
+- South Asia: 5 (Salaya-Mathura, Myanmar-China crude+gas, Dabhol-Bangalore)
+- Africa: 2 (Chad-Cameroon, Escravos-Lagos)
+- LatAm: 3 (OCP Ecuador, Puerto Rosales-La Plata, Gasoducto al Altiplano)
+- SE Asia: 1 (Amadeus Gas)
+- China West: 1 (Sebei-Golmud)
+
+Post-ingest cleanup removed 20 routes: 4 false positives (3 unrelated IDs mapped to "Casa
+Pipeline System", 1 matched "US Amines Hydrogen Pipeline") and 16 routes with <4 points
+(too sparse to render a meaningful line). Final: 104 routes in `global_pipeline_routes`.
+
+**Combined total: 358/700 WM pipelines with full polyline routes** (from 302 at session
+start). Route priority: EIA gas (RexTag crosswalk) -> EIA oil -> EU IGGIELGN -> OSM global.
+
+**Artifacts:** `backend/ingest_osm_named_pipeline_routes.py` (new), commits 18ff75a, 570e3f6, c19a077.
+
+---
+
 ## 2026-06-21 - EIA crude oil + petroleum product pipeline routes; extended WM-RexTag crosswalk
 
 **Added:** Full polyline geometry for an additional 36 WM pipelines (17 oil + 19 gas)
