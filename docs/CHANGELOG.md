@@ -1,5 +1,45 @@
 # Freight Hub Changelog
 
+## 2026-06-21 - OSM pipeline routes (China/Myanmar/India/Norway/Nigeria/Australia session) (404/618 total)
+
+**Routes added (+13 net, 175 total in global_pipeline_routes, 404/618 = 65.4% WM coverage):**
+
+Asia/Central:
+- `western-crude-oil-pipeline-shanshan-lanzhou-oil-pipeline-cn` - Kazakhstan-China crude (Atasu-Alashankou section mapped in OSM as "Kazakhstan - China Oil Pipeline"), 957 km, 30 pts
+- `sino-myanmar-oil-pipeline-sino-myanmar-oil-pipeline-myanmar--mm` - Myanmar section of Sino-Myanmar oil pipeline, 496 km, 18 pts
+- `turkmenistan-afghanistan-pakistan-india-gas-pipeline-tm` - TAPI pipeline (Afghanistan section), 257 km, 9 pts
+- `jagdishpur-haldia-bokaro-dhamra-natural-gas-pipeline-jhbdpl-in` - JHBDPL India gas trunk (partial, 52 km stub from 4 OSM ways near Bokaro)
+
+Africa:
+- `niger-benin-oil-pipeline-ne` - Niger-Benin Export Pipeline (NBEP), 637 km, 16 pts
+
+Australia:
+- `eastern-gas-pipeline-au` - Eastern Gas Pipeline (New South Wales), 110 km, 8 pts
+
+Norway (North Sea):
+- `langeled` - Langeled subsea gas pipeline; was stored under `langeled-gas-pipeline-no` in eu_pipeline_routes but WM uses short ID - SQL-copied to global_pipeline_routes with correct WM ID, 1169 km, 29 pts
+- `asgard-transport` - Åsgard Transport subsea pipeline (Norwegian shelf), 702 km, 15 pts; matched via north_sea region (new region added)
+
+**Regions run with zero matches (OSM coverage gaps confirmed):**
+- `africa_e` (80 groups): Tazama, Mtwara-Dar es Salaam not in OSM
+- `central_asia_n` (45 groups), `central_asia_s` (15 groups): Kazakhstan/Turkmenistan trunks not in OSM
+- `middle_east_west` (67 groups): Arab Gas Pipeline not in OSM with `man_made=pipeline` tag
+- `canada_east` (516 groups), `canada_west` (181 groups): intrastate/NGL systems not in OSM
+
+**Script changes (`ingest_osm_named_pipeline_routes.py`):**
+- Added `_EXPAND` entries: `\bjhbdpl\b`, `\bphbpl\b`, `\bdvpl\b`, `\bhvj\b` (India abbreviations)
+- Added `_FOREIGN_NAME_MAP` entries: Sino-Myanmar Chinese name (`中缅油气管道`), Myanmar-China English OSM name, Kazakhstan-China Atasu-Alashankou English OSM name, West-East Gas Pipeline 2 Lundu branch (`西气东输二线轮吐支干线`)
+- Added `north_sea` region bbox (54-68°N, -5-12°E) covering Norwegian/UK shelf
+- Removed duplicate dict keys (13 entries added mid-session overwrote originals)
+- Fixed snap_km_start/end values stored as computed haversine distances not hardcoded 0
+
+**Remaining large unrouted blocks:** CN (41), US (31), IN (24), IR (22), CO (10), RU (9), MX (8), SA (7).
+Iran IGAT pipelines: OSM Iran has no named IGAT ways (generic "خط لوله گاز").
+China oil pipelines (Yizheng-Changling, Daqing-Tieling, etc.): not in OSM.
+Colombia (OCENSA, Cano Limon, TGI): OSM Colombia has only water/aqueduct pipe names.
+
+---
+
 ## 2026-06-21 - OSM pipeline routes (LatAm, Ecuador, Russia expansions) (391/618 total)
 
 **Routes added** (+12 net from OSM ingest, 167 total in global_pipeline_routes):
