@@ -138,19 +138,12 @@ _FOREIGN_NAME_MAP: dict[str, str] = {
     "Gasoducto Yacuiba Río Grande": "Bolivia Argentina Yacuiba GIJA gas pipeline",
     # Argentina Cordillerano: OSM short name has only 1 distinctive token vs WM's 3
     "Gasoducto Cordillerano": "Cordillerano Patagónico north Argentina gas pipeline",
-    # China: West-East Gas Pipeline lines (Chinese names, OSM may have these without name:en)
-    "西气东输": "West East Gas Pipeline China",
-    "西气东输一线": "West East Gas Pipeline 1 China",
-    "西气东输二线": "West East Gas Pipeline 2 China",
-    "西气东输三线": "West East Gas Pipeline 3 China",
-    "西气东输四线": "West East Gas Pipeline 4 China",
-    "西气东输二线轮吐支干线": "West East Gas Pipeline 2 Lundu branch Xinjiang China",
-    # China-Russia East Route Natural Gas Pipeline (Power of Siberia China section)
-    "中俄东线天然气管道": "China Russia East Route Natural Gas Pipeline Power Siberia",
+    # China WEP Lundu branch (additional line, no name:en on OSM)
+    "西气东输二线轮吐支干线": "West East Gas Pipeline 2 Lundu branch Xinjiang",
     # Kazakhstan-China Oil Pipeline (Atasu-Alashankou section -> connects to Shanshan-Lanzhou)
-    "Kazakhstan - China Oil Pipeline (Atasu - Alashankou section)": "western crude oil pipeline shanshan lanzhou Kazakhstan Alashankou China",
+    "Kazakhstan - China Oil Pipeline (Atasu - Alashankou section)": "western crude oil pipeline shanshan lanzhou Kazakhstan Alashankou",
     # Myanmar-China pipeline (the two WM entries are Myanmar-side; OSM tags the full route)
-    "Myanmar - China pipeline": "Sino Myanmar oil gas pipeline China Myanmar",
+    "Myanmar - China pipeline": "Sino Myanmar oil gas pipeline Myanmar",
 }
 
 OVERPASS_ENDPOINTS = [
