@@ -84,12 +84,27 @@ REGIONS = [
 # ---------------------------------------------------------------------------
 # Text normalisation
 # ---------------------------------------------------------------------------
-_STOP = {"the", "of", "and", "for", "in", "to", "a", "an", "at", "by", "on"}
+_STOP = {"the", "of", "and", "for", "in", "to", "a", "an", "at", "by", "on",
+         "de", "del", "la", "el", "los", "las", "en", "da", "do", "dos"}
 _EXPAND = {
     r"\bpl\b": "pipeline", r"\bpipe\b": "pipeline", r"\bngl\b": "ngl",
     r"\bgas\b": "gas", r"\boil\b": "oil", r"\bcrude\b": "crude",
     r"\bsys(tem)?\b": "system", r"\btrans\b": "trans", r"\bco\b": "company",
     r"\bllc\b": "", r"\blp\b": "", r"\binc\b": "",
+    # Spanish/Portuguese pipeline words (LATAM)
+    r"\bgasoducto\b": "gas pipeline",
+    r"\boleoducto\b": "oil pipeline",
+    r"\bpoliducto\b": "products pipeline",
+    r"\bgasoduto\b": "gas pipeline",     # Portuguese
+    r"\boleoduto\b": "oil pipeline",     # Portuguese
+    r"\bducto\b": "pipeline",
+    r"\bsistema\b": "system",
+    r"\bnorte\b": "north",
+    r"\bsur\b": "south",
+    r"\bcentro\b": "central",
+    r"\beste\b": "east",
+    r"\boeste\b": "west",
+    r"\bandino\b": "andean",
 }
 
 
