@@ -144,6 +144,30 @@ _FOREIGN_NAME_MAP: dict[str, str] = {
     "Kazakhstan - China Oil Pipeline (Atasu - Alashankou section)": "western crude oil pipeline shanshan lanzhou Kazakhstan Alashankou",
     # Myanmar-China pipeline (the two WM entries are Myanmar-side; OSM tags the full route)
     "Myanmar - China pipeline": "Sino Myanmar oil gas pipeline Myanmar",
+    # West Natuna Transportation System (WNTS) - offshore South China Sea, Natuna-Singapore
+    # OSM uses the WNTS operator-assigned system name; WM calls it West Natuna-Singapore Gas Pipeline
+    "West Natuna Transportation System (WNTS)": "West Natuna Singapore gas pipeline Indonesia",
+    # Grissik-Batam/Sakra Gas Pipeline (South Sumatra to Singapore via Batam island)
+    # OSM may tag as "SSWJ" or the Grissik-Batam segment name
+    "Grissik - Batam Gas Pipeline": "Grissik Sakra Batam Singapore Indonesia gas pipeline",
+    "South Sumatra West Java Pipeline": "Grissik Sakra South Sumatra gas pipeline Indonesia",
+    # Peninsular Gas Utilization (PGU) pipeline Malaysia - OSM tags individual PTSP segments
+    "1st PTSP": "Peninsular Gas Utilization pipeline Malaysia gas",
+    # Arab Gas Pipeline - OSM uses Arabic name in Egypt/Jordan segment
+    "خط الغاز العربي": "Arab Gas Pipeline",
+    "Arab Gas Pipeline": "Arab Gas Pipeline",
+    # Dolphin Energy Gas Pipeline (Qatar to UAE/Oman)
+    "Dolphin Gas Pipeline": "Dolphin gas pipeline Qatar UAE",
+    # Habshan-Fujairah (IPIC / ADNOC crude export pipeline, Abu Dhabi)
+    "Habshan–Fujairah Oil Pipeline": "Habshan Fujairah crude oil pipeline UAE Abu Dhabi",
+    "Habshan–Fujairah oil pipeline": "Habshan Fujairah crude oil pipeline UAE Abu Dhabi",
+    # TAZAMA oil pipeline (Dar es Salaam to Ndola, Tanzania-Zambia)
+    "TAZAMA Pipeline": "Tazama oil pipeline Tanzania Zambia Dar es Salaam",
+    # Trans-Tanzania pipeline (Mtwara to Dar es Salaam gas)
+    "Mtwara-Dar es Salaam Gas Pipeline": "Mtwara Dar es Salaam Tanzania gas pipeline",
+    # Bolivia-Brazil gas pipeline (distinct from Taquiperenda WM entries)
+    "Bolivia-Brazil Gas Pipeline": "Bolivia Brazil gas pipeline",
+    "Gasoducto Bolivia-Brasil": "Bolivia Brazil gas pipeline",
 }
 
 OVERPASS_ENDPOINTS = [

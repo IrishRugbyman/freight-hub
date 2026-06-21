@@ -72,10 +72,15 @@ _MANUAL: dict[tuple[str, str], list[str]] = {
     ],
     # Trans Mountain / Kinder Morgan Canada
     ("KINDER MORGAN", "TransMountain"): ["trans-mountain"],
-    # Keystone Phase 1 (Hardisty->Patoka mainline) and Phase 2 (Gulf Coast leg)
+    # Keystone mainline (Phase 1: Hardisty->Patoka, Phase 2: NE->Cushing)
     # "keystone" is the aggregate WM ID for the full Phase 1-3 system
-    ("TRANSCANADA", "Keystone"): ["keystone", "keystone-oil-pipeline-mainline-phase-1-ca"],
-    ("TRANSCANADA", "Gulf Coast Project"): ["keystone-oil-pipeline-phase-2-us"],
+    ("TRANSCANADA", "Keystone"): [
+        "keystone",
+        "keystone-oil-pipeline-mainline-phase-1-ca",
+        "keystone-oil-pipeline-phase-2-us",
+    ],
+    # Gulf Coast Project (Phase 3): Cushing OK -> Port Arthur TX = Marketlink
+    ("TRANSCANADA", "Gulf Coast Project"): ["marketlink"],
     # Dakota Access
     ("ENERGY TRANSFER", "Dakota Access Pipeline (DAPL)"): ["dakota-access-oil-pipeline-dapl-us"],
     # Gray Oak (both spellings appear in EIA data)

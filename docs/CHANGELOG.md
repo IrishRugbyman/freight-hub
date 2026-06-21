@@ -1,5 +1,37 @@
 # Freight Hub Changelog
 
+## 2026-06-21 - OSM pipeline routes (continuation: Middle East/SE Asia/Africa session) (409/618 total)
+
+**Routes added (+5 net, 178 total in global_pipeline_routes, 409/618 = 66.2% WM coverage):**
+
+Southeast Asia (via new `_FOREIGN_NAME_MAP` entries + rerun of southeast_asia region):
+- `indonesia-singapore-west-natuna` - West Natuna Transportation System (WNTS) offshore gas pipeline Indonesia to Singapore, 592 km
+- `indonesia-singapore-grissik-sakra` - Grissik-Batam/Sakra Gas Pipeline (South Sumatra to Singapore), matched via "Grissik - Batam Gas Pipeline" OSM name
+
+Middle East:
+- `arab-gas-pipeline` - Arab Gas Pipeline (Egypt/Jordan/Syria/Lebanon), matched via Arabic OSM name `خط الغاز العربي`
+- `dolphin` - Dolphin Gas Pipeline (Qatar to UAE), matched via "Dolphin Gas Pipeline" OSM name
+
+Africa:
+- `tazama-oil-pipeline-tz` - TAZAMA Oil Pipeline (Dar es Salaam to Zambia border), matched via "TAZAMA Pipeline" OSM name
+- `tanzania-mtwara-dar` - Mtwara-Dar es Salaam Gas Pipeline, matched via OSM name
+
+**All OSM regions now exhausted - zero new matches in all remaining regions:**
+- iran_east, middle_east_gulf (0): Iranian IGAT pipelines not in OSM with English names
+- russia_w, russia_c, russia_e, china_ne (0): Cyrillic/Chinese names without Latin equivalents
+- latam_n, latam_s, mexico_ca, africa_w, africa_e, middle_east_west (0): OSM coverage gaps confirmed
+- us_northeast, us_southeast, us_gulf, us_west (0): US NGL/Y-grade/ethane pipelines not in EIA or OSM
+
+**Script changes (`ingest_osm_named_pipeline_routes.py`):**
+- Added `_FOREIGN_NAME_MAP` entries: WNTS (West Natuna), Grissik-Batam, Arab Gas Pipeline (Arabic + English), Dolphin Gas Pipeline, Habshan-Fujairah, TAZAMA, Mtwara-Dar es Salaam, Bolivia-Brazil Gas Pipeline (EN + ES)
+- Added `_EXPAND` entries for India pipeline abbreviations (PHBPL, DVPL, HVJ) - carried from previous session
+
+**Script changes (`ingest_eia_oil_routes.py`):**
+- Fixed Keystone Phase 1-3 mapping: moved `keystone-oil-pipeline-phase-2-us` to "Keystone" entry; mapped "Gulf Coast Project" to `marketlink`
+
+**Remaining large unrouted blocks (209 total):** CN (41), US (29), IN (23), IR (22), CO (10), RU (9), MX (8), SA (7).
+Next data source candidates: PHMSA geospatial data (US NGL/liquid pipelines), Global Energy Monitor tracker, or coordinate-only straight-line interpolation for the remaining 209.
+
 ## 2026-06-21 - OSM pipeline routes (China/Myanmar/India/Norway/Nigeria/Australia session) (404/618 total)
 
 **Routes added (+13 net, 175 total in global_pipeline_routes, 404/618 = 65.4% WM coverage):**

@@ -69,6 +69,8 @@ NEW_MAPPINGS: list[tuple[str, str]] = [
     ("sabal-trail-transmission-gas-pipeline-us", "sabal-trail-transmission"),
     # Algonquin Gas Transmission (already in crosswalk but check slug variant)
     # Tucked in for completeness; insert will be skipped if already present.
+    # Dominion Gas Pipeline = Equitrans Midstream (Dominion's Appalachian gas assets spun off 2018)
+    ("dominion-gas-pipeline-us", "equitrans"),
 ]
 
 
