@@ -128,10 +128,29 @@ _FOREIGN_NAME_MAP: dict[str, str] = {
     # SRTO-Surgut-Omsk (SAC) - if OSM has a different Cyrillic name
     "СРТО — Центр 1": "SRTO Center gas pipeline 1",
     "СРТО — Центр 2": "SRTO Center gas pipeline 2",
+    # Russia western Siberia oil/gas pipelines (Cyrillic OSM names)
+    "Усть-Балык-Омск": "Ust Balyk Omsk oil pipeline",
+    "Уренгой — Челябинск 1": "Urengoy Chelyabinsk gas pipeline 1",
+    "Уренгой — Челябинск 2": "Urengoy Chelyabinsk gas pipeline 2",
+    "Нижневартовский ГПЗ — Парабель — Кузбасс": "Nizhnevartovsk Parabel Kuzbass gas pipeline",
+    "Газопровод «Нижневартовский ГПЗ — Парабель — Кузбасс»": "Nizhnevartovsk Parabel Kuzbass gas pipeline",
     # Bolivia: OSM uses endpoint-pair name; WM uses GIJA/Yacuiba formulation
     "Gasoducto Yacuiba Río Grande": "Bolivia Argentina Yacuiba GIJA gas pipeline",
     # Argentina Cordillerano: OSM short name has only 1 distinctive token vs WM's 3
     "Gasoducto Cordillerano": "Cordillerano Patagónico north Argentina gas pipeline",
+    # China: West-East Gas Pipeline lines (Chinese names, OSM may have these without name:en)
+    "西气东输": "West East Gas Pipeline China",
+    "西气东输一线": "West East Gas Pipeline 1 China",
+    "西气东输二线": "West East Gas Pipeline 2 China",
+    "西气东输三线": "West East Gas Pipeline 3 China",
+    "西气东输四线": "West East Gas Pipeline 4 China",
+    "西气东输二线轮吐支干线": "West East Gas Pipeline 2 Lundu branch Xinjiang China",
+    # China-Russia East Route Natural Gas Pipeline (Power of Siberia China section)
+    "中俄东线天然气管道": "China Russia East Route Natural Gas Pipeline Power Siberia",
+    # Kazakhstan-China Oil Pipeline (Atasu-Alashankou section -> connects to Shanshan-Lanzhou)
+    "Kazakhstan - China Oil Pipeline (Atasu - Alashankou section)": "western crude oil pipeline shanshan lanzhou Kazakhstan Alashankou China",
+    # Myanmar-China pipeline (the two WM entries are Myanmar-side; OSM tags the full route)
+    "Myanmar - China pipeline": "Sino Myanmar oil gas pipeline China Myanmar",
 }
 
 OVERPASS_ENDPOINTS = [
@@ -163,6 +182,7 @@ REGIONS = [
     # Canada split into west/east to avoid Overpass timeout on the full-country bbox
     ("canada_west",         48.0,-145.0,  65.0,-105.0),  # BC, Alberta, NWT west (NGTL, Westcoast, Cold Lake)
     ("canada_east",         42.0,-110.0,  56.0, -52.0),  # Prairies, Ontario, Quebec, Maritimes
+    ("north_sea",           54.0,  -5.0,  68.0,  12.0),  # Norwegian shelf, UK shelf, Langeled, Åsgard
     ("oceania",            -50.0, 105.0,   5.0, 180.0),  # Australia + Pacific
     # US split into sub-regions to avoid Overpass timeout on the full continental bbox
     ("us_northeast",        37.0, -83.0,  48.0, -66.0),  # PA, OH, NY, NE - Mariner, Utopia, Dominion
@@ -211,7 +231,11 @@ _EXPAND = {
     r"\bnororiental\b": "northeastern",            # nororiental in Venezuelan gas pipeline names
     # SOTE abbreviation: expand to final form matching OSM's full Spanish name expanded tokens
     r"\bsote\b": "system trans ecuadorian oil pipeline",
-
+    # India pipeline abbreviations: expand so OSM short-form names match WM full names
+    r"\bjhbdpl\b": "jagdishpur haldia bokaro dhamra",
+    r"\bphbpl\b": "paradip haldia barauni",
+    r"\bdvpl\b": "dahej vijaipur",
+    r"\bhvj\b": "hazira vijaipur jagdishpur",
 }
 
 
@@ -630,10 +654,14 @@ def main():
                 for seg in simplified
                 for i in range(len(seg) - 1)
             )
+            osm_short = osm_name[:35]
             # Reject stub matches: a named pipeline should span at least 30km
             if path_km < 30:
+                print(
+                    f"    [stub<30km] {pipe['wm_id']!r:46} <- {osm_short!r} score={score:.2f} {path_km:.0f} km",
+                    flush=True,
+                )
                 continue
-            osm_short = osm_name[:35]
             print(
                 f"    {pipe['wm_id']!r:50} <- {osm_short!r} score={score:.2f} "
                 f"{len(simplified)} segs {n_pts} pts {path_km:.0f} km",
