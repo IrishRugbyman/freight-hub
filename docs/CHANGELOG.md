@@ -1,5 +1,27 @@
 # Freight Hub Changelog
 
+## 2026-06-22 - EIA NG intrastate pipeline routes (+5 routes, 422/618 total)
+
+**Routes added (via new `ingest_eia_ng_intrastate_routes.py`, operator-based matching, stored in eia_oil_pipeline_routes, 61 total there):**
+
+US gas intrastate pipelines from EIA Natural Gas Interstate+Intrastate Pipelines FeatureServer (operator field, no system name):
+- `acadian-gas-pipeline-system-us` - Acadian Gas Pipeline + Gathering System (Louisiana), 168 segs, 816 km
+- `bridgeline-gas-pipeline-us` - Bridgeline Holdings Pipeline (Louisiana), 40 segs, 1025 km
+- `louisiana-intrastate-gas-lig-pipeline-us` - Louisiana Intrastate Gas Co (LIG, Louisiana), 434 segs, 2265 km
+- `oasis-gas-pipeline-us` - Oasis Pipeline (Louisiana), 102 segs, 1358 km
+- `socalgas-pipeline-us` - Southern California Gas Co (California), 222 segs, 3102 km
+
+**Excluded (operator too broad - covers multiple systems):**
+- "Houston Pipeline Co" (662 segs, 7058 km) -> `houston-gas-pipeline-hpl-system-us` - HPL operator covers all Texas Gulf Coast gas distribution, cannot isolate HPL trunk
+- "Kinder Morgan Texas Pipeline Co" (812 segs, 7023 km) -> `tejas-gas-pipeline-us` - covers most of Texas gas infrastructure, not just the historical Tejas system
+
+**Not found in EIA NG dataset:**
+- `kpc-gas-pipeline-us` - KPC not identified under any matching operator name
+- `matterhorn-express-gas-pipeline-us` - 2024 pipeline, not in EIA dataset yet
+
+**Remaining US unrouted (17):** `cameron-highway`, `capline-expansion`, `eaglebine-express`, `heavy-louisiana-sweet`, `high-plains`, `hobbs-east-rio-grande`, `hpl-system`, `keystone-xl-cancelled`, `kpc-gas`, `lone-star-express-y-grade` (x2), `matterhorn-express`, `poseidon`, `sunrise`, `tejas-gas`, `bangl`, `zydeco`.
+Note: `keystone-xl-cancelled` should be skipped (pipeline was never built).
+
 ## 2026-06-21 - EIA HGL NGL pipeline routes (+8 routes, 417/618 total)
 
 **Routes added (via new `ingest_eia_hgl_routes.py`, stored in eia_oil_pipeline_routes, 56 total there):**
