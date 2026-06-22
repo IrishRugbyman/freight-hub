@@ -1,5 +1,26 @@
 # Freight Hub Changelog
 
+## 2026-06-22 - Straight-line fallback routes for remaining US pipelines (+11 routes, 433/618 total)
+
+**Routes added (via new `ingest_wm_straightline_routes.py`, 2-point routes from pipeline_registry start_lat/lon and end_lat/lon, stored in eia_oil_pipeline_routes, 72 total there):**
+
+- `bangl-pipeline-us` - Pecos TX to Big Spring TX, 194 km straight-line (WM: 845 km)
+- `capline-oil-pipeline-patoka-to-catlettsburg-expansion-us` - Patoka IL to Catlettsburg KY, 557 km
+- `eaglebine-express-crude-oil-pipeline-us` - Central TX to Beaumont TX, 269 km
+- `heavy-louisiana-sweet-crude-oil-pipeline-system-us` - GOM offshore to Baton Rouge LA, 411 km
+- `hobbs-east-gathering-system-rio-grande-pipeline-us` - Hobbs NM to El Paso TX, 345 km
+- `kpc-gas-pipeline-us` - SW Kansas to central Kansas corridor, 250 km (WM: 1817 km - complex gathering network)
+- `lone-star-express-y-grade-pipeline-us` - Midland TX to Beaumont TX coast, 701 km
+- `lone-star-express-y-grade-pipeline-expansion-us` - Midland TX to Corsicana TX, 536 km
+- `matterhorn-express-gas-pipeline-us` - Houston area to West TX (Permian to Gulf gas), 566 km
+- `poseidon-oil-pipeline-us` - GOM deepwater (27.9N, 92.6W) to Louisiana coast, 242 km
+- `sunrise-pipeline-system-us` - Wichita Falls TX to Midland TX, 390 km
+
+**Excluded (bad placeholder data):** `cameron-highway-oil-pipeline-system-chops-us` and `zydeco-oil-pipeline-us` have identical start/end coords in the WM registry.
+**Excluded (too large for straight-line):** `houston-gas-pipeline-hpl-system-us` (6116 km), `tejas-gas-pipeline-us` (5221 km).
+**Excluded (cancelled):** `keystone-xl-cancelled` (never built).
+**Note:** These 2-point routes are approximations for proximity analysis only - they show the terminal-to-terminal corridor, not the actual pipe path.
+
 ## 2026-06-22 - EIA NG intrastate pipeline routes (+5 routes, 422/618 total)
 
 **Routes added (via new `ingest_eia_ng_intrastate_routes.py`, operator-based matching, stored in eia_oil_pipeline_routes, 61 total there):**
