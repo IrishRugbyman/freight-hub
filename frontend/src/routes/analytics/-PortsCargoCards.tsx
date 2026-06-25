@@ -12,7 +12,7 @@ import {
   useLngInbound, useTransitRateTimeline,
   type EuropeanInboundVessel, type LngVessel,
 } from '@/lib/api'
-import { fmt, EmptyState, TOOLTIP_STYLE, LEGEND_STYLE, REGION_LABELS } from './-analyticsShared'
+import { fmt, EmptyState, ChartSkeleton, TOOLTIP_STYLE, LEGEND_STYLE, REGION_LABELS } from './-analyticsShared'
 
 function useGoToTracker() {
   const navigate = useNavigate()
@@ -246,7 +246,7 @@ export function PortFlowCard() {
       </CardHeader>
       <CardContent>
         {isLoading || !data ? (
-          <EmptyState message="Loading..." />
+          <ChartSkeleton />
         ) : data.ports.length === 0 ? (
           <EmptyState message="No destination data yet." />
         ) : (
@@ -316,7 +316,7 @@ export function PortCongestionCard() {
         </p>
       </CardHeader>
       <CardContent className="pt-0">
-        {isLoading && <p className="text-xs text-muted-foreground">Loading...</p>}
+        {isLoading && <ChartSkeleton className="h-24" />}
         {!isLoading && rows.length === 0 && (
           <p className="text-xs text-muted-foreground">No anchored episodes in selected window.</p>
         )}
@@ -607,7 +607,7 @@ export function DestinationFlowCard() {
         </p>
       </CardHeader>
       <CardContent className="pt-0">
-        {isLoading && <p className="text-xs text-muted-foreground">Loading...</p>}
+        {isLoading && <ChartSkeleton className="h-24" />}
         {!isLoading && rows.length === 0 && (
           <p className="text-xs text-muted-foreground">No destination data available.</p>
         )}
@@ -680,7 +680,7 @@ export function CargoTransitionsCard() {
         </p>
       </CardHeader>
       <CardContent className="pt-0">
-        {isLoading && <p className="text-xs text-muted-foreground">Loading...</p>}
+        {isLoading && <ChartSkeleton className="h-24" />}
         {!isLoading && rows.length === 0 && (
           <p className="text-xs text-muted-foreground">No transitions detected for selected filters.</p>
         )}
@@ -839,7 +839,7 @@ export function LadenCard() {
         <p className="text-xs text-muted-foreground">Current fleet status by segment.</p>
       </CardHeader>
       <CardContent>
-        {isLoading || !data ? <EmptyState message="Loading..." /> : chartData.length === 0 ? (
+        {isLoading || !data ? <ChartSkeleton /> : chartData.length === 0 ? (
           <EmptyState message="No draught data yet." />
         ) : (
           <ResponsiveContainer width="100%" height={240}>
@@ -895,7 +895,7 @@ export function DensityCard() {
         <p className="text-xs text-muted-foreground">Daily vessels in region by laden status.</p>
       </CardHeader>
       <CardContent>
-        {isLoading || !data ? <EmptyState message="Loading..." /> : chartData.length === 0 ? (
+        {isLoading || !data ? <ChartSkeleton /> : chartData.length === 0 ? (
           <EmptyState message="No density data yet." />
         ) : (
           <ResponsiveContainer width="100%" height={240}>
@@ -1134,7 +1134,7 @@ export function EuropeanInboundCard() {
       </CardHeader>
 
       <CardContent className="pb-3">
-        {isLoading && <EmptyState message="Loading..." />}
+        {isLoading && <ChartSkeleton />}
         {!isLoading && (!data || data.total_vessels === 0) && (
           <EmptyState message="No inbound vessels in this window." />
         )}

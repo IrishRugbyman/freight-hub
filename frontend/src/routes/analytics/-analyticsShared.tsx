@@ -1,8 +1,15 @@
 // Shared helpers and constants used across multiple analytics tab modules.
 // Card-local-only helpers stay co-located in their tab file.
 
+import { Skeleton } from '@/components/ui/skeleton'
+
 export function fmt(s: string): string {
   return s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+/** Pulse placeholder shaped like a chart/panel, swapped in while data loads. */
+export function ChartSkeleton({ className = 'h-40' }: { className?: string }) {
+  return <Skeleton className={`w-full ${className}`} />
 }
 
 export function EmptyState({ message }: { message: string }) {

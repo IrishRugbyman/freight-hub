@@ -10,6 +10,8 @@ import {
   type FleetRow,
   type FleetKPIs,
 } from '@/lib/api'
+import { SkeletonTableRows } from '@/components/ui/skeleton'
+import { RISK_TEXT, riskScoreClass, detentionClass } from '@/lib/status'
 
 export const Route = createFileRoute('/fleet')({
   component: FleetPage,
@@ -32,10 +34,12 @@ export const Route = createFileRoute('/fleet')({
   }),
 })
 
+// MoU flag color maps onto the shared severity ramp: White=clean, Grey=elevated,
+// Black=critical. Sourced from RISK_TEXT so it stays in lockstep with the rest.
 const MOU_COLORS: Record<string, string> = {
-  White: 'text-emerald-400',
-  Grey: 'text-yellow-400',
-  Black: 'text-red-400',
+  White: RISK_TEXT.low,
+  Grey: RISK_TEXT.elevated,
+  Black: RISK_TEXT.critical,
 }
 
 function mouColor(v?: string) {
@@ -43,17 +47,11 @@ function mouColor(v?: string) {
 }
 
 function detentionColor(v?: number | null) {
-  if (v == null) return ''
-  if (v >= 10) return 'text-red-400'
-  if (v >= 5) return 'text-yellow-400'
-  return 'text-emerald-400'
+  return v == null ? '' : detentionClass(v)
 }
 
 function riskColor(v?: number | null) {
-  if (v == null) return 'text-muted-foreground'
-  if (v >= 50) return 'text-red-400'
-  if (v >= 25) return 'text-yellow-400'
-  return 'text-emerald-400'
+  return v == null ? 'text-muted-foreground' : riskScoreClass(v)
 }
 
 const COLUMNS: { key: string; label: string; sortable?: boolean }[] = [
@@ -136,7 +134,7 @@ function FleetKPIBar({ kpis, onHighRisk, onCritical, onOfac }: {
           label="Elevated"
           value={kpis.elevated.toLocaleString()}
           sub="score >= 25"
-          color="text-yellow-400"
+          color={RISK_TEXT.elevated}
           icon={<Activity size={10} />}
           onClick={onHighRisk}
         />
@@ -144,7 +142,7 @@ function FleetKPIBar({ kpis, onHighRisk, onCritical, onOfac }: {
           label="High Risk"
           value={kpis.high_risk.toLocaleString()}
           sub="score >= 50"
-          color={kpis.high_risk > 0 ? 'text-orange-400' : undefined}
+          color={kpis.high_risk > 0 ? RISK_TEXT.high : undefined}
           icon={<ShieldAlert size={10} />}
           onClick={onHighRisk}
         />
@@ -152,7 +150,7 @@ function FleetKPIBar({ kpis, onHighRisk, onCritical, onOfac }: {
           label="Critical"
           value={kpis.critical.toLocaleString()}
           sub="score >= 75"
-          color={kpis.critical > 0 ? 'text-red-400' : undefined}
+          color={kpis.critical > 0 ? RISK_TEXT.critical : undefined}
           icon={<AlertTriangle size={10} />}
           onClick={onCritical}
         />
@@ -169,7 +167,7 @@ function FleetKPIBar({ kpis, onHighRisk, onCritical, onOfac }: {
             label="Avg Score"
             value={kpis.avg_risk_score.toFixed(1)}
             sub="scored vessels"
-            color={kpis.avg_risk_score >= 50 ? 'text-orange-400' : kpis.avg_risk_score >= 25 ? 'text-yellow-400' : 'text-emerald-400'}
+            color={riskScoreClass(kpis.avg_risk_score)}
           />
         )}
       </div>
@@ -462,11 +460,7 @@ export default function FleetPage() {
           </thead>
           <tbody>
             {isFetching && rows.length === 0 && (
-              <tr>
-                <td colSpan={COLUMNS.length} className="px-4 py-8 text-center text-muted-foreground">
-                  Loading...
-                </td>
-              </tr>
+              <SkeletonTableRows rows={14} cols={COLUMNS.length} />
             )}
             {!isFetching && rows.length === 0 && (
               <tr>

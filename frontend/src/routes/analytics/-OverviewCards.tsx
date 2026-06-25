@@ -8,6 +8,7 @@ import {
   useMarketSummary, useCrudeOnWater, useRegionMomentum, useFleetAtTime, useFleetTrend,
 } from '@/lib/api'
 import { EmptyState, TOOLTIP_STYLE, REGION_LABELS } from './-analyticsShared'
+import { Skeleton, SkeletonKpis } from '@/components/ui/skeleton'
 
 // ---------------------------------------------------------------------------
 // regionLabel - used only in RegionMomentumCard (Overview tab)
@@ -68,7 +69,16 @@ export function MarketSummaryCard() {
         </p>
       </CardHeader>
       <CardContent className="pt-0 space-y-4">
-        {isLoading && <p className="text-xs text-muted-foreground">Loading...</p>}
+        {isLoading && (
+          <div className="space-y-4">
+            <SkeletonKpis count={4} />
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <Skeleton key={i} className="h-7" />
+              ))}
+            </div>
+          </div>
+        )}
         {!isLoading && data && (
           <>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -430,7 +440,7 @@ function FleetTrendCard() {
         </p>
       </CardHeader>
       <CardContent>
-        {isLoading && <div className="h-32 flex items-center justify-center text-xs text-muted-foreground">Loading...</div>}
+        {isLoading && <Skeleton className="h-[180px] w-full" />}
         {!isLoading && (!data?.series.length) && (
           <EmptyState message="Fleet density data will appear here after the analytics build completes." />
         )}

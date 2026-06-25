@@ -9,7 +9,7 @@ import {
   useVesselRiskScores, useOwnerIntelligence, useOwnerRisk,
   useFlagRisk, useFleetAge, useTransitRisk, useAnchorageDwell, useStsRisk,
 } from '@/lib/api'
-import { fmt, EmptyState, TOOLTIP_STYLE, LEGEND_STYLE } from './-analyticsShared'
+import { fmt, EmptyState, ChartSkeleton, TOOLTIP_STYLE, LEGEND_STYLE } from './-analyticsShared'
 
 // ---------------------------------------------------------------------------
 // Local helpers (Risk tab only)
@@ -279,7 +279,7 @@ export function OwnerRiskCard() {
       </CardHeader>
       <CardContent>
         {isLoading || !data ? (
-          <EmptyState message="Loading..." />
+          <ChartSkeleton />
         ) : data.rows.length === 0 ? (
           <EmptyState message="No owner data available. Registry crawl may not have run yet." />
         ) : (
@@ -329,7 +329,7 @@ export function FlagRiskCard() {
       </CardHeader>
       <CardContent>
         {isLoading || !data ? (
-          <EmptyState message="Loading..." />
+          <ChartSkeleton />
         ) : data.rows.length === 0 ? (
           <EmptyState message="No flag data yet. Registry crawl populates this." />
         ) : (

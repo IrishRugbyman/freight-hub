@@ -4,6 +4,8 @@ import { MapPin } from 'lucide-react'
 import { useEvents, type AisEvent } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { SubscribeFeed } from '@/components/SubscribeFeed'
+import { SkeletonListRows } from '@/components/ui/skeleton'
+import { EVENT_TYPE_COLORS as TYPE_COLORS } from '@/lib/status'
 
 export const Route = createFileRoute('/events')({ component: EventsPage })
 
@@ -14,15 +16,6 @@ const TYPE_LABELS: Record<string, string> = {
   loiter: 'Loitering',
   sts: 'STS Candidate',
   reroute: 'Reroute',
-}
-
-const TYPE_COLORS: Record<string, string> = {
-  gap: 'bg-red-500/20 text-red-400 border-red-500/30',
-  loiter: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
-  sts: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-  reroute: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
-  dark_voyage: 'bg-purple-500/20 text-purple-300 border-purple-500/30',
-  spoof: 'bg-pink-500/20 text-pink-300 border-pink-500/30',
 }
 
 // Higher = more concerning, shown first when unfiltered
@@ -138,6 +131,7 @@ export default function EventsPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
+          {isLoading && <SkeletonListRows rows={10} />}
           {!isLoading && sorted.length === 0 && (
             <div className="px-4 py-8 text-center text-sm text-muted-foreground">
               No events in this window yet. Gap and loitering detection requires 48h+ of vessel

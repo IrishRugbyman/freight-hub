@@ -10,7 +10,7 @@ import {
   useRegionUtil, useFleetUtilization, useSlowSteamers,
   useOwnerFleetStatus,
 } from '@/lib/api'
-import { fmt, EmptyState, TOOLTIP_STYLE, LEGEND_STYLE } from './-analyticsShared'
+import { fmt, EmptyState, ChartSkeleton, TOOLTIP_STYLE, LEGEND_STYLE } from './-analyticsShared'
 
 function useGoToTracker() {
   const navigate = useNavigate()
@@ -425,7 +425,7 @@ export function OwnerFleetStatusCard() {
         )}
       </CardHeader>
       <CardContent>
-        {isLoading && <EmptyState message="Loading..." />}
+        {isLoading && <ChartSkeleton />}
         {!isLoading && rows.length === 0 && <EmptyState message="No registry-matched vessels" />}
         {rows.length > 0 && (
           <div className="space-y-2">

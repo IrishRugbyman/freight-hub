@@ -3,6 +3,8 @@ import { createFileRoute } from '@tanstack/react-router'
 import { MapContainer, TileLayer, ZoomControl, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import { usePipelines, type PipelineSegment } from '@/lib/api'
+import { SkeletonListRows } from '@/components/ui/skeleton'
+import { PIPELINE_STATE, COMMODITY } from '@/lib/status'
 import 'leaflet/dist/leaflet.css'
 
 export const Route = createFileRoute('/pipelines')({
@@ -42,12 +44,12 @@ function countryName(iso2: string): string {
   return COUNTRY[iso2?.toUpperCase()] ?? iso2
 }
 
-// Commodity + state -> line color
+// Commodity + state -> line color (centralized in lib/status.ts)
 function lineColor(p: PipelineSegment): string {
-  if (p.physical_state === 'offline') return '#ef4444'   // red
-  if (p.physical_state === 'reduced') return '#f97316'   // orange
-  if (p.commodity === 'oil') return '#fbbf24'            // amber
-  return '#38bdf8'                                       // sky
+  if (p.physical_state === 'offline') return PIPELINE_STATE.offline.hex
+  if (p.physical_state === 'reduced') return PIPELINE_STATE.reduced.hex
+  if (p.commodity === 'oil') return COMMODITY.oil.hex
+  return COMMODITY.gas.hex
 }
 
 function lineWeight(p: PipelineSegment, selected: boolean): number {
@@ -170,14 +172,14 @@ function PipelineZoomer({ pipeline }: { pipeline: PipelineSegment | null }) {
 function StateBadge({ state }: { state: string }) {
   if (state === 'offline') {
     return (
-      <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-red-500/20 text-red-300">
+      <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${PIPELINE_STATE.offline.badge}`}>
         Offline
       </span>
     )
   }
   if (state === 'reduced') {
     return (
-      <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-orange-500/20 text-orange-300">
+      <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${PIPELINE_STATE.reduced.badge}`}>
         Reduced
       </span>
     )
@@ -188,10 +190,10 @@ function StateBadge({ state }: { state: string }) {
 }
 
 function CommodityDot({ commodity }: { commodity: string }) {
-  const isOil = commodity === 'oil'
+  const c = commodity === 'oil' ? COMMODITY.oil : COMMODITY.gas
   return (
-    <span className={`inline-flex items-center gap-1 text-xs font-medium ${isOil ? 'text-amber-400' : 'text-sky-400'}`}>
-      <span className={`h-1.5 w-1.5 rounded-full ${isOil ? 'bg-amber-400' : 'bg-sky-400'}`} />
+    <span className={`inline-flex items-center gap-1 text-xs font-medium ${c.text}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${c.dot}`} />
       {commodity}
     </span>
   )
@@ -437,8 +439,11 @@ export default function PipelinesPage() {
         {/* Map */}
         <div className="relative flex-1 min-w-0">
           {isLoading && (
-            <div className="absolute inset-0 z-[1000] flex items-center justify-center bg-background/50 text-sm text-muted-foreground">
-              Loading...
+            <div className="absolute inset-0 z-[1000] flex items-center justify-center bg-background/50">
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-primary" />
+                Loading pipeline network...
+              </div>
             </div>
           )}
           <MapContainer
@@ -494,6 +499,7 @@ export default function PipelinesPage() {
 
           {/* Pipeline list */}
           <div className="min-h-0 flex-1 overflow-y-auto">
+            {isLoading && filtered.length === 0 && <SkeletonListRows rows={9} />}
             {filtered.length === 0 && !isLoading && (
               <div className="flex items-center justify-center py-12 text-xs text-muted-foreground">
                 No pipelines match.

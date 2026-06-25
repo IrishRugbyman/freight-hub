@@ -9,7 +9,7 @@ import {
   useTransitRateTimeline, useTransits, useCongestion,
   type ChokepointStatusRow,
 } from '@/lib/api'
-import { fmt, EmptyState, TOOLTIP_STYLE, LEGEND_STYLE } from './-analyticsShared'
+import { fmt, EmptyState, ChartSkeleton, TOOLTIP_STYLE, LEGEND_STYLE } from './-analyticsShared'
 
 // ---------------------------------------------------------------------------
 // Local constants (Chokepoints tab only)
@@ -479,7 +479,7 @@ export function TransitsCard() {
         <p className="text-xs text-muted-foreground">Daily transits. Data from 2026-06.</p>
       </CardHeader>
       <CardContent>
-        {isLoading || !data ? <EmptyState message="Loading..." /> : chartData.length === 0 ? (
+        {isLoading || !data ? <ChartSkeleton /> : chartData.length === 0 ? (
           <EmptyState message="No transit events yet. Data accumulates as history grows." />
         ) : (
           <ResponsiveContainer width="100%" height={240}>
@@ -531,7 +531,7 @@ export function CongestionCard() {
         <p className="text-xs text-muted-foreground">Daily anchored vessels and median dwell (hours). Data from 2026-06.</p>
       </CardHeader>
       <CardContent>
-        {isLoading || !data ? <EmptyState message="Loading..." /> : chartData.length === 0 ? (
+        {isLoading || !data ? <ChartSkeleton /> : chartData.length === 0 ? (
           <EmptyState message="No anchored episodes yet." />
         ) : (
           <ResponsiveContainer width="100%" height={240}>
