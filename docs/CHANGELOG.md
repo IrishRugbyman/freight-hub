@@ -10,28 +10,31 @@ First phase of the True ETA build (`docs/ROADMAP_TRUE_ETA.md`). Goal: make every
 - `eta_model_metrics` - lead-bucket x target-type scoreboard (one row set per backtest run); seeded with `model='naive'`.
 
 **New module `analytics/eta_labels.py`** (registered in `build.py` run order, also standalone via `python -m analytics.eta_labels`):
-- `build_targets()`: deterministic, de-duplicated target list. Chokepoints first (so they win clashes), then bbox anchorage zones, then point terminals from the app's `_EUR_TERMINALS` / `_US_LNG_LOADING_TERMINALS`. Greedy de-dupe drops any candidate within 20nm of one already kept (e.g. point-Rotterdam vs zone-Rotterdam).
-- **Reach radius decision**: `reach_nm` for a chokepoint is the bbox *cross-strait half-width* (half the shorter side), derived per chokepoint from its own region box - NOT the half-diagonal. The half-diagonal is dominated by the long approach axis and would count a vessel 250nm up-corridor as "arrived". (Considered and rejected a flat hardcoded cap as an unjustified magic number.) Anchorage zones use their bbox half-diagonal (small boxes); point terminals use fixed 15nm (port) / 25nm (LNG).
-- Arrival miner: bbox pre-filter in SQL -> exact vectorised haversine -> per-mmsi gap-split -> closest-approach fix as `arrival_ts`, first qualifying fix as `approach_start_ts`. `laden` from the arrival draught vs the per-approach max draught (0.8/0.65 ratio thresholds). Read path injected so production uses read-only lock-retry and tests use a temp DB.
+- `build_targets()`: deterministic target list. All 9 chokepoints kept unconditionally; ports (bbox anchorage zones, then `_EUR_TERMINALS` / `_US_LNG_LOADING_TERMINALS` point terminals) are de-duped *among themselves* within 20nm (e.g. zone-Rotterdam vs point-Rotterdam). A port is never de-duped against a chokepoint (the Suez gate and Suez Roads anchorage are distinct ETA targets).
+- **Chokepoint anchoring (the key rigor decision)**: a chokepoint target is anchored to its real transit GATE coordinate (`_CHOKEPOINT_GATES`), NOT the basin-bbox centroid. The first miner run against box centroids gave a ~53nm median closest-approach because the AIS subscription boxes are basin-wide; switching to published strait coordinates dropped chokepoint median closest-approach to **3.7nm**. Reach is a single documented transit-capture radius (30nm) - one physically meaningful knob ("committed to the transit"), not a per-target fudge or a cap on a derived value.
+- **Gate validation against data**: gate coordinates were cross-checked against where underway (sog>8) vessels actually concentrate in each region. This caught a mis-placed Cape of Good Hope gate (captured 4,880 underway fixes on the wrong side of the cape vs 34,377 on the real rounding lane); moved to the AIS-validated lane and its transit cross-check went from 79% -> 18% disagreement.
+- Arrival miner: SQL bbox pre-filter -> exact vectorised haversine -> per-mmsi 24h gap-split -> closest-approach fix as `arrival_ts`, first qualifying fix as `approach_start_ts`. Full re-mine clears a target's prior arrivals first (the PK includes `arrival_ts`, so a changed gate would otherwise leave stale rows). `laden` uses the canonical `detect.laden_status` against the vessel's GLOBAL max draught (a per-approach max would read everything laden, since draught is ~constant within one approach). Read path injected (read-only lock-retry in prod, temp DB in tests).
+- `cross_check_chokepoints()`: compares mined chokepoint arrivals to the independently-detected `transit_events` by distinct-vessel count, logging a warning past 50% relative divergence. Run automatically.
+- **Coverage transparency**: a coverage summary logs every target with 0 arrivals. 32/56 targets have data; 24 are in regions the AIS collector does not yet feed (Hormuz, Bab-el-Mandeb, the Arabian Gulf, most Asia-Pacific and Med boxes - only 15 of the 24 `regions.py` boxes are in the current free-tier subscription). These stay seeded as legal targets and populate as collector coverage grows. Flagged as a data-coverage follow-up (collector domain, not this app).
 
 **New module `analytics/eta_backtest.py`** (standalone via `python -m analytics.eta_backtest`):
 - `build_samples()`: replays each arrival's approach track (one bulk AIS scan + in-memory groupby, not ~15k per-mmsi scans), samples fixes thinned to ~1h cadence up to 72h before arrival, labels each with actual `remaining_h` and great-circle distance. 756,691 samples / 236,868 scored (underway only).
 - `score(eta_fn, ...)`: any `eta_fn(obs) -> hours` (or `{p50,low,high}` dict) -> median |err|, bias, MAPE, P90 |err|, interval coverage, by lead bucket x target type.
 - Leakage control: `voyage_id = hash(mmsi,target_id,arrival_ts)`; `voyage_split` partitions on it so no voyage straddles train/test. Buckets are by *actual* remaining time.
 
-**Committed baseline artifact**: `analytics/baselines/eta_naive_baseline.csv`. The naive `great_circle/SOG` model reproduces the roadmap's signature - excellent short range, optimistic at long lead:
+**Committed baseline artifact**: `analytics/baselines/eta_naive_baseline.csv` (749,905 samples, 237,771 scored underway). The naive `great_circle/SOG` model reproduces the roadmap's signature on high-fidelity labels - excellent short range, optimistic at long lead:
 
-| lead | med \|err\| | bias | reading |
-|---|--:|--:|---|
-| 0-6h | 0.86h | +0.17 | excellent |
-| 6-12h | 3.85h | -2.51 | good |
-| 12-24h | 11.8h | -11.2 | weak |
-| 24-48h | 28.5h | -28.3 | optimistic, unusable |
-| 48h+ | 52.5h | -52.4 | unusable |
+| lead | med \|err\| (all) | bias | chokepoint med \|err\| | reading |
+|---|--:|--:|--:|---|
+| 0-6h | 0.67h | +0.02 | 0.45h | excellent |
+| 6-12h | 3.63h | -2.74 | 1.71h | good |
+| 12-24h | 12.6h | -12.3 | 11.4h | weak |
+| 24-48h | 29.5h | -29.4 | 30.6h | optimistic, unusable |
+| 48h+ | 53.7h | -53.7 | 53.7h | unusable |
 
-**Known limitation (flagged, not papered over)**: chokepoint arrival labels have a ~53nm median closest-approach distance because the AIS subscription bboxes (in `ais/regions.py`) are basin-wide, not tight to the strait. Port/anchorage labels are tight (5.5nm median). Tightening chokepoint boxes is a data-definition follow-up, not solvable by a magic constant. Cross-check vs existing `transit_events`: distinct-vessel counts agree well where boxes are tight (Dover 2085 mined vs 2091 transit vessels).
+Label quality after the gate fix: chokepoint closest-approach median **3.7nm** (was 53.6nm with basin centroids), port/anchorage **5.5nm**; `laden` distribution realistic (20k laden / 7k ballast / 7k unknown, vs the all-laden bug before using global max draught).
 
-**Tests**: `tests/test_eta.py` (8 tests) - seeded temp DuckDB with one approach that reaches a target and one that never does; asserts the miner finds exactly the real arrival (laden flag, approach-precedes-arrival), miner idempotency, harness math on an ideal constant-speed straight-line approach (naive ETA == true remaining, |err| < 0.25h), lead-bucket edges, and no-leakage voyage split. Full backend suite green (345 passed).
+**Tests**: `tests/test_eta.py` (11 tests) - seeded temp DuckDB; asserts the miner finds exactly the real arrival, miner idempotency, chokepoints anchored to real gate coords with uniform reach, ports de-duped but chokepoints exempt, `laden` uses global (not per-approach) max draught so a historically-laden VLCC arriving light reads ballast, the transit cross-check reports agreement, harness math on an ideal approach (naive ETA == true remaining, |err| < 0.25h), lead-bucket edges, and no-leakage voyage split. Full backend suite green (348 passed).
 
 ## 2026-06-25 - Landing page: front door for the hub
 

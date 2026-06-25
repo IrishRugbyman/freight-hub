@@ -136,13 +136,28 @@ def test_build_targets_chokepoints_and_canals():
     assert all(t["reach_nm"] > 0 for t in targets)
 
 
-def test_build_targets_dedupes_nearby():
+def test_chokepoints_anchored_to_real_gates():
+    # Each chokepoint target sits on its published gate coordinate (a fact, not a
+    # basin centroid) with the uniform transit-capture reach.
+    by_id = {t["target_id"]: t for t in el.build_targets()}
+    for cp, (lat, lon) in el._CHOKEPOINT_GATES.items():
+        t = by_id[f"cp:{cp}"]
+        assert (t["lat"], t["lon"]) == (lat, lon)
+        assert t["reach_nm"] == el._CHOKEPOINT_CAPTURE_NM
+
+
+def test_ports_deduped_but_chokepoints_exempt():
     targets = el.build_targets()
-    # No two kept targets sit within the dedupe radius of each other.
-    for i, a in enumerate(targets):
-        for b in targets[i + 1 :]:
+    ports = [t for t in targets if t["target_type"] == "port"]
+    # Ports are mutually de-duped...
+    for i, a in enumerate(ports):
+        for b in ports[i + 1 :]:
             d = el.haversine_nm(a["lat"], a["lon"], b["lat"], b["lon"])
             assert d >= el._TARGET_DEDUPE_NM, f"{a['target_id']} ~ {b['target_id']} = {d:.1f} nm"
+    # ...but a chokepoint near a port (e.g. Singapore gate vs Singapore anchorage)
+    # is intentionally NOT de-duped - they are distinct ETA targets.
+    assert "cp:singapore_malacca" in {t["target_id"] for t in targets}
+    assert any(t["target_id"].startswith("zone:singapore") for t in targets)
 
 
 # ---------------------------------------------------------------------------
@@ -172,6 +187,65 @@ def test_miner_idempotent(ais_db, analytics_conn):
     el.mine_arrivals(analytics_conn, q, targets=[_TARGET])
     el.mine_arrivals(analytics_conn, q, targets=[_TARGET])
     assert analytics_conn.execute("SELECT count(*) FROM eta_arrivals").fetchone()[0] == 1
+
+
+def test_laden_uses_global_max_draught_not_per_approach(tmp_path, analytics_conn):
+    # A ballast VLCC arrives at 12 m draught but has historically loaded to 22 m.
+    # Per-approach max (12) would wrongly read laden; the global max (22) reads
+    # ballast (12/22 = 0.55 <= 0.65). Two history fixes far away set the max.
+    db = tmp_path / "ais_positions.duckdb"
+    conn = duckdb.connect(str(db))
+    conn.execute(_AIS_SCHEMA)
+    approach = []
+    for i in range(11):
+        approach.append((
+            _T0 + timedelta(hours=i), 2001, "tanker", "VLCC", None,
+            0.0, -2.0 + 0.2 * i, 80, 330, 12.0, 0, 12.0, None,
+        ))
+    # Laden history elsewhere (outside the target radius) at 22 m draught.
+    history = [
+        (_T0 - timedelta(days=10), 2001, "tanker", "VLCC", None,
+         40.0, 40.0, 80, 330, 13.0, 0, 22.0, None),
+        (_T0 - timedelta(days=9), 2001, "tanker", "VLCC", None,
+         40.0, 40.0, 80, 330, 13.0, 0, 22.0, None),
+    ]
+    conn.executemany(
+        "INSERT INTO ais_snapshots VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", approach + history
+    )
+    conn.close()
+
+    el.mine_arrivals(analytics_conn, _ais_query_for(db), targets=[_TARGET])
+    laden = analytics_conn.execute("SELECT laden FROM eta_arrivals WHERE mmsi = 2001").fetchone()[0]
+    assert laden is False  # ballast: 12 m against a 22 m design proxy
+
+
+def test_cross_check_chokepoints(analytics_conn):
+    # Seed a chokepoint arrival + a transit_events row for the same vessel/strait;
+    # the cross-check should report perfect agreement (rel_diff 0).
+    analytics_conn.execute(
+        "INSERT OR REPLACE INTO eta_targets VALUES "
+        "('cp:hormuz','chokepoint','hormuz',26.57,56.25,30.0,false)"
+    )
+    analytics_conn.execute(
+        "INSERT OR REPLACE INTO eta_arrivals VALUES "
+        "(3001,'cp:hormuz',?,5.0,'VLCC',true,?)",
+        [_T0, _T0 - timedelta(hours=3)],
+    )
+    analytics_conn.execute(
+        "CREATE TABLE IF NOT EXISTS transit_events ("
+        "mmsi BIGINT, chokepoint VARCHAR, entered_ts TIMESTAMP, exited_ts TIMESTAMP, "
+        "direction VARCHAR, kind VARCHAR, segment VARCHAR, laden BOOLEAN)"
+    )
+    analytics_conn.execute(
+        "INSERT INTO transit_events VALUES "
+        "(3001,'hormuz',?,?,'outbound','tanker','VLCC',true)",
+        [_T0 - timedelta(hours=2), _T0 - timedelta(hours=1)],
+    )
+    df = el.cross_check_chokepoints(analytics_conn)
+    hormuz = df[df["cp"] == "hormuz"].iloc[0]
+    assert hormuz["eta_vessels"] == 1
+    assert hormuz["transit_vessels"] == 1
+    assert hormuz["rel_diff"] == 0.0
 
 
 # ---------------------------------------------------------------------------

@@ -31,8 +31,8 @@ from pathlib import Path
 import duckdb
 import numpy as np
 import pandas as pd
-from ais.regions import REGIONS
 
+from analytics.detect import laden_status
 from analytics.zones import ANCHORAGE_ZONES
 
 log = logging.getLogger(__name__)
@@ -50,27 +50,44 @@ ANALYTICS_DB = Path(os.environ.get("ANALYTICS_DB", str(_DEFAULT_ANALYTICS_DB)))
 # Earliest snapshot to consider (collector started 2026-06; cheap lower bound).
 _HISTORY_FLOOR = datetime(2026, 1, 1)
 
-# The 9 transit chokepoints, keyed to their region bbox in regions.py.
-_CHOKEPOINTS = [
-    "singapore_malacca",
-    "suez",
-    "hormuz",
-    "panama",
-    "gibraltar",
-    "bosphorus_dardanelles",
-    "dover_channel",
-    "cape_good_hope",
-    "bab_el_mandeb",
-]
+# The 9 transit chokepoints. The AIS subscription bboxes in regions.py are
+# basin-wide (Malacca's box spans the whole Singapore basin), so their centroids
+# sit tens-to-hundreds of nm from where ships actually transit - an early miner
+# run confirmed a ~53 nm median closest-approach when anchored to box centroids.
+# We instead anchor each ETA target to the real transit GATE: the published
+# coordinate of the narrows ships physically pass through. These are geographic
+# facts (chokepoint locations), not tuning knobs.
+#   key -> (gate_lat, gate_lon)   [region key kept for the transit_events cross-check]
+_CHOKEPOINT_GATES: dict[str, tuple[float, float]] = {
+    "singapore_malacca": (1.23, 103.83),       # Singapore Strait narrows
+    "suez": (30.50, 32.34),                     # Suez Canal (Ismailia reach)
+    "hormuz": (26.57, 56.25),                   # Strait of Hormuz narrowest
+    "panama": (9.12, -79.75),                   # Panama Canal (Gatun-Pacific axis)
+    "gibraltar": (35.95, -5.50),               # Strait of Gibraltar narrows
+    "bosphorus_dardanelles": (41.05, 29.03),    # Bosphorus narrows
+    "dover_channel": (51.00, 1.50),            # Dover Strait
+    "cape_good_hope": (-34.45, 18.30),         # Cape of Good Hope rounding lane (AIS-validated)
+    "bab_el_mandeb": (12.58, 43.33),           # Bab-el-Mandeb (Perim) narrows
+}
+_CHOKEPOINTS = list(_CHOKEPOINT_GATES)
 # Canals add transit + queue dwell (used from Phase C); only true canals here.
 _CANALS = {"suez", "panama"}
+
+# Single documented transit-capture radius: a vessel within this of the gate is
+# committed to / executing the transit. 30 nm covers the widest strait approaches
+# (Hormuz/Malacca) and Cape rounding while staying tight enough that closest
+# approach means "at the gate", not "somewhere in the basin". One physically
+# meaningful knob, applied uniformly - not a per-target fudge.
+_CHOKEPOINT_CAPTURE_NM = 30.0
 
 # Point-port arrival radii (nm). Anchorage zones derive reach from their bbox.
 _PORT_REACH_NM = 15.0
 _LNG_REACH_NM = 25.0
 
-# Two targets closer than this (nm) are treated as the same place; the earlier
-# one in seeding order wins (chokepoints, then bbox anchorages, then points).
+# Two PORTS closer than this (nm) are the same place (e.g. the Rotterdam anchorage
+# zone vs the Rotterdam point terminal); the earlier-seeded one wins. Chokepoints
+# are never de-duped against ports - a strait gate and a nearby anchorage are
+# genuinely distinct ETA targets (e.g. Suez gate vs Suez Roads waiting anchorage).
 _TARGET_DEDUPE_NM = 20.0
 
 # Arrival-miner tuning.
@@ -156,22 +173,6 @@ def _bbox_half_diag_nm(bbox: list[list[float]]) -> float:
     return haversine_nm(lat_min, lon_min, lat_max, lon_max) / 2.0
 
 
-def _bbox_cross_half_width_nm(bbox: list[list[float]]) -> float:
-    """Half the *shorter* side of the bbox (nm).
-
-    A chokepoint region box is a corridor: a long axis along the transit
-    direction and a short axis across the strait. The half-diagonal is dominated
-    by the long approach axis, so it would count a vessel hundreds of nm up the
-    corridor as 'arrived'. The cross-strait half-width is the geometrically
-    meaningful 'I am at the strait' radius, and it falls straight out of each
-    chokepoint's own box - no per-strait constant.
-    """
-    (lat_min, lon_min), (lat_max, lon_max) = bbox[0], bbox[1]
-    lat_side = haversine_nm(lat_min, lon_min, lat_max, lon_min)  # N-S extent
-    lon_side = haversine_nm(lat_min, lon_min, lat_min, lon_max)  # E-W extent
-    return min(lat_side, lon_side) / 2.0
-
-
 def _zone_to_bbox(z: tuple[tuple[float, float], tuple[float, float]]) -> list[list[float]]:
     (lat_min, lon_min), (lat_max, lon_max) = z
     return [[lat_min, lon_min], [lat_max, lon_max]]
@@ -243,34 +244,33 @@ def _curated_port_points() -> list[dict]:
 
 
 def build_targets() -> list[dict]:
-    """Return the de-duplicated ETA target list (deterministic order).
+    """Return the ETA target list (deterministic order).
 
-    Seeding priority (earlier wins on a < _TARGET_DEDUPE_NM clash):
-      1. 9 chokepoints  - region-bbox centroid, half-diagonal reach.
-      2. anchorage zones - bbox centroid, half-diagonal reach (proper geometry).
-      3. curated point ports / LNG terminals - fixed reach.
+    - All 9 chokepoints are kept unconditionally, anchored to their real transit
+      GATE coordinate (not the basin-bbox centroid) with a uniform capture reach.
+    - Ports (anchorage zones, then curated point terminals) are de-duped *among
+      themselves* within _TARGET_DEDUPE_NM (e.g. zone-Rotterdam vs point-Rotterdam);
+      a port is never de-duped against a chokepoint.
     """
-    candidates: list[dict] = []
-
-    for cp in _CHOKEPOINTS:
-        bbox = REGIONS[cp]
-        lat, lon = _bbox_centroid(bbox)
-        candidates.append(
+    chokepoints: list[dict] = []
+    for cp, (lat, lon) in _CHOKEPOINT_GATES.items():
+        chokepoints.append(
             {
                 "target_id": f"cp:{cp}",
                 "target_type": "chokepoint",
                 "name": cp,
                 "lat": lat,
                 "lon": lon,
-                "reach_nm": round(_bbox_cross_half_width_nm(bbox), 2),
+                "reach_nm": _CHOKEPOINT_CAPTURE_NM,
                 "is_canal": cp in _CANALS,
             }
         )
 
+    port_candidates: list[dict] = []
     for zname, z in ANCHORAGE_ZONES.items():
         bbox = _zone_to_bbox(z)
         lat, lon = _bbox_centroid(bbox)
-        candidates.append(
+        port_candidates.append(
             {
                 "target_id": f"zone:{zname}",
                 "target_type": "port",
@@ -281,20 +281,20 @@ def build_targets() -> list[dict]:
                 "is_canal": False,
             }
         )
+    port_candidates.extend(_curated_port_points())
 
-    candidates.extend(_curated_port_points())
-
-    # Greedy de-dupe: drop any candidate within _TARGET_DEDUPE_NM of one already kept.
-    kept: list[dict] = []
-    for c in candidates:
+    # Greedy de-dupe among ports only.
+    ports: list[dict] = []
+    for c in port_candidates:
         clash = any(
-            haversine_nm(c["lat"], c["lon"], k["lat"], k["lon"]) < _TARGET_DEDUPE_NM for k in kept
+            haversine_nm(c["lat"], c["lon"], k["lat"], k["lon"]) < _TARGET_DEDUPE_NM for k in ports
         )
         if not clash:
-            kept.append(c)
+            ports.append(c)
         else:
-            log.debug("target %s de-duped against a nearer existing target", c["target_id"])
-    return kept
+            log.debug("port %s de-duped against a nearer existing port", c["target_id"])
+
+    return chokepoints + ports
 
 
 def seed_targets(conn: duckdb.DuckDBPyConnection) -> int:
@@ -324,28 +324,26 @@ def seed_targets(conn: duckdb.DuckDBPyConnection) -> int:
 # Arrival miner
 # ---------------------------------------------------------------------------
 
-# Minimal laden classifier (avoids importing the full detect module; mirrors its
-# 0.8 / 0.65 ratio thresholds against a per-approach max draught proxy).
-_LADEN_RATIO = 0.8
-_BALLAST_RATIO = 0.65
+def _laden_bool(draught: float | None, max_seen: float | None, segment: str | None) -> bool | None:
+    """Map detect.laden_status' 'laden'/'ballast'/'unknown' to True/False/None.
 
-
-def _laden_bool(draught: float | None, max_seen: float | None) -> bool | None:
-    if draught is None or draught <= 0 or not max_seen or max_seen <= 0:
-        return None
-    ratio = draught / max_seen
-    if ratio >= _LADEN_RATIO:
+    `max_seen` must be the vessel's GLOBAL max draught (its design-draught proxy),
+    not a per-approach max - within one approach draught is ~constant, so a
+    per-approach max would force every ratio to ~1 and label everything laden.
+    """
+    status = laden_status(draught, max_seen, segment)
+    if status == "laden":
         return True
-    if ratio <= _BALLAST_RATIO:
+    if status == "ballast":
         return False
     return None
 
 
-def _mine_target(df: pd.DataFrame, target: dict) -> list[dict]:
+def _mine_target(df: pd.DataFrame, target: dict, max_draught_by_mmsi: dict[int, float]) -> list[dict]:
     """Mine arrivals for one target from its pre-filtered snapshot frame.
 
     `df` must already be limited to fixes near the target and carry a `dist_nm`
-    column (distance to the centroid). Returns one row per distinct approach.
+    column (distance to the gate/centroid). Returns one row per distinct approach.
     """
     reach = float(target["reach_nm"])
     qualify = reach + _REACH_MARGIN_NM
@@ -373,24 +371,17 @@ def _mine_target(df: pd.DataFrame, target: dict) -> list[dict]:
                 continue
             arr = ep.iloc[i_min]
             seg = arr.get("segment")
-            max_seen = None
-            if "draught" in ep.columns:
-                dvals = ep["draught"].dropna()
-                dvals = dvals[dvals > 0]
-                if not dvals.empty:
-                    max_seen = float(dvals.max())
+            seg = str(seg) if seg is not None and pd.notna(seg) else None
             draught = arr.get("draught")
+            draught = float(draught) if draught is not None and pd.notna(draught) else None
             out.append(
                 {
                     "mmsi": int(mmsi),
                     "target_id": target["target_id"],
                     "arrival_ts": arr["snapshot_ts"].to_pydatetime(),
                     "min_dist_nm": round(min_dist, 3),
-                    "segment": str(seg) if seg is not None and pd.notna(seg) else None,
-                    "laden": _laden_bool(
-                        float(draught) if draught is not None and pd.notna(draught) else None,
-                        max_seen,
-                    ),
+                    "segment": seg,
+                    "laden": _laden_bool(draught, max_draught_by_mmsi.get(int(mmsi)), seg),
                     "approach_start_ts": ep["snapshot_ts"].iloc[0].to_pydatetime(),
                 }
             )
@@ -413,6 +404,24 @@ def mine_arrivals(
         targets = build_targets()
     since = history_since or _HISTORY_FLOOR
 
+    # Vessel design-draught proxy = global max draught across ALL history. Used
+    # for laden/ballast at arrival (a per-approach max would read everything laden).
+    md = ais_query(
+        "SELECT mmsi, max(draught) AS m FROM ais_snapshots "
+        "WHERE draught IS NOT NULL AND draught > 0 GROUP BY mmsi"
+    )
+    max_draught_by_mmsi: dict[int, float] = (
+        {int(r.mmsi): float(r.m) for r in md.itertuples()} if md is not None and not md.empty else {}
+    )
+
+    # Full re-mine: clear prior arrivals for every target being mined first. The PK
+    # includes arrival_ts, so a changed gate (different closest-approach time) would
+    # otherwise leave old rows behind as stale duplicates instead of replacing them.
+    # Clearing up front also drops stale rows for a target that now yields nothing.
+    target_ids = [t["target_id"] for t in targets]
+    placeholders = ", ".join("?" for _ in target_ids)
+    conn.execute(f"DELETE FROM eta_arrivals WHERE target_id IN ({placeholders})", target_ids)
+
     total = 0
     for t in targets:
         reach = float(t["reach_nm"])
@@ -433,7 +442,7 @@ def mine_arrivals(
         df = df.copy()
         df["snapshot_ts"] = pd.to_datetime(df["snapshot_ts"])
         df["dist_nm"] = haversine_nm_vec(df["lat"].values, df["lon"].values, t["lat"], t["lon"])
-        rows = _mine_target(df, t)
+        rows = _mine_target(df, t, max_draught_by_mmsi)
         for r in rows:
             conn.execute(
                 "INSERT OR REPLACE INTO eta_arrivals "
@@ -452,8 +461,68 @@ def mine_arrivals(
         total += len(rows)
         if rows:
             log.info("target %s: %d arrivals", t["target_id"], len(rows))
-    log.info("mined %d eta_arrivals across %d targets", total, len(targets))
+    # Coverage transparency: a target with 0 arrivals is almost always a region the
+    # AIS collector does not yet feed (e.g. Hormuz, Bab-el-Mandeb, the Arabian Gulf
+    # and most Asia-Pacific boxes are not in the current free-tier subscription).
+    # These stay seeded as legal targets and populate as collector coverage grows.
+    empty = [t["target_id"] for t in targets if t["target_id"] not in _seen_target_ids(conn)]
+    if empty:
+        log.warning("%d/%d targets have 0 arrivals (likely no collector coverage): %s",
+                    len(empty), len(targets), ", ".join(empty))
+    log.info("mined %d eta_arrivals across %d targets (%d targets with data)",
+             total, len(targets), len(targets) - len(empty))
     return total
+
+
+def _seen_target_ids(conn: duckdb.DuckDBPyConnection) -> set[str]:
+    return {r[0] for r in conn.execute("SELECT DISTINCT target_id FROM eta_arrivals").fetchall()}
+
+
+# ---------------------------------------------------------------------------
+# Cross-check vs the independently-detected transit_events
+# ---------------------------------------------------------------------------
+
+# Mined chokepoint arrivals and transit_events are two independent views of the
+# same physical events; their per-chokepoint distinct-vessel counts should agree
+# to within this relative tolerance. A larger gap flags a gate mis-placement or a
+# detection regression worth investigating (logged, non-fatal).
+_CROSS_CHECK_TOL = 0.5
+
+
+def cross_check_chokepoints(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
+    """Compare mined chokepoint arrivals to transit_events by distinct-vessel count.
+
+    Returns a per-chokepoint frame (eta_vessels, transit_vessels, rel_diff) and
+    logs a warning for any chokepoint whose counts diverge beyond the tolerance.
+    """
+    try:
+        df = conn.execute(
+            "WITH e AS ("
+            "  SELECT replace(target_id, 'cp:', '') AS cp, count(DISTINCT mmsi) AS eta_vessels "
+            "  FROM eta_arrivals WHERE target_id LIKE 'cp:%' GROUP BY 1"
+            "), t AS ("
+            "  SELECT chokepoint AS cp, count(DISTINCT mmsi) AS transit_vessels "
+            "  FROM transit_events GROUP BY 1"
+            ") SELECT coalesce(e.cp, t.cp) AS cp, "
+            "         coalesce(eta_vessels, 0) AS eta_vessels, "
+            "         coalesce(transit_vessels, 0) AS transit_vessels "
+            "FROM e FULL OUTER JOIN t ON e.cp = t.cp ORDER BY 1"
+        ).df()
+    except duckdb.CatalogException:
+        log.info("cross-check skipped: transit_events not present")
+        return pd.DataFrame()
+    if df.empty:
+        return df
+
+    denom = df[["eta_vessels", "transit_vessels"]].max(axis=1).clip(lower=1)
+    df["rel_diff"] = (df["eta_vessels"] - df["transit_vessels"]).abs() / denom
+    for r in df.itertuples():
+        level = log.warning if r.rel_diff > _CROSS_CHECK_TOL else log.info
+        level(
+            "cross-check %s: eta=%d transit=%d rel_diff=%.0f%%",
+            r.cp, r.eta_vessels, r.transit_vessels, r.rel_diff * 100,
+        )
+    return df
 
 
 # ---------------------------------------------------------------------------
@@ -468,6 +537,7 @@ def run_in_conn(conn: duckdb.DuckDBPyConnection, ais_query, history_since=None) 
     """
     seed_targets(conn)
     mine_arrivals(conn, ais_query, history_since=history_since)
+    cross_check_chokepoints(conn)
 
 
 def _default_ais_query(sql: str, params: list | None = None) -> pd.DataFrame:
