@@ -1,5 +1,21 @@
 # Freight Hub Changelog
 
+## 2026-06-25 - European supply intelligence: inbound vessel forecast with cargo origin inference
+
+**New endpoint `/api/analytics/european-inbound`** (Phase 54):
+- 15 European energy import terminals: Rotterdam, Antwerp, Zeebrugge, Hamburg, Wilhelmshaven, Le Havre, Milford Haven, Fos-Marseille, Barcelona, Huelva, Sines, Genova, Trieste, Augusta, Algeciras, Gdansk
+- Origin inference from transit_events: Suez NB -> Middle East, Bosphorus S -> Black Sea, Cape NB -> East/long-haul, Malacca W -> Asia Pacific, Gibraltar E -> Atlantic/Americas
+- Returns: vessel list sorted by ETA, per-vessel DWT estimates (segment proxies), by_origin, by_port, eta_bucket aggregates
+- Live data: 266 vessels / 167 laden / 6.4M DWT inbound in 48h window
+
+**New `EuropeanInboundCard`** in Analytics Ports & Cargo tab (first card):
+- ETA timeline grouped 0-6h / 6-12h / 12-24h / 24-48h with vessel count per bucket
+- Origin badges colour-coded by loading region (amber=Middle East, purple=Black Sea, green=W Africa, blue=Americas, teal=Asia Pacific)
+- Laden-only filter, horizon selector (24h / 48h / 72h)
+- Sidebar: origin breakdown with mini bars, port count list
+
+**Tests**: 6 new pytest tests. Full suite 332 passed.
+
 ## 2026-06-22 - Straight-line fallback routes for remaining US pipelines (+11 routes, 433/618 total)
 
 **Routes added (via new `ingest_wm_straightline_routes.py`, 2-point routes from pipeline_registry start_lat/lon and end_lat/lon, stored in eia_oil_pipeline_routes, 72 total there):**
