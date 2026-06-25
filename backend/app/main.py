@@ -5689,6 +5689,19 @@ _EUR_TERMINALS: dict[str, dict] = {
         "lat": 54.40, "lon": 18.66, "region": "Baltic",
         "aliases": ["PLGDN", "GDANSK", "GDYNIA", "PL GDN", "GDYNIA"],
     },
+    # UK terminals (LNG + crude)
+    "Immingham": {
+        "lat": 53.62, "lon": -0.19, "region": "NW Europe",
+        "aliases": ["GBIMM", "IMMINGHAM", "HUMBER"],
+    },
+    "Grangemouth": {
+        "lat": 56.02, "lon": -3.72, "region": "NW Europe",
+        "aliases": ["GBGMO", "GRANGEMOUTH", "HOUND POINT", "FORTH"],
+    },
+    "Teesside": {
+        "lat": 54.62, "lon": -1.16, "region": "NW Europe",
+        "aliases": ["GBTES", "TEESSIDE", "TEES", "MIDDLESBROUGH"],
+    },
 }
 
 # Pre-built flat lookup: normalised alias -> port name
@@ -5717,16 +5730,23 @@ def _match_eur_port(destination: str | None) -> str | None:
 # Chosen as ~1.5x the typical sailing time from load zone to that chokepoint.
 _ORIGIN_CHOKEPOINTS: list[dict] = [
     # chokepoint, direction (None = any), laden_required, label, via_label, lookback_days
+    # Order matters: first match wins. Higher-confidence rules go first.
     {"cp": "suez",                   "dir": "northbound", "laden": True,
-     "origin": "Middle East",        "via": "Suez NB",   "days": 18},
+     "origin": "Middle East",        "via": "Suez NB",   "days": 21},
     {"cp": "bosphorus_dardanelles",  "dir": "southbound", "laden": True,
-     "origin": "Black Sea",          "via": "Bosphorus S", "days": 10},
+     "origin": "Black Sea",          "via": "Bosphorus S", "days": 14},
     {"cp": "cape_good_hope",         "dir": "northbound", "laden": True,
      "origin": "East / Long-haul",   "via": "Cape NB",   "days": 45},
     {"cp": "singapore_malacca",      "dir": "westbound",  "laden": True,
      "origin": "Asia Pacific",       "via": "Malacca W", "days": 35},
+    # Gibraltar E = vessel entering Med from Atlantic -> Atlantic loading (Americas, W Africa)
     {"cp": "gibraltar",              "dir": "eastbound",  "laden": True,
-     "origin": "Atlantic / Americas","via": "Gibraltar E","days": 6},
+     "origin": "Atlantic",           "via": "Gibraltar E","days": 8},
+    # Dover Channel E (laden) = vessel entering North Sea from the Atlantic side
+    # -> loaded in the Americas, West Africa, or directly from a North Atlantic field.
+    # Less precise than Suez but useful when no other signal is available.
+    {"cp": "dover_channel",          "dir": "eastbound",  "laden": True,
+     "origin": "Atlantic",           "via": "Dover E",   "days": 3},
 ]
 
 # AIS region -> origin label (fallback when no transit found)
