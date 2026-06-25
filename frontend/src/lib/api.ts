@@ -2022,3 +2022,44 @@ export function useOwnerFleetStatus(kind?: string, minVessels = 1, limit = 30) {
     refetchInterval: 5 * 60_000,
   })
 }
+
+// Phase 54: European Supply Intelligence
+export interface EuropeanInboundVessel {
+  mmsi: number
+  name: string | null
+  segment: string | null
+  kind: string | null
+  laden: string | null
+  eta_hours: number
+  distance_nm: number
+  sog: number
+  port: string
+  port_region: string
+  destination_raw: string | null
+  inferred_origin: string | null
+  inferred_via: string | null
+  dwt_estimate: number | null
+  registry_risk: number | null
+}
+
+export interface EuropeanInboundResponse {
+  as_of: string
+  horizon_h: number
+  total_vessels: number
+  total_laden: number
+  total_dwt_laden: number
+  vessels: EuropeanInboundVessel[]
+  by_origin: Record<string, number>
+  by_port: Record<string, number>
+  eta_buckets: Record<string, number>
+}
+
+export function useEuropeanInbound(horizonH = 48, ladenOnly = false) {
+  const qs = new URLSearchParams({ horizon_h: String(horizonH), laden_only: String(ladenOnly) })
+  return useQuery({
+    queryKey: ['european-inbound', horizonH, ladenOnly],
+    queryFn: () => getJSON<EuropeanInboundResponse>(`/api/analytics/european-inbound?${qs}`),
+    staleTime: 4 * 60_000,
+    refetchInterval: 4 * 60_000,
+  })
+}

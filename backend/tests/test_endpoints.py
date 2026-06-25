@@ -4657,3 +4657,119 @@ def test_owner_fleet_status_kind_filter(owner_fleet_client):
     owner_names = {row["owner"] for row in d["rows"]}
     assert "SHADOW FLEET LLC" in owner_names
     assert "CLEAN OWNER PTE" not in owner_names
+
+
+# ---------------------------------------------------------------------------
+# Phase 54: European Supply Intelligence
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def eur_inbound_client(tmp_path, monkeypatch):
+    """Fixture: tankers heading to Rotterdam (NW Europe) and Trieste (Med)."""
+    import duckdb
+    from fastapi.testclient import TestClient
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+    ais_file = tmp_path / "ais_eur.duckdb"
+    conn = duckdb.connect(str(ais_file))
+    conn.execute("""
+    CREATE TABLE live_positions (
+        mmsi BIGINT PRIMARY KEY, name VARCHAR, lat DOUBLE, lon DOUBLE,
+        sog DOUBLE, cog DOUBLE, heading DOUBLE, destination VARCHAR,
+        ship_type INTEGER, length_m DOUBLE, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, updated_ts TIMESTAMP,
+        imo BIGINT, draught DOUBLE, nav_status INTEGER, eta VARCHAR
+    );
+    """)
+    # Aframax heading Rotterdam from ~200nm, should appear
+    # VLCC heading Rotterdam, far out (>48h at 8kn) - excluded by default 48h horizon
+    # Suezmax heading Trieste
+    conn.executemany("INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [
+        (7001, "EUR A", 49.5, 3.5, 12.0, 60.0, 60.0, "NLRTM", 80, 330.0, "tanker", "Aframax", "north_sea", now, 9001, 20.0, 0, None),
+        (7002, "EUR B", 30.0, -5.0, 8.0, 45.0, 45.0, "ROTTERDAM", 80, 300.0, "tanker", "VLCC", "west_africa", now, 9002, 15.0, 0, None),
+        (7003, "EUR C", 40.0, 12.0, 11.0, 90.0, 90.0, "ITTRS",  80, 200.0, "tanker", "Suezmax", "med", now, 9003, 22.0, 0, None),
+    ])
+    conn.close()
+
+    analytics_file = tmp_path / "analytics_eur.duckdb"
+    ac = duckdb.connect(str(analytics_file))
+    ac.execute("CREATE TABLE vessel_state (mmsi BIGINT PRIMARY KEY, laden VARCHAR, last_draught DOUBLE, max_draught_seen DOUBLE, updated_ts TIMESTAMP)")
+    ac.executemany("INSERT INTO vessel_state VALUES (?,?,?,?,?)", [
+        (7001, "laden",   20.0, 22.0, now),
+        (7002, "laden",   15.0, 22.0, now),
+        (7003, "ballast", 10.0, 22.0, now),
+    ])
+    # Add transit event: vessel 7001 transited Suez northbound laden 10 days ago
+    ac.execute("""CREATE TABLE transit_events (
+        mmsi BIGINT, chokepoint VARCHAR, entered_ts TIMESTAMP, exited_ts TIMESTAMP,
+        direction VARCHAR, kind VARCHAR, segment VARCHAR, laden BOOLEAN,
+        PRIMARY KEY (mmsi, chokepoint, entered_ts)
+    )""")
+    suez_ts = now - timedelta(days=10)
+    ac.executemany("INSERT INTO transit_events VALUES (?,?,?,?,?,?,?,?)", [
+        (7001, "suez", suez_ts, suez_ts + timedelta(hours=12), "northbound", "tanker", "Aframax", True),
+    ])
+    ac.close()
+
+    registry_file = tmp_path / "registry_eur.duckdb"
+    rc = duckdb.connect(str(registry_file))
+    rc.execute("CREATE TABLE vessel_registry (imo BIGINT PRIMARY KEY, risk_score INTEGER, fetch_ok BOOLEAN)")
+    rc.close()
+
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
+    monkeypatch.setenv("ANALYTICS_DB", str(analytics_file))
+    monkeypatch.setenv("REGISTRY_DB", str(registry_file))
+    from app.main import app
+    return TestClient(app)
+
+
+def test_european_inbound_structure(eur_inbound_client):
+    r = eur_inbound_client.get("/api/analytics/european-inbound?horizon_h=48")
+    assert r.status_code == 200
+    d = r.json()
+    for key in ("total_vessels", "total_laden", "total_dwt_laden", "vessels", "by_origin", "by_port", "eta_buckets"):
+        assert key in d
+
+
+def test_european_inbound_rotterdam_appears(eur_inbound_client):
+    r = eur_inbound_client.get("/api/analytics/european-inbound?horizon_h=48")
+    d = r.json()
+    mmsis = [v["mmsi"] for v in d["vessels"]]
+    assert 7001 in mmsis, "Aframax heading Rotterdam should appear within 48h horizon"
+    rdam_vessel = next(v for v in d["vessels"] if v["mmsi"] == 7001)
+    assert rdam_vessel["port"] == "Rotterdam"
+    assert rdam_vessel["port_region"] == "NW Europe"
+    assert rdam_vessel["laden"] == "laden"
+
+
+def test_european_inbound_origin_inference(eur_inbound_client):
+    r = eur_inbound_client.get("/api/analytics/european-inbound?horizon_h=48")
+    d = r.json()
+    aframax = next((v for v in d["vessels"] if v["mmsi"] == 7001), None)
+    assert aframax is not None
+    assert aframax["inferred_origin"] == "Middle East", "Suez NB transit should infer Middle East origin"
+    assert aframax["inferred_via"] == "Suez NB"
+
+
+def test_european_inbound_horizon_excludes_far(eur_inbound_client):
+    # VLCC at 8kn from lat=30 is ~1500nm -> ~187h, far beyond any horizon
+    r = eur_inbound_client.get("/api/analytics/european-inbound?horizon_h=48")
+    d = r.json()
+    mmsis = [v["mmsi"] for v in d["vessels"]]
+    assert 7002 not in mmsis, "VLCC > 48h should be excluded"
+
+
+def test_european_inbound_dwt_estimate(eur_inbound_client):
+    r = eur_inbound_client.get("/api/analytics/european-inbound?horizon_h=48")
+    d = r.json()
+    aframax = next((v for v in d["vessels"] if v["mmsi"] == 7001), None)
+    assert aframax is not None
+    assert aframax["dwt_estimate"] == 105_000, "Aframax DWT should be 105000"
+
+
+def test_european_inbound_laden_only_filter(eur_inbound_client):
+    r = eur_inbound_client.get("/api/analytics/european-inbound?horizon_h=120&laden_only=true")
+    d = r.json()
+    for v in d["vessels"]:
+        assert v["laden"] == "laden", "laden_only filter should exclude non-laden vessels"

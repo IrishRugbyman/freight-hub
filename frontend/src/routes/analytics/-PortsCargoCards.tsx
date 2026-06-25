@@ -8,7 +8,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   usePortArrivals, usePortFlow, usePortCongestion, useAnchorageOccupancy,
   useTradeLaneMatrix, useDestinationFlows, useCargoTransitions,
-  useCargoStateChanges, useLaden, useDensity,
+  useCargoStateChanges, useLaden, useDensity, useEuropeanInbound,
+  type EuropeanInboundVessel,
 } from '@/lib/api'
 import { fmt, EmptyState, TOOLTIP_STYLE, LEGEND_STYLE, REGION_LABELS } from './-analyticsShared'
 
@@ -915,11 +916,277 @@ export function DensityCard() {
 }
 
 // ---------------------------------------------------------------------------
+// European Supply Intelligence card (Phase 54)
+// ---------------------------------------------------------------------------
+
+const ORIGIN_COLORS: Record<string, string> = {
+  'Middle East':        'bg-amber-500/20 text-amber-300 border-amber-500/30',
+  'Black Sea':          'bg-purple-500/20 text-purple-300 border-purple-500/30',
+  'West Africa':        'bg-green-500/20 text-green-300 border-green-500/30',
+  'Americas':           'bg-blue-500/20 text-blue-300 border-blue-500/30',
+  'Atlantic / Americas':'bg-blue-500/20 text-blue-300 border-blue-500/30',
+  'Asia Pacific':       'bg-teal-500/20 text-teal-300 border-teal-500/30',
+  'East / Long-haul':   'bg-cyan-500/20 text-cyan-300 border-cyan-500/30',
+}
+const ORIGIN_DEFAULT = 'bg-muted text-muted-foreground border-border'
+
+function OriginBadge({ origin }: { origin: string | null }) {
+  if (!origin) return null
+  const cls = ORIGIN_COLORS[origin] ?? ORIGIN_DEFAULT
+  return (
+    <span className={`shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${cls}`}>
+      {origin}
+    </span>
+  )
+}
+
+const LADEN_COLORS: Record<string, string> = {
+  laden:   'text-emerald-400',
+  ballast: 'text-muted-foreground',
+  unknown: 'text-muted-foreground/50',
+}
+
+const ETA_BUCKET_ORDER = ['0-6h', '6-12h', '12-24h', '24-48h']
+
+function EtaBucketGroup({
+  bucket,
+  vessels,
+  onSelect,
+}: {
+  bucket: string
+  vessels: EuropeanInboundVessel[]
+  onSelect: (mmsi: number) => void
+}) {
+  if (vessels.length === 0) return null
+  return (
+    <div>
+      <div className="sticky top-0 bg-background/90 px-0 py-1 text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-widest">
+        {bucket}
+        <span className="ml-1.5 rounded bg-muted px-1 py-px text-[9px] font-normal">
+          {vessels.length}
+        </span>
+      </div>
+      <div className="space-y-px">
+        {vessels.map(v => (
+          <button
+            key={v.mmsi}
+            onClick={() => onSelect(v.mmsi)}
+            className="flex w-full items-center gap-2 rounded px-1.5 py-1.5 text-left hover:bg-muted/30 transition-colors"
+          >
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 truncate">
+                <span className="truncate text-xs font-medium">{v.name ?? `MMSI ${v.mmsi}`}</span>
+                <span className="shrink-0 rounded bg-muted px-1 py-px text-[9px] text-muted-foreground">
+                  {v.segment}
+                </span>
+                {v.inferred_origin && <OriginBadge origin={v.inferred_origin} />}
+              </div>
+              <div className="mt-0.5 flex items-center gap-2 text-[10px] text-muted-foreground">
+                <span className="font-medium text-foreground/70">{v.port}</span>
+                <span className="text-muted-foreground/40">|</span>
+                <span className={LADEN_COLORS[v.laden ?? 'unknown'] ?? 'text-muted-foreground'}>
+                  {v.laden ?? 'unknown'}
+                </span>
+                {v.dwt_estimate != null && v.laden === 'laden' && (
+                  <>
+                    <span className="text-muted-foreground/40">|</span>
+                    <span>{(v.dwt_estimate / 1000).toFixed(0)}k DWT</span>
+                  </>
+                )}
+                {v.inferred_via && (
+                  <>
+                    <span className="text-muted-foreground/40">|</span>
+                    <span className="text-muted-foreground/60">via {v.inferred_via}</span>
+                  </>
+                )}
+              </div>
+            </div>
+            <div className="shrink-0 text-right text-[10px] tabular-nums">
+              <span className="font-semibold text-foreground/80">{v.eta_hours.toFixed(1)}h</span>
+              <div className="text-muted-foreground/50">{v.sog.toFixed(1)} kn</div>
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function OriginBreakdown({ byOrigin }: { byOrigin: Record<string, number> }) {
+  const total = Object.values(byOrigin).reduce((a, b) => a + b, 0)
+  if (total === 0) return null
+  const entries = Object.entries(byOrigin).filter(([, n]) => n > 0)
+  return (
+    <div className="flex flex-col gap-0.5">
+      {entries.map(([origin, count]) => {
+        const pct = Math.round((count / total) * 100)
+        const cls = ORIGIN_COLORS[origin] ? ORIGIN_COLORS[origin].split(' ')[1] : 'text-muted-foreground'
+        return (
+          <div key={origin} className="flex items-center gap-2 text-[10px]">
+            <div className="flex-1 min-w-0">
+              <div className="flex justify-between mb-0.5">
+                <span className="truncate text-muted-foreground">{origin}</span>
+                <span className={`font-mono ${cls}`}>{count}</span>
+              </div>
+              <div className="h-1 rounded-full bg-muted overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-current"
+                  style={{ width: `${pct}%`, color: ORIGIN_COLORS[origin]?.split(' ')[1]?.replace('text-', '') ?? '#6b7280' }}
+                />
+              </div>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+export function EuropeanInboundCard() {
+  const [horizonH, setHorizonH] = useState(48)
+  const [ladenOnly, setLadenOnly] = useState(false)
+  const { data, isLoading } = useEuropeanInbound(horizonH, ladenOnly)
+  const navigate = useNavigate()
+
+  function goToTracker(mmsi: number) {
+    const v = data?.vessels.find(x => x.mmsi === mmsi)
+    const search: Record<string, unknown> = { mmsi }
+    if (v?.eta_hours != null) {
+      // Not on the map yet (approaching), just navigate to tracker with mmsi pre-selected
+    }
+    navigate({ to: '/', search: search as never })
+  }
+
+  // Group vessels by ETA bucket
+  const bucketMap: Record<string, EuropeanInboundVessel[]> = {}
+  for (const v of data?.vessels ?? []) {
+    const b = v.eta_hours <= 6 ? '0-6h' : v.eta_hours <= 12 ? '6-12h' : v.eta_hours <= 24 ? '12-24h' : '24-48h'
+    if (!bucketMap[b]) bucketMap[b] = []
+    bucketMap[b].push(v)
+  }
+
+  const totalDwtK = data ? Math.round(data.total_dwt_laden / 1000) : 0
+  const knownOriginCount = data
+    ? Object.entries(data.by_origin).filter(([k]) => k !== 'Unknown').reduce((a, [, v]) => a + v, 0)
+    : 0
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <CardTitle className="text-sm">European Supply Intelligence</CardTitle>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Inbound vessel arrivals at European import terminals with cargo origin inference from transit history.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setLadenOnly(v => !v)}
+              className={`rounded border px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                ladenOnly
+                  ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-400'
+                  : 'border-border text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Laden only
+            </button>
+            <div className="flex rounded border border-border overflow-hidden text-[10px]">
+              {([24, 48, 72] as const).map(h => (
+                <button
+                  key={h}
+                  onClick={() => setHorizonH(h)}
+                  className={`px-2 py-1 transition-colors ${
+                    horizonH === h ? 'bg-primary/20 text-primary font-medium' : 'text-muted-foreground hover:bg-muted/40'
+                  }`}
+                >
+                  {h}h
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* KPI bar */}
+        {data && (
+          <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 border-t border-border/40 pt-2">
+            <div className="text-xs">
+              <span className="font-semibold tabular-nums text-foreground">{data.total_vessels}</span>
+              <span className="ml-1 text-muted-foreground">inbound</span>
+            </div>
+            <div className="text-xs">
+              <span className="font-semibold tabular-nums text-emerald-400">{data.total_laden}</span>
+              <span className="ml-1 text-muted-foreground">laden</span>
+            </div>
+            <div className="text-xs">
+              <span className="font-semibold tabular-nums text-foreground">{totalDwtK.toLocaleString()}k</span>
+              <span className="ml-1 text-muted-foreground">DWT laden</span>
+            </div>
+            {knownOriginCount > 0 && (
+              <div className="text-xs">
+                <span className="font-semibold tabular-nums text-foreground">{knownOriginCount}</span>
+                <span className="ml-1 text-muted-foreground">origins traced</span>
+              </div>
+            )}
+          </div>
+        )}
+      </CardHeader>
+
+      <CardContent className="pb-3">
+        {isLoading && <EmptyState message="Loading..." />}
+        {!isLoading && (!data || data.total_vessels === 0) && (
+          <EmptyState message="No inbound vessels in this window." />
+        )}
+        {data && data.total_vessels > 0 && (
+          <div className="flex gap-4">
+            {/* Vessel timeline */}
+            <div className="min-w-0 flex-1 max-h-[480px] overflow-y-auto space-y-3 pr-1">
+              {ETA_BUCKET_ORDER.map(bucket => (
+                <EtaBucketGroup
+                  key={bucket}
+                  bucket={bucket}
+                  vessels={bucketMap[bucket] ?? []}
+                  onSelect={goToTracker}
+                />
+              ))}
+            </div>
+
+            {/* Right sidebar: origin breakdown + top ports */}
+            <div className="w-36 shrink-0 space-y-4">
+              <div>
+                <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Origin
+                </div>
+                <OriginBreakdown byOrigin={data.by_origin} />
+              </div>
+              <div>
+                <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Port
+                </div>
+                <div className="space-y-0.5">
+                  {Object.entries(data.by_port).slice(0, 8).map(([port, count]) => (
+                    <div key={port} className="flex items-center justify-between text-[10px]">
+                      <span className="truncate text-muted-foreground">{port}</span>
+                      <span className="ml-1 font-mono tabular-nums">{count}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Default export: Ports & Cargo tab component
 // ---------------------------------------------------------------------------
 export default function PortsCargoTab() {
   return (
     <div className="space-y-6">
+      <EuropeanInboundCard />
       <PortArrivalForecastCard />
       <PortFlowCard />
       <PortCongestionCard />

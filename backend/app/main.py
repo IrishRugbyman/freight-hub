@@ -139,6 +139,8 @@ from .schemas import (
     PipelinesResponse,
     OwnerFleetStatusRow,
     OwnerFleetStatusResponse,
+    EuropeanInboundVessel,
+    EuropeanInboundResponse,
 )
 
 _STATIC = Path(__file__).parent / "static"
@@ -5607,3 +5609,373 @@ def get_pipelines(disrupted_only: bool = True):
     )
     _pipelines_cache[disrupted_only] = (now, result)
     return result
+
+
+# ---------------------------------------------------------------------------
+# Phase 54: European Supply Intelligence
+# Laden vessel arrival forecast for European import terminals with cargo origin
+# inference from recent chokepoint transit history.
+# ---------------------------------------------------------------------------
+
+# Major European energy import terminals (crude + products + LNG).
+# Separate from _CURATED_PORTS (global) so port-arrivals is unaffected.
+_EUR_TERMINALS: dict[str, dict] = {
+    # NW Europe
+    "Rotterdam": {
+        "lat": 51.96, "lon": 4.10, "region": "NW Europe",
+        "aliases": ["NLRTM", "ROTTERDAM", "AMSTERDAM", "NLAMS", "NL RTM", "EUROPOORT",
+                    "DORDRECHT", "PERNIS", "BOTLEK"],
+    },
+    "Antwerp": {
+        "lat": 51.26, "lon": 4.40, "region": "NW Europe",
+        "aliases": ["BEANR", "ANTWERPEN", "ANTWERP", "GENT", "GHENT", "BE ANR"],
+    },
+    "Zeebrugge": {
+        "lat": 51.35, "lon": 3.20, "region": "NW Europe",
+        "aliases": ["BEZEE", "ZEEBRUGGE", "BE ZEE", "ZEEBRUGE"],
+    },
+    "Hamburg": {
+        "lat": 53.53, "lon": 9.97, "region": "NW Europe",
+        "aliases": ["DEHAM", "HAMBURG", "DE HAM", "BRUNSBUETEL", "BRUNSBÜTTEL"],
+    },
+    "Wilhelmshaven": {
+        "lat": 53.52, "lon": 8.16, "region": "NW Europe",
+        "aliases": ["DEWVN", "WILHELMSHAVEN", "WILHELMSH"],
+    },
+    "Le Havre": {
+        "lat": 49.49, "lon": 0.11, "region": "NW Europe",
+        "aliases": ["FRLEH", "LE HAVRE", "LEHAVRE", "HAVRE"],
+    },
+    "Milford Haven": {
+        "lat": 51.71, "lon": -5.03, "region": "NW Europe",
+        "aliases": ["GBMFH", "MILFORD HAVEN", "MILFORDHAVEN", "PEMBROKE", "SOUTH HOOK"],
+    },
+    # Mediterranean
+    "Fos-Marseille": {
+        "lat": 43.40, "lon": 5.10, "region": "Mediterranean",
+        "aliases": ["FRFOS", "FOS SUR MER", "FOSSURMER", "FOS-SUR-MER",
+                    "MARSEILLE", "FRMRS", "LAVERA"],
+    },
+    "Barcelona": {
+        "lat": 41.32, "lon": 2.16, "region": "Mediterranean",
+        "aliases": ["ESBCN", "BARCELONA"],
+    },
+    "Huelva": {
+        "lat": 37.26, "lon": -6.94, "region": "Mediterranean",
+        "aliases": ["ESHUE", "HUELVA"],
+    },
+    "Sines": {
+        "lat": 37.95, "lon": -8.87, "region": "Mediterranean",
+        "aliases": ["PTSIN", "SINES"],
+    },
+    "Genova": {
+        "lat": 44.40, "lon": 8.93, "region": "Mediterranean",
+        "aliases": ["ITGOA", "GENOVA", "GENOA"],
+    },
+    "Trieste": {
+        "lat": 45.65, "lon": 13.76, "region": "Mediterranean",
+        "aliases": ["ITTRS", "TRIESTE"],
+    },
+    "Augusta": {
+        "lat": 37.22, "lon": 15.22, "region": "Mediterranean",
+        "aliases": ["ITAUG", "AUGUSTA", "MILAZZO"],
+    },
+    "Algeciras": {
+        "lat": 36.13, "lon": -5.45, "region": "Mediterranean",
+        "aliases": ["ESALG", "ALGECIRAS"],
+    },
+    # Baltic
+    "Gdansk": {
+        "lat": 54.40, "lon": 18.66, "region": "Baltic",
+        "aliases": ["PLGDN", "GDANSK", "GDYNIA", "PL GDN", "GDYNIA"],
+    },
+}
+
+# Pre-built flat lookup: normalised alias -> port name
+_EUR_ALIAS_TO_PORT: dict[str, str] = {}
+for _epname, _epdata in _EUR_TERMINALS.items():
+    for _ealias in _epdata["aliases"]:
+        _EUR_ALIAS_TO_PORT[_ealias] = _epname
+
+
+def _match_eur_port(destination: str | None) -> str | None:
+    """Return European terminal name if the AIS destination matches, else None."""
+    if not destination:
+        return None
+    norm = _norm_dest(destination)
+    if not norm:
+        return None
+    if norm in _EUR_ALIAS_TO_PORT:
+        return _EUR_ALIAS_TO_PORT[norm]
+    for alias, pname in _EUR_ALIAS_TO_PORT.items():
+        if alias in norm:
+            return pname
+    return None
+
+
+# Lookback days for each chokepoint to determine origin.
+# Chosen as ~1.5x the typical sailing time from load zone to that chokepoint.
+_ORIGIN_CHOKEPOINTS: list[dict] = [
+    # chokepoint, direction (None = any), laden_required, label, via_label, lookback_days
+    {"cp": "suez",                   "dir": "northbound", "laden": True,
+     "origin": "Middle East",        "via": "Suez NB",   "days": 18},
+    {"cp": "bosphorus_dardanelles",  "dir": "southbound", "laden": True,
+     "origin": "Black Sea",          "via": "Bosphorus S", "days": 10},
+    {"cp": "cape_good_hope",         "dir": "northbound", "laden": True,
+     "origin": "East / Long-haul",   "via": "Cape NB",   "days": 45},
+    {"cp": "singapore_malacca",      "dir": "westbound",  "laden": True,
+     "origin": "Asia Pacific",       "via": "Malacca W", "days": 35},
+    {"cp": "gibraltar",              "dir": "eastbound",  "laden": True,
+     "origin": "Atlantic / Americas","via": "Gibraltar E","days": 6},
+]
+
+# AIS region -> origin label (fallback when no transit found)
+_REGION_TO_ORIGIN: dict[str, str] = {
+    "west_africa":   "West Africa",
+    "us_gulf":       "Americas",
+    "us_east_coast": "Americas",
+    "us_west_coast": "Americas",
+    "brazil":        "Americas",
+    "hormuz":        "Middle East",
+    "persian_gulf":  "Middle East",
+}
+
+
+def _infer_origins(mmsi_list: list[int]) -> dict[int, tuple[str | None, str | None]]:
+    """Return {mmsi: (origin_label, via_label)} using recent transit history.
+
+    Only laden transits count. Priority is determined by the order of
+    _ORIGIN_CHOKEPOINTS (Suez NB is the highest-confidence signal for European imports).
+    """
+    if not mmsi_list:
+        return {}
+
+    now_dt = datetime.now(UTC).replace(tzinfo=None)
+    max_lookback = max(r["days"] for r in _ORIGIN_CHOKEPOINTS)
+    cutoff = now_dt - timedelta(days=max_lookback)
+
+    placeholders = ",".join("?" * len(mmsi_list))
+    transit_df = db.query(
+        f"SELECT mmsi, chokepoint, direction, laden, entered_ts "
+        f"FROM transit_events "
+        f"WHERE mmsi IN ({placeholders}) AND entered_ts >= ? "
+        f"ORDER BY entered_ts DESC",
+        mmsi_list + [cutoff],
+        db=db.analytics_db_path(),
+    )
+
+    result: dict[int, tuple[str | None, str | None]] = {}
+    if transit_df.empty:
+        return result
+
+    # Group by mmsi; for each vessel pick the highest-priority matching transit
+    for mmsi, grp in transit_df.groupby("mmsi"):
+        mmsi_int = int(mmsi)
+        for rule in _ORIGIN_CHOKEPOINTS:
+            cutoff_rule = now_dt - timedelta(days=rule["days"])
+            mask = (grp["chokepoint"] == rule["cp"])
+            if rule["dir"]:
+                mask &= (grp["direction"] == rule["dir"])
+            if rule["laden"]:
+                mask &= (grp["laden"] == True)  # noqa: E712
+            mask &= (pd.to_datetime(grp["entered_ts"]) >= cutoff_rule)
+            if mask.any():
+                result[mmsi_int] = (rule["origin"], rule["via"])
+                break  # highest-priority rule matched; stop checking
+
+    return result
+
+
+def _eur_dwt(segment: str | None) -> int | None:
+    """DWT proxy for common tanker segments. Bulk carriers use similar ranges."""
+    return {
+        "ULCC": 400_000, "VLCC": 300_000, "Suezmax": 157_000,
+        "Aframax": 105_000, "Panamax": 74_000, "LR2": 110_000,
+        "LR1": 75_000, "MR": 50_000, "Handysize": 35_000,
+        "Capesize": 180_000, "Post-Panamax": 120_000,
+        "Small": 20_000,
+    }.get(segment or "", None)
+
+
+def _eta_bucket(h: float) -> str:
+    if h <= 6:
+        return "0-6h"
+    if h <= 12:
+        return "6-12h"
+    if h <= 24:
+        return "12-24h"
+    return "24-48h"
+
+
+@app.get("/api/analytics/european-inbound", response_model=EuropeanInboundResponse)
+def analytics_european_inbound(horizon_h: int = 48, laden_only: bool = False):
+    """Laden vessel arrival forecast for European energy import terminals.
+
+    For each underway vessel with a destination matching a curated European port,
+    computes ETA from position + SOG, then infers cargo origin by looking up
+    recent chokepoint transit history (Suez NB = Middle East, Bosphorus S = Black Sea, etc.).
+    Returns the fleet sorted by ETA with aggregated breakdowns by origin, port and horizon bucket.
+    """
+    horizon_h = max(12, min(120, horizon_h))
+    now_dt = datetime.now(UTC).replace(tzinfo=None)
+
+    fleet_df = _live_all()
+    if not fleet_df.empty:
+        sog_num = pd.to_numeric(fleet_df["sog"], errors="coerce")
+        fleet_df = fleet_df[
+            (sog_num >= 1.5)
+            & fleet_df["destination"].notna()
+            & fleet_df["segment"].notna()
+        ].copy()
+        needed = ["mmsi", "name", "lat", "lon", "sog", "destination", "segment", "kind", "imo", "region"]
+        fleet_df = fleet_df[[c for c in needed if c in fleet_df.columns]]
+
+    if fleet_df.empty:
+        return EuropeanInboundResponse(
+            as_of=now_dt.isoformat(), horizon_h=horizon_h,
+            total_vessels=0, total_laden=0, total_dwt_laden=0,
+            vessels=[], by_origin={}, by_port={}, eta_buckets={},
+        )
+
+    # Laden status from vessel_state
+    state_df = db.query(
+        "SELECT mmsi, laden FROM vessel_state",
+        db=db.analytics_db_path(),
+    )
+    laden_map: dict[int, str | None] = {}
+    if not state_df.empty:
+        for _, r in state_df.iterrows():
+            laden_map[int(r["mmsi"])] = _str_or_none(r.get("laden"))
+
+    # Match vessels to European terminals and compute ETAs
+    candidates: list[dict] = []
+    for _, r in fleet_df.iterrows():
+        port_name = _match_eur_port(_str_or_none(r.get("destination")))
+        if not port_name:
+            continue
+        terminal = _EUR_TERMINALS[port_name]
+        try:
+            dist_nm = _haversine_nm(float(r["lat"]), float(r["lon"]), terminal["lat"], terminal["lon"])
+        except Exception:
+            continue
+        sog_val = float(r["sog"])
+        if sog_val < 0.5:
+            continue
+        eta_h = dist_nm / sog_val
+        if dist_nm < 5 or eta_h > horizon_h:
+            continue
+
+        mmsi_int = int(r["mmsi"])
+        laden_status = laden_map.get(mmsi_int)
+        if laden_only and laden_status != "laden":
+            continue
+
+        candidates.append({
+            "mmsi": mmsi_int,
+            "name": _str_or_none(r.get("name")),
+            "segment": _str_or_none(r.get("segment")),
+            "kind": _str_or_none(r.get("kind")),
+            "laden": laden_status,
+            "eta_hours": round(eta_h, 1),
+            "distance_nm": round(dist_nm, 0),
+            "sog": round(sog_val, 1),
+            "port": port_name,
+            "port_region": terminal["region"],
+            "destination_raw": _str_or_none(r.get("destination")),
+            "current_region": _str_or_none(r.get("region")),
+            "imo": _valid_imo(r.get("imo")),
+        })
+
+    if not candidates:
+        return EuropeanInboundResponse(
+            as_of=now_dt.isoformat(), horizon_h=horizon_h,
+            total_vessels=0, total_laden=0, total_dwt_laden=0,
+            vessels=[], by_origin={}, by_port={}, eta_buckets={},
+        )
+
+    # Infer cargo origins from transit history
+    all_mmsis = [c["mmsi"] for c in candidates]
+    origin_map = _infer_origins(all_mmsis)
+
+    # Registry risk enrichment
+    all_imos = [c["imo"] for c in candidates if c.get("imo")]
+    risk_m: dict[int, int] = {}
+    if all_imos:
+        reg_df = db.query(
+            "SELECT imo, risk_score FROM vessel_registry "
+            "WHERE imo IN (" + ",".join("?" * len(all_imos)) + ") AND fetch_ok = true",
+            all_imos,
+            db=db.registry_db_path(),
+        )
+        if not reg_df.empty:
+            for _, rr in reg_df.iterrows():
+                iv = _valid_imo(rr.get("imo"))
+                rv = rr.get("risk_score")
+                if iv and rv is not None and not (isinstance(rv, float) and pd.isna(rv)):
+                    risk_m[iv] = int(rv)
+
+    # Build vessels list and aggregate stats
+    vessels: list[EuropeanInboundVessel] = []
+    by_origin: dict[str, int] = {}
+    by_port: dict[str, int] = {}
+    eta_buckets: dict[str, int] = {"0-6h": 0, "6-12h": 0, "12-24h": 0, "24-48h": 0}
+    total_laden = 0
+    total_dwt_laden = 0
+
+    for c in sorted(candidates, key=lambda x: x["eta_hours"]):
+        mmsi_int = c["mmsi"]
+        inferred_origin, inferred_via = origin_map.get(mmsi_int, (None, None))
+
+        # Fallback: use current AIS region as rough origin proxy
+        if inferred_origin is None:
+            inferred_origin = _REGION_TO_ORIGIN.get(c.get("current_region") or "", None)
+
+        dwt = _eur_dwt(c.get("segment"))
+        laden_status = c["laden"]
+
+        if laden_status == "laden":
+            total_laden += 1
+            if dwt:
+                total_dwt_laden += dwt
+
+        origin_key = inferred_origin or "Unknown"
+        by_origin[origin_key] = by_origin.get(origin_key, 0) + 1
+        by_port[c["port"]] = by_port.get(c["port"], 0) + 1
+        bucket = _eta_bucket(c["eta_hours"])
+        eta_buckets[bucket] = eta_buckets.get(bucket, 0) + 1
+
+        vessels.append(EuropeanInboundVessel(
+            mmsi=mmsi_int,
+            name=c["name"],
+            segment=c["segment"],
+            kind=c["kind"],
+            laden=laden_status,
+            eta_hours=c["eta_hours"],
+            distance_nm=c["distance_nm"],
+            sog=c["sog"],
+            port=c["port"],
+            port_region=c["port_region"],
+            destination_raw=c["destination_raw"],
+            inferred_origin=inferred_origin,
+            inferred_via=inferred_via,
+            dwt_estimate=dwt,
+            registry_risk=risk_m.get(c["imo"]) if c.get("imo") else None,
+        ))
+
+    # Sort origins by count descending
+    by_origin = dict(sorted(by_origin.items(), key=lambda x: x[1], reverse=True))
+    by_port = dict(sorted(by_port.items(), key=lambda x: x[1], reverse=True))
+    # Remove empty buckets
+    eta_buckets = {k: v for k, v in eta_buckets.items() if v > 0}
+
+    return EuropeanInboundResponse(
+        as_of=now_dt.isoformat(),
+        horizon_h=horizon_h,
+        total_vessels=len(vessels),
+        total_laden=total_laden,
+        total_dwt_laden=total_dwt_laden,
+        vessels=vessels,
+        by_origin=by_origin,
+        by_port=by_port,
+        eta_buckets=eta_buckets,
+    )

@@ -1224,3 +1224,34 @@ class OwnerFleetStatusResponse(BaseModel):
     total_owners: int
     rows: list[OwnerFleetStatusRow]
 
+
+# Phase 54: European Supply Intelligence
+class EuropeanInboundVessel(BaseModel):
+    mmsi: int
+    name: str | None
+    segment: str | None
+    kind: str | None
+    laden: str | None
+    eta_hours: float
+    distance_nm: float
+    sog: float
+    port: str
+    port_region: str  # "NW Europe" | "Mediterranean" | "Baltic"
+    destination_raw: str | None
+    inferred_origin: str | None   # "Middle East", "Black Sea", "W Africa", etc.
+    inferred_via: str | None      # chokepoint transit that gave origin, e.g. "Suez NB"
+    dwt_estimate: int | None      # proxy from segment
+    registry_risk: int | None
+
+
+class EuropeanInboundResponse(BaseModel):
+    as_of: str
+    horizon_h: int
+    total_vessels: int
+    total_laden: int
+    total_dwt_laden: int          # sum of DWT estimates for laden vessels
+    vessels: list[EuropeanInboundVessel]
+    by_origin: dict[str, int]     # origin label -> vessel count
+    by_port: dict[str, int]       # port name -> vessel count
+    eta_buckets: dict[str, int]   # "0-6h", "6-12h", "12-24h", "24-48h" -> count
+
