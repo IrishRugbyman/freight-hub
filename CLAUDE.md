@@ -6,6 +6,10 @@ Guidance for Claude Code when working in the freight hub.
 (collector capture upgrade, map UX, analytics, intelligence). Read it at the start of a
 session and pick up the first incomplete phase.
 
+**Active initiative: [`docs/ROADMAP_TRUE_ETA.md`](docs/ROADMAP_TRUE_ETA.md)** - the True ETA
+build (sea-route distance, physics ETA, history-gated LightGBM, calibrated intervals,
+accuracy scoreboard). Critical path A->B->C->E->F ships a real upgrade without ML.
+
 ## What this is
 
 Standalone freight/maritime web app, live at **https://freight.lbzgiu.xyz**. First and

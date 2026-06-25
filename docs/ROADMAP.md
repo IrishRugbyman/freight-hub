@@ -2,6 +2,8 @@
 
 Forward-looking only. Completed work is in `docs/CHANGELOG.md`.
 
+**Active initiative:** True ETA - see [`docs/ROADMAP_TRUE_ETA.md`](ROADMAP_TRUE_ETA.md) for the full phased blueprint (sea-route distance, physics ETA, history-gated ML, calibrated intervals, accuracy scoreboard).
+
 **Rules that apply to every phase:**
 - No synthetic data. All series from real AIS messages.
 - No `Co-Authored-By` or AI attribution in commits.
@@ -36,7 +38,7 @@ Promote to a phase only with a written plan:
 
 - **Global AIS coverage:** terrestrial receivers make mid-ocean subscription useless; the 24 curated basins cover every chokepoint that matters.
 - **Satellite AIS / paid data:** out of budget and against the free-source ethos.
-- **Destination geocoding / ETA prediction ML:** the free-text destination field is garbage-in; revisit only after months of clean history.
+- **Destination-string geocoding:** the free-text destination field is garbage-in and stays an untrusted ETA target. (ETA *itself* is now a planned initiative, computed only to resolved chokepoint/port targets - see `docs/ROADMAP_TRUE_ETA.md`. ML gated on accumulated clean history; physics ships first.)
 - **WebSocket bidirectional streaming:** SSE (Phase 4, optional) is sufficient for a read-only feed.
 - **Backfilling history:** impossible by definition; charts honestly start at their collection date.
 - **Per-visitor accounts/auth:** public showcase.
