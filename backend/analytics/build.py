@@ -517,6 +517,19 @@ def _run_inner(conn: duckdb.DuckDBPyConnection, reset: bool) -> None:
     _insert_events(conn, dark_voyages)
 
     # ------------------------------------------------------------------
+    # 7b. ETA ground truth (True ETA Phase A): seed targets + mine arrivals.
+    # Writes only to the scratch analytics DB, so it shares the atomic swap.
+    # Mining reads the full AIS history (arrivals need whole approach tracks),
+    # so it uses the injected _ais_query rather than the incremental `df`.
+    # ------------------------------------------------------------------
+    try:
+        from .eta_labels import run_in_conn as _eta_run
+
+        _eta_run(conn, _ais_query)
+    except Exception as exc:
+        log.warning("ETA label mining failed, skipping: %s", exc, exc_info=True)
+
+    # ------------------------------------------------------------------
     # 8. Advance watermark and promote scratch to live
     # ------------------------------------------------------------------
     new_watermark = max_ts_dt

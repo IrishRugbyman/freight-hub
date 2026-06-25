@@ -140,42 +140,7 @@ All new tables in `freight_analytics.duckdb`, written by the analytics batch job
 
 ## Phases
 
-### Phase A - Ground truth + baseline harness
-*Goal: every ETA function in the repo can be scored against reconstructed real arrivals, by lead bucket and target, with one command - and the naive baseline numbers are a committed, reproducible artifact.*
-*Depends on: nothing. Estimated effort: 1-2 sessions.*
-
-**What's new.** An offline job that mines `ais_snapshots` for true arrival events
-(closest-approach to each target, generalizing the throwaway backtest) and a
-scoring harness. No user-visible change yet.
-
-**Database changes.** Create + seed `eta_targets` (9 chokepoints from
-`ais/regions.py` centroids + curated ports from `_EUR_TERMINALS`,
-`_US_LNG_LOADING_TERMINALS`, and analytics anchorage zones). Create
-`eta_arrivals`.
-
-**API routes.** None.
-
-**Frontend.** None.
-
-**Infrastructure.** None (manual run for now).
-
-**Task checklist.**
-- Setup
-  - [ ] New module `backend/analytics/eta_labels.py`; register it in `build.py`'s run order (writes to `freight_analytics.duckdb` only).
-  - [ ] Seed `eta_targets` from `regions.py` + existing terminal dicts; one source of truth for centroid + `reach_nm`.
-- Data Layer
-  - [ ] Arrival miner: per (mmsi, target) find closest-approach to centroid in `ais_snapshots`; require `min_dist_nm <= reach_nm + margin`; dedupe repeat calls by min-gap; persist `eta_arrivals`.
-  - [ ] Cross-check mined chokepoint arrivals against existing `transit_events` (sanity: counts within tolerance).
-- API
-  - [ ] (none)
-- Validation
-  - [ ] `backend/analytics/eta_backtest.py`: takes any `eta_fn(obs) -> hours`, replays approach snapshots, emits the lead-bucket x target table (median |err|, bias, MAPE, P90, interval coverage) into `eta_model_metrics` with `model='naive'`.
-  - [ ] Split harness on `voyage_id` (no leakage), and bucket by *actual* remaining time.
-- Testing & Polish
-  - [ ] pytest: seeded temp DuckDB with 2 synthetic-but-real-shaped approaches, assert the miner finds the arrival and the harness math (err/bias/coverage) is correct.
-  - [ ] Commit the baseline metrics table as the reference all later phases must beat.
-
-**Definition of done.** `python -m analytics.eta_labels && python -m analytics.eta_backtest` reproduces the naive baseline table; `eta_arrivals` populated; tests green.
+### Phase A - Ground truth + baseline harness [COMPLETE 2026-06-25]
 
 ---
 

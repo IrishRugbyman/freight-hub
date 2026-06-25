@@ -1,5 +1,38 @@
 # Freight Hub Changelog
 
+## 2026-06-25 - True ETA Phase A: ground truth + naive baseline harness
+
+First phase of the True ETA build (`docs/ROADMAP_TRUE_ETA.md`). Goal: make every ETA function in the repo scoreable against reconstructed real arrivals, by lead bucket and target, with one command, and commit the naive baseline as the reference all later phases must beat. No user-visible change.
+
+**New tables** (all in `freight_analytics.duckdb`, written by the analytics job):
+- `eta_targets` - the only legal ETA destinations. Seeded with 55 targets: the 9 transit chokepoints (region-bbox centroids) plus 46 de-duplicated ports/anchorage zones.
+- `eta_arrivals` - reconstructed ground truth: per (mmsi, target) closest-approach to the target centroid, distinct calls split by a 24h min-gap. 35,328 arrivals mined over the 16-day history.
+- `eta_model_metrics` - lead-bucket x target-type scoreboard (one row set per backtest run); seeded with `model='naive'`.
+
+**New module `analytics/eta_labels.py`** (registered in `build.py` run order, also standalone via `python -m analytics.eta_labels`):
+- `build_targets()`: deterministic, de-duplicated target list. Chokepoints first (so they win clashes), then bbox anchorage zones, then point terminals from the app's `_EUR_TERMINALS` / `_US_LNG_LOADING_TERMINALS`. Greedy de-dupe drops any candidate within 20nm of one already kept (e.g. point-Rotterdam vs zone-Rotterdam).
+- **Reach radius decision**: `reach_nm` for a chokepoint is the bbox *cross-strait half-width* (half the shorter side), derived per chokepoint from its own region box - NOT the half-diagonal. The half-diagonal is dominated by the long approach axis and would count a vessel 250nm up-corridor as "arrived". (Considered and rejected a flat hardcoded cap as an unjustified magic number.) Anchorage zones use their bbox half-diagonal (small boxes); point terminals use fixed 15nm (port) / 25nm (LNG).
+- Arrival miner: bbox pre-filter in SQL -> exact vectorised haversine -> per-mmsi gap-split -> closest-approach fix as `arrival_ts`, first qualifying fix as `approach_start_ts`. `laden` from the arrival draught vs the per-approach max draught (0.8/0.65 ratio thresholds). Read path injected so production uses read-only lock-retry and tests use a temp DB.
+
+**New module `analytics/eta_backtest.py`** (standalone via `python -m analytics.eta_backtest`):
+- `build_samples()`: replays each arrival's approach track (one bulk AIS scan + in-memory groupby, not ~15k per-mmsi scans), samples fixes thinned to ~1h cadence up to 72h before arrival, labels each with actual `remaining_h` and great-circle distance. 756,691 samples / 236,868 scored (underway only).
+- `score(eta_fn, ...)`: any `eta_fn(obs) -> hours` (or `{p50,low,high}` dict) -> median |err|, bias, MAPE, P90 |err|, interval coverage, by lead bucket x target type.
+- Leakage control: `voyage_id = hash(mmsi,target_id,arrival_ts)`; `voyage_split` partitions on it so no voyage straddles train/test. Buckets are by *actual* remaining time.
+
+**Committed baseline artifact**: `analytics/baselines/eta_naive_baseline.csv`. The naive `great_circle/SOG` model reproduces the roadmap's signature - excellent short range, optimistic at long lead:
+
+| lead | med \|err\| | bias | reading |
+|---|--:|--:|---|
+| 0-6h | 0.86h | +0.17 | excellent |
+| 6-12h | 3.85h | -2.51 | good |
+| 12-24h | 11.8h | -11.2 | weak |
+| 24-48h | 28.5h | -28.3 | optimistic, unusable |
+| 48h+ | 52.5h | -52.4 | unusable |
+
+**Known limitation (flagged, not papered over)**: chokepoint arrival labels have a ~53nm median closest-approach distance because the AIS subscription bboxes (in `ais/regions.py`) are basin-wide, not tight to the strait. Port/anchorage labels are tight (5.5nm median). Tightening chokepoint boxes is a data-definition follow-up, not solvable by a magic constant. Cross-check vs existing `transit_events`: distinct-vessel counts agree well where boxes are tight (Dover 2085 mined vs 2091 transit vessels).
+
+**Tests**: `tests/test_eta.py` (8 tests) - seeded temp DuckDB with one approach that reaches a target and one that never does; asserts the miner finds exactly the real arrival (laden flag, approach-precedes-arrival), miner idempotency, harness math on an ideal constant-speed straight-line approach (naive ETA == true remaining, |err| < 0.25h), lead-bucket edges, and no-leakage voyage split. Full backend suite green (345 passed).
+
 ## 2026-06-25 - Landing page: front door for the hub
 
 The hub previously opened cold on the live tracker map (no context for a first-time visitor / recruiter). Added a proper landing page so the brand has a one-screen pitch before the dashboards.
