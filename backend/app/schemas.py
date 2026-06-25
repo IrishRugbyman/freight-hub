@@ -1255,3 +1255,36 @@ class EuropeanInboundResponse(BaseModel):
     by_port: dict[str, int]       # port name -> vessel count
     eta_buckets: dict[str, int]   # "0-6h", "6-12h", "12-24h", "24-48h" -> count
 
+
+# Phase 55: LNG Intelligence
+class LngVessel(BaseModel):
+    mmsi: int
+    imo: int
+    name: str | None
+    sog: float
+    lat: float
+    lon: float
+    region: str | None
+    destination_raw: str | None
+    # null when the vessel is outbound / in transit without an EU terminal destination
+    terminal: str | None
+    terminal_country: str | None
+    eta_hours: float | None
+    distance_nm: float | None
+    laden: str | None             # laden / ballast / unknown
+    inferred_origin: str | None   # Qatar / US Gulf / Norway / Australia / etc.
+    inferred_via: str | None      # Suez NB, Gibraltar E, Cape NB, etc.
+    registry_name: str | None
+    owner: str | None
+
+
+class LngInboundResponse(BaseModel):
+    as_of: str
+    total_lng_visible: int        # all LNG tankers in live AIS
+    inbound_to_europe: int        # vessels with EU terminal ETA inside horizon
+    bcm_inbound: float            # rough bcm estimate (assuming 3.5 bcf cargo = 0.10 bcm)
+    vessels: list[LngVessel]
+    by_origin: dict[str, int]
+    by_terminal: dict[str, int]
+    eta_buckets: dict[str, int]
+

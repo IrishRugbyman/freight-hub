@@ -4773,3 +4773,138 @@ def test_european_inbound_laden_only_filter(eur_inbound_client):
     d = r.json()
     for v in d["vessels"]:
         assert v["laden"] == "laden", "laden_only filter should exclude non-laden vessels"
+
+
+# ===========================================================================
+# Phase 55: LNG Intelligence tests
+# ===========================================================================
+
+@pytest.fixture
+def lng_client(tmp_path):
+    """Seeded TestClient with a known LNG tanker heading to Gate LNG Rotterdam."""
+    ais_db = tmp_path / "ais.duckdb"
+    ana_db = tmp_path / "analytics.duckdb"
+    reg_db = tmp_path / "registry.duckdb"
+
+    import duckdb
+    from datetime import datetime, UTC
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+    recently = now.strftime("%Y-%m-%d %H:%M:%S")
+
+    # AIS: one LNG tanker heading to Gate Rotterdam (~150nm from Rotterdam at 14kn -> 10.7h)
+    ais = duckdb.connect(str(ais_db))
+    ais.execute("""
+        CREATE TABLE live_positions (
+            mmsi BIGINT, name TEXT, lat DOUBLE, lon DOUBLE,
+            sog DOUBLE, cog DOUBLE, heading DOUBLE,
+            destination TEXT, kind TEXT, segment TEXT,
+            region TEXT, updated_ts TIMESTAMP, imo BIGINT,
+            draught DOUBLE, nav_status INT, eta TEXT
+        )
+    """)
+    # LNG tanker QATARI STAR heading to Rotterdam (NLRTM), ~150nm away
+    ais.execute("""
+        INSERT INTO live_positions VALUES
+        (9001001, 'QATARI STAR', 50.0, 2.5, 14.0, 45.0, 45.0,
+         'NLRTM', 'tanker', 'LNG Tanker', 'english_channel',
+         ?, 9451818, 12.0, 0, NULL)
+    """, [now])
+    ais.close()
+
+    # Analytics: vessel_state + a Suez NB transit 15 days ago
+    ana = duckdb.connect(str(ana_db))
+    ana.execute("""
+        CREATE TABLE vessel_state (mmsi BIGINT, max_draught_seen DOUBLE, last_draught DOUBLE, laden TEXT, updated_ts TIMESTAMP)
+    """)
+    ana.execute("INSERT INTO vessel_state VALUES (9001001, 12.0, 12.0, 'laden', ?)", [now])
+    ana.execute("""
+        CREATE TABLE transit_events (
+            mmsi BIGINT, chokepoint TEXT, entered_ts TIMESTAMP, exited_ts TIMESTAMP,
+            direction TEXT, kind TEXT, segment TEXT, laden BOOLEAN
+        )
+    """)
+    fifteen_days_ago = (now - __import__('datetime').timedelta(days=15)).strftime("%Y-%m-%d %H:%M:%S")
+    ana.execute("""
+        INSERT INTO transit_events VALUES
+        (9001001, 'suez', ?, ?, 'northbound', 'tanker', 'LNG Tanker', true)
+    """, [fifteen_days_ago, fifteen_days_ago])
+    ana.close()
+
+    # Registry: QATARI STAR is an LNG tanker
+    reg = duckdb.connect(str(reg_db))
+    reg.execute("""
+        CREATE TABLE vessel_registry (
+            imo INT, ship_name TEXT, flag TEXT, flag_code TEXT, call_sign TEXT,
+            gross_tonnage INT, dwt INT, ship_type TEXT, year_built INT, ship_status TEXT,
+            owner TEXT, ism_manager TEXT, ship_manager TEXT, class_society TEXT,
+            pi_club TEXT, detention_rate_pct DOUBLE, paris_mou DOUBLE, tokyo_mou DOUBLE,
+            uscg_targeting DOUBLE, fetched_ts TIMESTAMP, fetch_ok BOOLEAN,
+            risk_score INT, risk_indicators TEXT, ofac_sanctioned BOOLEAN
+        )
+    """)
+    reg.execute("""
+        INSERT INTO vessel_registry (imo, ship_name, ship_type, owner)
+        VALUES (9451818, 'QATARI STAR', 'LNG Tanker', 'Qatar Gas Transport')
+    """)
+    reg.close()
+
+    import os
+    from fastapi.testclient import TestClient
+    env = {
+        "AIS_POSITIONS_DB": str(ais_db),
+        "ANALYTICS_DB": str(ana_db),
+        "REGISTRY_DB": str(reg_db),
+    }
+    with __import__('unittest.mock', fromlist=['patch']).patch.dict(os.environ, env):
+        from importlib import reload
+        from app import db
+        reload(db)
+        from app import main as m
+        reload(m)
+        client = TestClient(m.app)
+        yield client
+
+
+def test_lng_inbound_structure(lng_client):
+    r = lng_client.get("/api/analytics/lng-inbound?horizon_h=72")
+    assert r.status_code == 200
+    d = r.json()
+    assert "total_lng_visible" in d
+    assert "inbound_to_europe" in d
+    assert "bcm_inbound" in d
+    assert "vessels" in d
+    assert "by_origin" in d
+    assert "by_terminal" in d
+
+
+def test_lng_inbound_vessel_found(lng_client):
+    r = lng_client.get("/api/analytics/lng-inbound?horizon_h=72")
+    d = r.json()
+    assert d["total_lng_visible"] >= 1, "Should detect at least the seeded LNG tanker"
+    assert d["inbound_to_europe"] >= 1, "QATARI STAR heading to NLRTM should be inbound"
+
+
+def test_lng_inbound_terminal_match(lng_client):
+    r = lng_client.get("/api/analytics/lng-inbound?horizon_h=72")
+    d = r.json()
+    v = next((x for x in d["vessels"] if x["mmsi"] == 9001001), None)
+    assert v is not None, "QATARI STAR should appear in vessel list"
+    assert v["terminal"] == "Gate LNG Rotterdam", f"Expected Gate LNG Rotterdam, got {v['terminal']}"
+    assert v["terminal_country"] == "Netherlands"
+
+
+def test_lng_inbound_origin_inference(lng_client):
+    r = lng_client.get("/api/analytics/lng-inbound?horizon_h=72")
+    d = r.json()
+    v = next((x for x in d["vessels"] if x["mmsi"] == 9001001), None)
+    assert v is not None
+    assert v["inferred_origin"] == "Qatar / ME", f"Suez NB laden should infer Qatar/ME, got {v['inferred_origin']}"
+    assert v["inferred_via"] == "Suez NB"
+
+
+def test_lng_inbound_bcm_estimate(lng_client):
+    r = lng_client.get("/api/analytics/lng-inbound?horizon_h=72")
+    d = r.json()
+    # 1 inbound vessel * 0.099 bcm
+    assert abs(d["bcm_inbound"] - 0.099) < 0.001, f"bcm should be ~0.099, got {d['bcm_inbound']}"

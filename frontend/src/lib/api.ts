@@ -2063,3 +2063,44 @@ export function useEuropeanInbound(horizonH = 48, ladenOnly = false) {
     refetchInterval: 4 * 60_000,
   })
 }
+
+// Phase 55: LNG Intelligence
+export interface LngVessel {
+  mmsi: number
+  imo: number
+  name: string | null
+  sog: number
+  lat: number
+  lon: number
+  region: string | null
+  destination_raw: string | null
+  terminal: string | null
+  terminal_country: string | null
+  eta_hours: number | null
+  distance_nm: number | null
+  laden: string | null
+  inferred_origin: string | null
+  inferred_via: string | null
+  registry_name: string | null
+  owner: string | null
+}
+
+export interface LngInboundResponse {
+  as_of: string
+  total_lng_visible: number
+  inbound_to_europe: number
+  bcm_inbound: number
+  vessels: LngVessel[]
+  by_origin: Record<string, number>
+  by_terminal: Record<string, string>
+  eta_buckets: Record<string, number>
+}
+
+export function useLngInbound(horizonH = 72) {
+  return useQuery({
+    queryKey: ['lng-inbound', horizonH],
+    queryFn: () => getJSON<LngInboundResponse>(`/api/analytics/lng-inbound?horizon_h=${horizonH}`),
+    staleTime: 5 * 60_000,
+    refetchInterval: 5 * 60_000,
+  })
+}

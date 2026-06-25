@@ -141,6 +141,8 @@ from .schemas import (
     OwnerFleetStatusResponse,
     EuropeanInboundVessel,
     EuropeanInboundResponse,
+    LngVessel,
+    LngInboundResponse,
 )
 
 _STATIC = Path(__file__).parent / "static"
@@ -5997,5 +5999,360 @@ def analytics_european_inbound(horizon_h: int = 48, laden_only: bool = False):
         vessels=vessels,
         by_origin=by_origin,
         by_port=by_port,
+        eta_buckets=eta_buckets,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase 55: LNG Intelligence
+# ---------------------------------------------------------------------------
+
+# European LNG import terminals (key regas facilities only)
+_LNG_EU_TERMINALS: dict[str, dict] = {
+    "Gate LNG Rotterdam": {
+        "lat": 51.93, "lon": 3.95, "country": "Netherlands",
+        "aliases": ["NLRTM", "ROTTERDAM", "GATE", "MAASVLAKTE"],
+    },
+    "Zeebrugge": {
+        "lat": 51.36, "lon": 3.19, "country": "Belgium",
+        "aliases": ["BEZEE", "BEEBRUGGE", "ZEEBRUGGE"],
+    },
+    "Dunkerque LNG": {
+        "lat": 51.03, "lon": 2.37, "country": "France",
+        "aliases": ["FRDKK", "DUNKERQUE", "DUNKIRK", "DUNKIRQUE"],
+    },
+    "Montoir de Bretagne": {
+        "lat": 47.26, "lon": -2.14, "country": "France",
+        "aliases": ["FRMTX", "MONTOIR", "NANTES", "SAINT NAZAIRE"],
+    },
+    "South Hook / Milford Haven": {
+        "lat": 51.70, "lon": -5.04, "country": "UK",
+        "aliases": ["GBMIL", "MILFORD", "SOUTH HOOK", "SOUTHHOOK", "GBSWH"],
+    },
+    "Isle of Grain": {
+        "lat": 51.44, "lon": 0.72, "country": "UK",
+        "aliases": ["GBGRA", "ISLE OF GRAIN", "GRAIN", "GBCAN", "CANVEY"],
+    },
+    "Dragon LNG": {
+        "lat": 51.69, "lon": -5.00, "country": "UK",
+        "aliases": ["GBDRA", "DRAGON", "DRAGON LNG"],
+    },
+    "Eemshaven": {
+        "lat": 53.42, "lon": 6.85, "country": "Netherlands",
+        "aliases": ["NLEEM", "EEMSHAVEN", "EEMS"],
+    },
+    "Świnoujście": {
+        "lat": 53.93, "lon": 14.22, "country": "Poland",
+        "aliases": ["PLSWI", "SWINOUJSCIE", "SWINOUJŚCIE", "SWINEMUNDE", "POLAND LNG"],
+    },
+    "Revithoussa": {
+        "lat": 37.96, "lon": 23.37, "country": "Greece",
+        "aliases": ["GRREV", "REVITHOUSSA", "REVITHUSA", "PIRAEUS LNG"],
+    },
+    "Porto Levante": {
+        "lat": 44.99, "lon": 12.32, "country": "Italy",
+        "aliases": ["ITLEV", "PORTO LEVANTE", "ADRIA", "OLT"],
+    },
+    "Panigaglia": {
+        "lat": 44.10, "lon": 9.86, "country": "Italy",
+        "aliases": ["ITPAN", "PANIGAGLIA", "LA SPEZIA LNG"],
+    },
+    "Livorno FSRU": {
+        "lat": 43.57, "lon": 10.32, "country": "Italy",
+        "aliases": ["ITLIV", "LIVORNO", "TOSCANA LNG"],
+    },
+    "Barcelona LNG": {
+        "lat": 41.35, "lon": 2.18, "country": "Spain",
+        "aliases": ["ESBCN", "BARCELONA LNG", "BCN LNG"],
+    },
+    "Mugardos / Ferrol": {
+        "lat": 43.46, "lon": -8.23, "country": "Spain",
+        "aliases": ["ESFER", "MUGARDOS", "FERROL", "GNLC"],
+    },
+    "Huelva LNG": {
+        "lat": 37.24, "lon": -6.95, "country": "Spain",
+        "aliases": ["ESHUE", "ESHUV", "HUELVA", "ESHU"],
+    },
+    "Sagunto": {
+        "lat": 39.66, "lon": -0.23, "country": "Spain",
+        "aliases": ["ESSAG", "SAGUNTO"],
+    },
+    "Cartagena LNG": {
+        "lat": 37.60, "lon": -0.98, "country": "Spain",
+        "aliases": ["ESACT", "CARTAGENA LNG"],
+    },
+    "Krk FSRU": {
+        "lat": 45.10, "lon": 14.60, "country": "Croatia",
+        "aliases": ["HRKRK", "KRK", "OMISALJ", "LNG CROATIA"],
+    },
+    "Klaipeda FSRU": {
+        "lat": 55.72, "lon": 21.13, "country": "Lithuania",
+        "aliases": ["LTKLA", "KLAIPEDA", "INDEPENDENCE", "LITGAS"],
+    },
+    "Nynashamn FSRU": {
+        "lat": 58.91, "lon": 17.95, "country": "Sweden",
+        "aliases": ["SENYN", "NYNASHAMN", "NYNASHAM", "FSRU ENERGOS POWER"],
+    },
+    "Manga LNG": {
+        "lat": 65.03, "lon": 25.43, "country": "Finland",
+        "aliases": ["FIMNG", "MANGA", "MANGA LNG", "FITKU", "OULU"],
+    },
+}
+
+_LNG_ALIAS_MAP: dict[str, str] = {}
+for _tname, _tdata in _LNG_EU_TERMINALS.items():
+    for _alias in _tdata["aliases"]:
+        _LNG_ALIAS_MAP[_alias] = _tname
+
+
+def _match_lng_terminal(destination: str | None) -> str | None:
+    if not destination:
+        return None
+    norm = _norm_dest(destination)
+    if not norm:
+        return None
+    if norm in _LNG_ALIAS_MAP:
+        return _LNG_ALIAS_MAP[norm]
+    for alias, tname in _LNG_ALIAS_MAP.items():
+        if alias in norm:
+            return tname
+    return None
+
+
+# Origin inference rules specific to LNG trade routes
+_LNG_ORIGIN_RULES: list[dict] = [
+    # Qatar (Ras Laffan) -> Suez NB (no Bosphorus)
+    {"cp": "suez", "dir": "northbound", "laden": True, "origin": "Qatar / ME", "via": "Suez NB", "days": 21},
+    # US Gulf (Sabine Pass, Corpus Christi, Freeport) -> Gibraltar E or Dover E
+    {"cp": "gibraltar", "dir": "eastbound", "laden": True, "origin": "US Gulf LNG", "via": "Gibraltar E", "days": 8},
+    {"cp": "dover_channel", "dir": "eastbound", "laden": True, "origin": "US Gulf LNG", "via": "Dover E", "days": 3},
+    # West Africa (Equatorial Guinea, Mozambique) or Angola -> Cape NB
+    {"cp": "cape_good_hope", "dir": "northbound", "laden": True, "origin": "Atlantic LNG", "via": "Cape NB", "days": 45},
+    # Australia / SE Asia -> Malacca W -> (then Suez or Cape)
+    {"cp": "singapore_malacca", "dir": "westbound", "laden": True, "origin": "Asia Pacific LNG", "via": "Malacca W", "days": 35},
+]
+
+# Supplement origin with live region heuristic for known loading zones
+_LNG_REGION_ORIGIN: dict[str, str] = {
+    "us_gulf": "US Gulf LNG",
+    "us_east": "US East LNG",
+    "middle_east": "Qatar / ME",
+    "ara": "Qatar / ME",
+    "west_africa": "Atlantic LNG",
+    "russia": "Norway / Russia LNG",
+}
+
+# Typical LNG cargo size: Q-Flex = 210k m3, Q-Max = 265k m3, standard TFDE = 160k m3
+# 1 m3 LNG ~ 0.6 mmBtu ~ 21.5 MJ; 160k m3 ~ 3.5 bcf ~ 0.099 bcm
+_LNG_BCM_PER_CARGO = 0.099
+
+
+@app.get("/api/analytics/lng-inbound", response_model=LngInboundResponse, tags=["analytics"])
+async def get_lng_inbound(horizon_h: int = 72):
+    """LNG carriers visible in AIS and their ETA to European regas terminals.
+
+    Returns all LNG tankers found in the live AIS feed (cross-referenced against the
+    vessel registry), with ETA estimates for European LNG import terminals derived from
+    great-circle distance and current SOG. Origin is inferred from recent chokepoint
+    transit history (Suez NB = Qatar, Gibraltar/Dover E laden = US Gulf, etc.).
+    """
+    from math import radians, sin, cos, sqrt, atan2
+
+    def _haversine_nm(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        R = 3440.065  # nautical miles
+        phi1, phi2 = radians(lat1), radians(lat2)
+        dphi = radians(lat2 - lat1)
+        dlambda = radians(lon2 - lon1)
+        a = sin(dphi / 2) ** 2 + cos(phi1) * cos(phi2) * sin(dlambda / 2) ** 2
+        return R * 2 * atan2(sqrt(a), sqrt(1 - a))
+
+    now_dt = datetime.now(UTC).replace(tzinfo=None)
+    stale_cutoff = now_dt - timedelta(hours=db.STALE_HOURS)
+
+    # --- 1. Load LNG IMOs from registry ---
+    reg_df = db.query(
+        "SELECT imo, ship_name, owner, ship_type FROM vessel_registry WHERE ship_type LIKE '%LNG%' OR ship_type LIKE '%Liquefied Gas%'",
+        db=db.registry_db_path(),
+    )
+    lng_imos: set[int] = set(reg_df["imo"].dropna().astype(int).tolist()) if not reg_df.empty else set()
+    reg_by_imo: dict[int, dict] = {}
+    if not reg_df.empty:
+        for _, row in reg_df.iterrows():
+            reg_by_imo[int(row["imo"])] = {"name": row.get("ship_name"), "owner": row.get("owner")}
+
+    if not lng_imos:
+        return LngInboundResponse(
+            as_of=now_dt.isoformat(),
+            total_lng_visible=0,
+            inbound_to_europe=0,
+            bcm_inbound=0.0,
+            vessels=[],
+            by_origin={},
+            by_terminal={},
+            eta_buckets={},
+        )
+
+    # --- 2. Fetch live positions for LNG vessels ---
+    imo_list = list(lng_imos)
+    live_df = db.query(
+        """
+        SELECT mmsi, name, lat, lon, sog, cog, heading, destination, kind,
+               segment, region, updated_ts, imo, draught, nav_status, eta
+        FROM live_positions
+        WHERE imo IS NOT NULL
+          AND CAST(imo AS BIGINT) = ANY(?)
+          AND updated_ts >= ?
+        """,
+        params=[imo_list, stale_cutoff],
+    )
+
+    if live_df.empty:
+        return LngInboundResponse(
+            as_of=now_dt.isoformat(),
+            total_lng_visible=0,
+            inbound_to_europe=0,
+            bcm_inbound=0.0,
+            vessels=[],
+            by_origin={},
+            by_terminal={},
+            eta_buckets={},
+        )
+
+    total_lng_visible = len(live_df)
+
+    # --- 3. Laden status from vessel_state ---
+    laden_df = db.query("SELECT mmsi, laden FROM vessel_state", db=db.analytics_db_path())
+    laden_m: dict[int, str] = {}
+    if not laden_df.empty:
+        for _, r in laden_df.iterrows():
+            laden_m[int(r["mmsi"])] = r["laden"]
+
+    # --- 4. Origin inference via transit_events ---
+    mmsi_list_all = live_df["mmsi"].astype(int).tolist()
+    origin_m: dict[int, tuple[str, str]] = {}
+    for rule in _LNG_ORIGIN_RULES:
+        cutoff_t = now_dt - timedelta(days=rule["days"])
+        clause = "laden = ?" if rule["laden"] else "1=1"
+        dir_clause = f"AND direction = ?" if rule["dir"] else ""
+        params: list = [mmsi_list_all, cutoff_t, rule["cp"]]
+        if rule["dir"]:
+            params.append(rule["dir"])
+        if rule["laden"]:
+            params.append(True)
+        rows = db.query(
+            f"""
+            SELECT mmsi FROM transit_events
+            WHERE mmsi = ANY(?)
+              AND exited_ts >= ?
+              AND chokepoint = ?
+              {dir_clause}
+              AND {clause}
+            """,
+            params=params,
+            db=db.analytics_db_path(),
+        )
+        if rows.empty:
+            continue
+        for mmsi in rows["mmsi"].astype(int).tolist():
+            if mmsi not in origin_m:
+                origin_m[mmsi] = (rule["origin"], rule["via"])
+
+    # Fill remaining from region heuristic
+    for _, row in live_df.iterrows():
+        mmsi = int(row["mmsi"])
+        if mmsi not in origin_m:
+            region = str(row.get("region") or "")
+            fallback = _LNG_REGION_ORIGIN.get(region)
+            if fallback:
+                origin_m[mmsi] = (fallback, "region")
+
+    # --- 5. Match destination to EU LNG terminal and compute ETA ---
+    vessels: list[LngVessel] = []
+    by_origin: dict[str, int] = {}
+    by_terminal: dict[str, int] = {}
+    eta_buckets: dict[str, int] = {"0-6h": 0, "6-12h": 0, "12-24h": 0, "24-48h": 0, "48-72h": 0}
+
+    for _, row in live_df.iterrows():
+        mmsi = int(row["mmsi"])
+        imo = int(row["imo"]) if row.get("imo") else 0
+        lat = float(row["lat"])
+        lon = float(row["lon"])
+        sog = float(row.get("sog") or 0)
+        dest_raw = str(row.get("destination") or "") or None
+
+        # Match destination to terminal
+        terminal = _match_lng_terminal(dest_raw)
+        terminal_country = _LNG_EU_TERMINALS[terminal]["country"] if terminal else None
+        terminal_lat = _LNG_EU_TERMINALS[terminal]["lat"] if terminal else None
+        terminal_lon = _LNG_EU_TERMINALS[terminal]["lon"] if terminal else None
+
+        # Compute ETA via haversine
+        dist_nm: float | None = None
+        eta_h: float | None = None
+        if terminal_lat is not None:
+            dist_nm = _haversine_nm(lat, lon, terminal_lat, terminal_lon)
+            if sog and sog > 0.5:
+                eta_h = dist_nm / sog
+            else:
+                eta_h = None  # anchored / stopped
+
+        # Apply horizon filter
+        if terminal is not None and eta_h is not None and eta_h > horizon_h:
+            terminal = None
+            terminal_country = None
+            dist_nm = None
+            eta_h = None
+
+        origin_tup = origin_m.get(mmsi)
+        inferred_origin = origin_tup[0] if origin_tup else None
+        inferred_via = origin_tup[1] if origin_tup and origin_tup[1] != "region" else None
+
+        laden_val = laden_m.get(mmsi, "unknown")
+        reg_info = reg_by_imo.get(imo, {})
+
+        if terminal and eta_h is not None:
+            by_terminal[terminal] = by_terminal.get(terminal, 0) + 1
+            if inferred_origin:
+                by_origin[inferred_origin] = by_origin.get(inferred_origin, 0) + 1
+            bucket = _eta_bucket(eta_h) if eta_h <= 48 else "48-72h"
+            if bucket in eta_buckets:
+                eta_buckets[bucket] += 1
+
+        vessels.append(LngVessel(
+            mmsi=mmsi,
+            imo=imo,
+            name=str(row.get("name") or reg_info.get("name") or ""),
+            sog=round(sog, 1),
+            lat=round(lat, 4),
+            lon=round(lon, 4),
+            region=str(row.get("region") or "") or None,
+            destination_raw=dest_raw,
+            terminal=terminal,
+            terminal_country=terminal_country,
+            eta_hours=round(eta_h, 1) if eta_h is not None else None,
+            distance_nm=round(dist_nm, 0) if dist_nm is not None else None,
+            laden=laden_val,
+            inferred_origin=inferred_origin,
+            inferred_via=inferred_via,
+            registry_name=str(reg_info.get("name") or "") or None,
+            owner=str(reg_info.get("owner") or "") or None,
+        ))
+
+    # Sort: EU-bound first (by ETA), then others by name
+    vessels.sort(key=lambda v: (v.terminal is None, v.eta_hours if v.eta_hours is not None else 9999, v.name or ""))
+    inbound_to_europe = sum(1 for v in vessels if v.terminal is not None)
+    bcm_inbound = round(inbound_to_europe * _LNG_BCM_PER_CARGO, 3)
+    by_origin = dict(sorted(by_origin.items(), key=lambda x: x[1], reverse=True))
+    by_terminal = dict(sorted(by_terminal.items(), key=lambda x: x[1], reverse=True))
+    eta_buckets = {k: v for k, v in eta_buckets.items() if v > 0}
+
+    return LngInboundResponse(
+        as_of=now_dt.isoformat(),
+        total_lng_visible=total_lng_visible,
+        inbound_to_europe=inbound_to_europe,
+        bcm_inbound=bcm_inbound,
+        vessels=vessels,
+        by_origin=by_origin,
+        by_terminal=by_terminal,
         eta_buckets=eta_buckets,
     )

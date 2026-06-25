@@ -9,7 +9,7 @@ import {
   usePortArrivals, usePortFlow, usePortCongestion, useAnchorageOccupancy,
   useTradeLaneMatrix, useDestinationFlows, useCargoTransitions,
   useCargoStateChanges, useLaden, useDensity, useEuropeanInbound,
-  type EuropeanInboundVessel,
+  useLngInbound, type EuropeanInboundVessel, type LngVessel,
 } from '@/lib/api'
 import { fmt, EmptyState, TOOLTIP_STYLE, LEGEND_STYLE, REGION_LABELS } from './-analyticsShared'
 
@@ -1181,11 +1181,224 @@ export function EuropeanInboundCard() {
 }
 
 // ---------------------------------------------------------------------------
+// LNG Intelligence Card (Phase 55)
+// ---------------------------------------------------------------------------
+const LNG_ORIGIN_COLORS: Record<string, string> = {
+  'Qatar / ME':      '#f59e0b',   // amber
+  'US Gulf LNG':     '#3b82f6',   // blue
+  'Atlantic LNG':    '#10b981',   // green
+  'Asia Pacific LNG':'#8b5cf6',   // purple
+  'Norway / Russia LNG': '#6b7280', // gray
+}
+
+const COUNTRY_FLAG: Record<string, string> = {
+  Netherlands: 'NL', Belgium: 'BE', France: 'FR', UK: 'GB',
+  Spain: 'ES', Italy: 'IT', Poland: 'PL', Greece: 'GR',
+  Croatia: 'HR', Lithuania: 'LT', Sweden: 'SE', Finland: 'FI',
+}
+
+function LngOriginDot({ origin }: { origin: string | null }) {
+  const color = origin ? (LNG_ORIGIN_COLORS[origin] ?? '#6b7280') : '#6b7280'
+  return (
+    <span
+      className="inline-block h-2 w-2 flex-shrink-0 rounded-full"
+      style={{ backgroundColor: color }}
+    />
+  )
+}
+
+function LngOriginBar({ byOrigin }: { byOrigin: Record<string, number> }) {
+  const total = Object.values(byOrigin).reduce((a, b) => a + b, 0)
+  if (total === 0) return null
+  const entries = Object.entries(byOrigin).sort((a, b) => b[1] - a[1])
+  return (
+    <div className="space-y-1">
+      {entries.map(([origin, count]) => (
+        <div key={origin} className="flex items-center gap-2 text-xs">
+          <LngOriginDot origin={origin} />
+          <span className="w-36 truncate text-muted-foreground">{origin}</span>
+          <div className="flex-1 overflow-hidden rounded-full bg-muted h-1.5">
+            <div
+              className="h-full rounded-full transition-all"
+              style={{
+                width: `${(count / total) * 100}%`,
+                backgroundColor: LNG_ORIGIN_COLORS[origin] ?? '#6b7280',
+              }}
+            />
+          </div>
+          <span className="w-4 text-right font-mono text-foreground">{count}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function LngVesselRow({ v, onNavigate }: { v: LngVessel; onNavigate: (mmsi: number, lat: number, lon: number) => void }) {
+  const etaLabel = v.eta_hours != null
+    ? v.eta_hours < 1 ? '<1h' : `${Math.round(v.eta_hours)}h`
+    : '-'
+
+  return (
+    <button
+      type="button"
+      className="flex w-full items-center gap-2 rounded px-1 py-1 text-left text-xs hover:bg-muted/60 transition-colors"
+      onClick={() => onNavigate(v.mmsi, v.lat, v.lon)}
+    >
+      <LngOriginDot origin={v.inferred_origin} />
+      <span className="w-36 truncate font-medium text-foreground">{v.name || `MMSI ${v.mmsi}`}</span>
+      <span className="flex-1 truncate text-muted-foreground">{v.terminal ?? v.region ?? '-'}</span>
+      {v.terminal_country && (
+        <span className="text-[10px] text-muted-foreground/70">{COUNTRY_FLAG[v.terminal_country] ?? v.terminal_country}</span>
+      )}
+      <span className="w-8 text-right tabular-nums text-foreground/80">{etaLabel}</span>
+    </button>
+  )
+}
+
+export function LngIntelligenceCard() {
+  const [horizonH, setHorizonH] = useState(72)
+  const { data, isLoading } = useLngInbound(horizonH)
+  const goToTracker = useGoToTracker()
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardHeader><CardTitle className="text-base">LNG Intelligence</CardTitle></CardHeader>
+        <CardContent><div className="h-48 animate-pulse rounded bg-muted/40" /></CardContent>
+      </Card>
+    )
+  }
+
+  const inboundVessels = (data?.vessels ?? []).filter(v => v.terminal != null)
+  const otherVessels = (data?.vessels ?? []).filter(v => v.terminal == null)
+
+  return (
+    <Card className="overflow-hidden">
+      <CardHeader className="pb-2">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <CardTitle className="text-base">LNG Intelligence</CardTitle>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              LNG carriers visible via AIS - European regas terminal ETAs and origin inference
+            </p>
+          </div>
+          <select
+            value={horizonH}
+            onChange={e => setHorizonH(Number(e.target.value))}
+            className="rounded border border-border bg-background px-2 py-1 text-xs"
+          >
+            {[48, 72, 120].map(h => (
+              <option key={h} value={h}>{h}h window</option>
+            ))}
+          </select>
+        </div>
+      </CardHeader>
+
+      <CardContent className="space-y-4">
+        {/* KPI bar */}
+        <div className="grid grid-cols-3 gap-3 rounded-lg bg-muted/30 px-4 py-3 text-center">
+          <div>
+            <div className="text-xl font-bold tabular-nums text-foreground">
+              {data?.total_lng_visible ?? '-'}
+            </div>
+            <div className="text-[10px] text-muted-foreground">LNG in AIS</div>
+          </div>
+          <div>
+            <div className="text-xl font-bold tabular-nums text-amber-400">
+              {data?.inbound_to_europe ?? '-'}
+            </div>
+            <div className="text-[10px] text-muted-foreground">EU inbound</div>
+          </div>
+          <div>
+            <div className="text-xl font-bold tabular-nums text-blue-400">
+              {data?.bcm_inbound != null ? `${data.bcm_inbound.toFixed(2)}` : '-'}
+            </div>
+            <div className="text-[10px] text-muted-foreground">bcm inbound*</div>
+          </div>
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-2">
+          {/* Inbound list */}
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <h4 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                EU terminal arrivals
+              </h4>
+              <span className="text-[10px] text-muted-foreground">within {horizonH}h</span>
+            </div>
+            {inboundVessels.length === 0 ? (
+              <p className="py-4 text-center text-xs text-muted-foreground">No vessels matched EU terminal in window</p>
+            ) : (
+              <div className="space-y-0.5">
+                {inboundVessels.map(v => (
+                  <LngVesselRow key={v.mmsi} v={v} onNavigate={goToTracker} />
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Origin breakdown + terminal breakdown */}
+          <div className="space-y-4">
+            {Object.keys(data?.by_origin ?? {}).length > 0 && (
+              <div>
+                <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Origin breakdown
+                </h4>
+                <LngOriginBar byOrigin={data?.by_origin ?? {}} />
+              </div>
+            )}
+
+            {Object.keys(data?.by_terminal ?? {}).length > 0 && (
+              <div>
+                <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Terminals receiving
+                </h4>
+                <div className="space-y-0.5">
+                  {Object.entries(data?.by_terminal ?? {})
+                    .sort((a, b) => Number(b[1]) - Number(a[1]))
+                    .map(([terminal, count]) => (
+                      <div key={terminal} className="flex items-center justify-between text-xs">
+                        <span className="text-muted-foreground truncate">{terminal}</span>
+                        <span className="font-mono text-foreground">{count}</span>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Fleet in transit (not EU-bound) */}
+        {otherVessels.length > 0 && (
+          <div>
+            <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Fleet in transit / at terminal
+            </h4>
+            <div className="max-h-36 overflow-y-auto space-y-0.5">
+              {otherVessels.map(v => (
+                <LngVesselRow key={v.mmsi} v={v} onNavigate={goToTracker} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        <p className="text-[10px] text-muted-foreground/60">
+          * Assumes 160k m³ cargo (standard TFDE LNG carrier = ~0.10 bcm). Origin inferred from
+          transit events: Suez NB = Qatar/ME, Gibraltar/Dover E laden = US Gulf, Cape NB = long-haul.
+          AIS coverage varies; some carriers may not broadcast IMO. Registry: {data?.total_lng_visible ?? 0} carriers tracked.
+        </p>
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Default export: Ports & Cargo tab component
 // ---------------------------------------------------------------------------
 export default function PortsCargoTab() {
   return (
     <div className="space-y-6">
+      <LngIntelligenceCard />
       <EuropeanInboundCard />
       <PortArrivalForecastCard />
       <PortFlowCard />
