@@ -1295,6 +1295,35 @@ export function LngIntelligenceCard() {
       </CardHeader>
 
       <CardContent className="space-y-4">
+        {/* Supply chain pipeline: Loading -> Trans-Atlantic -> EU Arrival */}
+        {(() => {
+          const loading = (data?.us_loading ?? []).filter(v => v.status === 'loading').length
+          const departing = (data?.us_loading ?? []).filter(v => v.status === 'departing').length
+          const arriving = data?.inbound_to_europe ?? 0
+          const deptBcm = (departing * 0.099).toFixed(2)
+          return (
+            <div className="flex items-center gap-0 overflow-hidden rounded-lg border border-border text-center text-xs">
+              <div className="flex-1 bg-amber-500/10 px-2 py-2.5">
+                <div className="text-lg font-bold tabular-nums text-amber-400">{loading}</div>
+                <div className="text-[10px] text-muted-foreground">loading</div>
+                <div className="mt-0.5 text-[9px] text-muted-foreground/60">US terminals</div>
+              </div>
+              <div className="text-muted-foreground/40 px-1 text-lg">›</div>
+              <div className="flex-1 bg-blue-500/10 px-2 py-2.5">
+                <div className="text-lg font-bold tabular-nums text-blue-400">{departing}</div>
+                <div className="text-[10px] text-muted-foreground">trans-Atlantic</div>
+                <div className="mt-0.5 text-[9px] text-muted-foreground/60">{deptBcm} bcm in ~14-18d</div>
+              </div>
+              <div className="text-muted-foreground/40 px-1 text-lg">›</div>
+              <div className="flex-1 bg-green-500/10 px-2 py-2.5">
+                <div className="text-lg font-bold tabular-nums text-green-400">{arriving}</div>
+                <div className="text-[10px] text-muted-foreground">EU arriving</div>
+                <div className="mt-0.5 text-[9px] text-muted-foreground/60">{(arriving * 0.099).toFixed(2)} bcm &lt;{horizonH}h</div>
+              </div>
+            </div>
+          )
+        })()}
+
         {/* KPI bar */}
         <div className="grid grid-cols-3 gap-3 rounded-lg bg-muted/30 px-4 py-3 text-center">
           <div>
