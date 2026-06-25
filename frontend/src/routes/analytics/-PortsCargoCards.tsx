@@ -9,7 +9,8 @@ import {
   usePortArrivals, usePortFlow, usePortCongestion, useAnchorageOccupancy,
   useTradeLaneMatrix, useDestinationFlows, useCargoTransitions,
   useCargoStateChanges, useLaden, useDensity, useEuropeanInbound,
-  useLngInbound, type EuropeanInboundVessel, type LngVessel,
+  useLngInbound, useTransitRateTimeline,
+  type EuropeanInboundVessel, type LngVessel,
 } from '@/lib/api'
 import { fmt, EmptyState, TOOLTIP_STYLE, LEGEND_STYLE, REGION_LABELS } from './-analyticsShared'
 
@@ -1258,7 +1259,23 @@ function LngVesselRow({ v, onNavigate }: { v: LngVessel; onNavigate: (mmsi: numb
 export function LngIntelligenceCard() {
   const [horizonH, setHorizonH] = useState(72)
   const { data, isLoading } = useLngInbound(horizonH)
+  const { data: suezData } = useTransitRateTimeline(360, 'suez')
   const goToTracker = useGoToTracker()
+
+  // Aggregate hourly Suez NB transit data into daily laden counts for the chart
+  const suezDailyLaden = React.useMemo(() => {
+    if (!suezData) return []
+    const byDay: Record<string, number> = {}
+    for (const pt of suezData.points) {
+      if (pt.chokepoint !== 'suez') continue
+      const day = pt.hour.slice(0, 10)
+      byDay[day] = (byDay[day] ?? 0) + (pt.laden_count ?? 0)
+    }
+    return Object.entries(byDay)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .slice(-14)  // last 14 days
+      .map(([day, laden]) => ({ day: day.slice(5), laden }))  // MM-DD
+  }, [suezData])
 
   if (isLoading) {
     return (
@@ -1442,10 +1459,31 @@ export function LngIntelligenceCard() {
           </div>
         )}
 
+        {/* Suez NB laden daily chart - 14d leading indicator */}
+        {suezDailyLaden.length > 0 && (
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <h4 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Suez NB laden (daily) - ME supply pipeline
+              </h4>
+              <span className="text-[10px] text-muted-foreground">+16-20d EU arrival lead</span>
+            </div>
+            <ResponsiveContainer width="100%" height={80}>
+              <BarChart data={suezDailyLaden} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+                <XAxis dataKey="day" tick={{ fontSize: 9 }} tickLine={false} axisLine={false} />
+                <YAxis tick={{ fontSize: 9 }} tickLine={false} axisLine={false} allowDecimals={false} />
+                <Tooltip contentStyle={TOOLTIP_STYLE} />
+                <Bar dataKey="laden" fill="#f59e0b" radius={[2, 2, 0, 0]} maxBarSize={20} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+
         <p className="text-[10px] text-muted-foreground/60">
           * Assumes 160k m³ cargo (standard TFDE LNG carrier = ~0.10 bcm). Origin inferred from
           transit events: Suez NB = Qatar/ME, Gibraltar/Dover E laden = US Gulf, Cape NB = long-haul.
           US loading terminals: within 80nm of Sabine Pass, Calcasieu Pass, Corpus Christi, Freeport, Cove Point.
+          Suez chart shows all laden vessel types (includes crude/bulk carriers, not LNG-only).
           AIS coverage varies; some carriers may not broadcast IMO.
         </p>
       </CardContent>
