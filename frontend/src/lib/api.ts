@@ -2085,6 +2085,19 @@ export interface LngVessel {
   owner: string | null
 }
 
+export interface LngLoadingVessel {
+  mmsi: number
+  imo: number
+  name: string | null
+  sog: number
+  lat: number
+  lon: number
+  terminal_name: string
+  status: 'loading' | 'departing'
+  destination_raw: string | null
+  eu_terminal_eta_days: number | null
+}
+
 export interface LngInboundResponse {
   as_of: string
   total_lng_visible: number
@@ -2092,8 +2105,9 @@ export interface LngInboundResponse {
   bcm_inbound: number
   vessels: LngVessel[]
   by_origin: Record<string, number>
-  by_terminal: Record<string, string>
+  by_terminal: Record<string, number>
   eta_buckets: Record<string, number>
+  us_loading: LngLoadingVessel[]
 }
 
 export function useLngInbound(horizonH = 72) {

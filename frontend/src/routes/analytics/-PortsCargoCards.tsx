@@ -1368,13 +1368,44 @@ export function LngIntelligenceCard() {
           </div>
         </div>
 
-        {/* Fleet in transit (not EU-bound) */}
+        {/* US LNG loading terminal activity */}
+        {(data?.us_loading ?? []).length > 0 && (
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <h4 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                US loading terminals
+              </h4>
+              <span className="text-[10px] text-muted-foreground">leading indicator +14-18d</span>
+            </div>
+            <div className="space-y-0.5">
+              {(data?.us_loading ?? []).map(v => (
+                <button
+                  key={v.mmsi}
+                  type="button"
+                  className="flex w-full items-center gap-2 rounded px-1 py-1 text-left text-xs hover:bg-muted/60 transition-colors"
+                  onClick={() => goToTracker(v.mmsi, v.lat, v.lon)}
+                >
+                  <span
+                    className={`inline-block h-2 w-2 flex-shrink-0 rounded-full ${v.status === 'loading' ? 'bg-amber-400' : 'bg-blue-400'}`}
+                  />
+                  <span className="w-36 truncate font-medium text-foreground">{v.name || `MMSI ${v.mmsi}`}</span>
+                  <span className="flex-1 truncate text-muted-foreground text-[10px]">{v.terminal_name}</span>
+                  <span className={`text-[10px] font-medium ${v.status === 'loading' ? 'text-amber-400' : 'text-blue-400'}`}>
+                    {v.status === 'loading' ? 'loading' : `dep. - EU ~${v.eu_terminal_eta_days}d`}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Fleet in transit (not EU-bound, not US loading) */}
         {otherVessels.length > 0 && (
           <div>
             <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
               Fleet in transit / at terminal
             </h4>
-            <div className="max-h-36 overflow-y-auto space-y-0.5">
+            <div className="max-h-28 overflow-y-auto space-y-0.5">
               {otherVessels.map(v => (
                 <LngVesselRow key={v.mmsi} v={v} onNavigate={goToTracker} />
               ))}
@@ -1385,7 +1416,8 @@ export function LngIntelligenceCard() {
         <p className="text-[10px] text-muted-foreground/60">
           * Assumes 160k m³ cargo (standard TFDE LNG carrier = ~0.10 bcm). Origin inferred from
           transit events: Suez NB = Qatar/ME, Gibraltar/Dover E laden = US Gulf, Cape NB = long-haul.
-          AIS coverage varies; some carriers may not broadcast IMO. Registry: {data?.total_lng_visible ?? 0} carriers tracked.
+          US loading terminals: within 80nm of Sabine Pass, Calcasieu Pass, Corpus Christi, Freeport, Cove Point.
+          AIS coverage varies; some carriers may not broadcast IMO.
         </p>
       </CardContent>
     </Card>

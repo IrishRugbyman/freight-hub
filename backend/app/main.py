@@ -142,6 +142,7 @@ from .schemas import (
     EuropeanInboundVessel,
     EuropeanInboundResponse,
     LngVessel,
+    LngLoadingVessel,
     LngInboundResponse,
 )
 
@@ -6119,6 +6120,18 @@ def _match_lng_terminal(destination: str | None) -> str | None:
     return None
 
 
+# US LNG loading terminals (lat/lon + 60nm radius for proximity match)
+_US_LNG_LOADING_TERMINALS: list[dict] = [
+    {"name": "Sabine Pass", "lat": 29.73, "lon": -93.87},
+    {"name": "Calcasieu Pass (Venture Global)", "lat": 29.72, "lon": -93.34},
+    {"name": "Corpus Christi LNG", "lat": 27.83, "lon": -97.40},
+    {"name": "Freeport LNG", "lat": 28.94, "lon": -95.36},
+    {"name": "Cove Point", "lat": 38.42, "lon": -76.38},
+    {"name": "Elba Island", "lat": 31.93, "lon": -81.12},
+]
+_US_LNG_TERMINAL_RADIUS_NM = 80.0  # generous radius to catch vessels in approach
+
+
 # Origin inference rules specific to LNG trade routes
 _LNG_ORIGIN_RULES: list[dict] = [
     # Qatar (Ras Laffan) -> Suez NB (no Bosphorus)
@@ -6190,6 +6203,7 @@ async def get_lng_inbound(horizon_h: int = 72):
             by_origin={},
             by_terminal={},
             eta_buckets={},
+            us_loading=[],
         )
 
     # --- 2. Fetch live positions for LNG vessels ---
@@ -6216,6 +6230,7 @@ async def get_lng_inbound(horizon_h: int = 72):
             by_origin={},
             by_terminal={},
             eta_buckets={},
+            us_loading=[],
         )
 
     total_lng_visible = len(live_df)
@@ -6346,6 +6361,49 @@ async def get_lng_inbound(horizon_h: int = 72):
     by_terminal = dict(sorted(by_terminal.items(), key=lambda x: x[1], reverse=True))
     eta_buckets = {k: v for k, v in eta_buckets.items() if v > 0}
 
+    # --- 6. US LNG loading terminal activity ---
+    us_loading: list[LngLoadingVessel] = []
+    for _, row in live_df.iterrows():
+        lat = float(row["lat"])
+        lon = float(row["lon"])
+        sog = float(row.get("sog") or 0)
+        # Only consider vessels in the Western Hemisphere (US terminals all lon < -60)
+        if lon > -60 or lon < -110:
+            continue
+        # Find nearest US terminal within radius
+        nearest: dict | None = None
+        nearest_dist = float("inf")
+        for term in _US_LNG_LOADING_TERMINALS:
+            dist = _haversine_nm(lat, lon, term["lat"], term["lon"])
+            if dist < nearest_dist:
+                nearest_dist = dist
+                nearest = term
+        if nearest is None or nearest_dist > _US_LNG_TERMINAL_RADIUS_NM:
+            continue
+        mmsi = int(row["mmsi"])
+        imo = int(row["imo"]) if row.get("imo") else 0
+        status = "loading" if sog < 1.5 else "departing"
+        # For departing vessels, estimate ETA to nearest EU terminal
+        # Approx 4700nm US Gulf -> NW Europe at 15kn -> ~313h -> ~13 days
+        eu_eta_days: float | None = None
+        if status == "departing" and sog > 1:
+            eu_eta_days = round(4700 / sog / 24, 1)
+        reg_info = reg_by_imo.get(imo, {})
+        us_loading.append(LngLoadingVessel(
+            mmsi=mmsi,
+            imo=imo,
+            name=str(row.get("name") or reg_info.get("name") or ""),
+            sog=round(sog, 1),
+            lat=round(lat, 4),
+            lon=round(lon, 4),
+            terminal_name=nearest["name"],
+            status=status,
+            destination_raw=str(row.get("destination") or "") or None,
+            eu_terminal_eta_days=eu_eta_days,
+        ))
+
+    us_loading.sort(key=lambda v: (v.status != "loading", v.name or ""))
+
     return LngInboundResponse(
         as_of=now_dt.isoformat(),
         total_lng_visible=total_lng_visible,
@@ -6355,4 +6413,5 @@ async def get_lng_inbound(horizon_h: int = 72):
         by_origin=by_origin,
         by_terminal=by_terminal,
         eta_buckets=eta_buckets,
+        us_loading=us_loading,
     )

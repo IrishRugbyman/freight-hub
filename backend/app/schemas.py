@@ -1278,6 +1278,19 @@ class LngVessel(BaseModel):
     owner: str | None
 
 
+class LngLoadingVessel(BaseModel):
+    mmsi: int
+    imo: int
+    name: str | None
+    sog: float
+    lat: float
+    lon: float
+    terminal_name: str            # nearest US loading terminal
+    status: str                   # "loading" (SOG < 1.5kn) or "departing" (SOG >= 1.5kn)
+    destination_raw: str | None
+    eu_terminal_eta_days: float | None   # ETA to nearest EU terminal after loading (~14-18d)
+
+
 class LngInboundResponse(BaseModel):
     as_of: str
     total_lng_visible: int        # all LNG tankers in live AIS
@@ -1287,4 +1300,5 @@ class LngInboundResponse(BaseModel):
     by_origin: dict[str, int]
     by_terminal: dict[str, int]
     eta_buckets: dict[str, int]
+    us_loading: list[LngLoadingVessel]  # US Gulf loading terminal activity
 
