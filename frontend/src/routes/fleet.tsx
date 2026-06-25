@@ -259,7 +259,7 @@ export default function FleetPage() {
 
   function goToMap(row: FleetRow) {
     if (row.mmsi == null || row.lat == null || row.lon == null) return
-    navigate({ to: '/', search: { mmsi: row.mmsi, lat: row.lat, lon: row.lon } as never })
+    navigate({ to: '/tracker', search: { mmsi: row.mmsi, lat: row.lat, lon: row.lon } as never })
   }
 
   return (

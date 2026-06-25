@@ -1,5 +1,14 @@
 # Freight Hub Changelog
 
+## 2026-06-25 - Landing page: front door for the hub
+
+The hub previously opened cold on the live tracker map (no context for a first-time visitor / recruiter). Added a proper landing page so the brand has a one-screen pitch before the dashboards.
+
+- **New landing at `/`** (`frontend/src/routes/index.tsx`): hero with a live "N vessels tracked live" badge (pulsing dot, pulled from `/api/meta` `total_tracked`, falls back to "Live AIS feed" when offline), a one-line pitch, and an "Open the tracker" CTA. Below it a 7-card dashboard grid (Live Tracker spanning 2 cols + Analytics + Pipelines featured; Fleet, Events, Routes, Dispersion secondary) and a data-sources strip. Mirrors the energy hub's landing pattern and dark aesthetic.
+- **Tracker moved `/` -> `/tracker`** (`frontend/src/routes/tracker.tsx`): same component, route id and `Route.useSearch()` retargeted. The brand/logo in the header now links to `/`; the "Tracker" nav item points to `/tracker`.
+- **Deep-link retargeting**: all in-app navigations that opened a vessel/event on the map (`events.tsx`, `fleet.tsx`, and the four `analytics/-*Cards.tsx` modules) updated from `to: '/'` to `to: '/tracker'`, preserving their `mmsi`/`lat`/`lon`/`pipeline_id` search params.
+- Build + typecheck clean; verified live in dev (landing renders with live count, grid links, tracker reachable at new path, 0 console errors).
+
 ## 2026-06-25 - LNG Intelligence: live carrier tracker with EU terminal ETAs, origin inference, US loading monitoring
 
 **New endpoint `/api/analytics/lng-inbound`** (Phase 55):

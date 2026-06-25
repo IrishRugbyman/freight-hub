@@ -31,12 +31,12 @@ function RootLayout() {
   return (
     <div className="flex h-full flex-col">
       <header className={cn('flex items-center gap-5 border-b border-border bg-card/40 px-4 py-2')}>
-        <div className="flex items-center gap-2">
+        <Link to="/" className="flex items-center gap-2 transition-opacity hover:opacity-80">
           <Ship size={16} className="text-primary" strokeWidth={2.5} />
           <span className="text-sm font-semibold tracking-tight">Freight Hub</span>
-        </div>
+        </Link>
         <nav className="flex items-center gap-0.5">
-          <NavItem to="/">Tracker</NavItem>
+          <NavItem to="/tracker">Tracker</NavItem>
           <NavItem to="/fleet">Fleet</NavItem>
           <NavItem to="/pipelines">Pipelines</NavItem>
           <span className="mx-1.5 h-3.5 w-px bg-border" />

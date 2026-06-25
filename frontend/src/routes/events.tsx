@@ -54,7 +54,7 @@ export default function EventsPage() {
   const navigate = useNavigate()
 
   function goToTracker(ev: AisEvent) {
-    navigate({ to: '/', search: { mmsi: ev.mmsi, lat: ev.lat, lon: ev.lon } as never })
+    navigate({ to: '/tracker', search: { mmsi: ev.mmsi, lat: ev.lat, lon: ev.lon } as never })
   }
 
   const counts = useMemo(() => {

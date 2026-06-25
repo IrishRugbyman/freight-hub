@@ -18,7 +18,7 @@ function useGoToTracker() {
   return (mmsi: number, lat?: number | null, lon?: number | null) => {
     const search: Record<string, unknown> = { mmsi }
     if (lat != null && lon != null) { search.lat = lat; search.lon = lon }
-    navigate({ to: '/', search: search as never })
+    navigate({ to: '/tracker', search: search as never })
   }
 }
 
