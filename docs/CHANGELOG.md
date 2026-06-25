@@ -1,5 +1,24 @@
 # Freight Hub Changelog
 
+## 2026-06-25 - LNG Intelligence: live carrier tracker with EU terminal ETAs, origin inference, US loading monitoring
+
+**New endpoint `/api/analytics/lng-inbound`** (Phase 55):
+- Cross-references live AIS positions with vessel_registry by IMO to identify LNG carriers (ship_type = 'LNG Tanker')
+- 20 European LNG regas terminals: Gate LNG Rotterdam, Zeebrugge, Dunkerque, Montoir, South Hook, Isle of Grain, Dragon LNG, Eemshaven, Swinoujscie, Revithoussa, Porto Levante, Panigaglia, Livorno FSRU, Barcelona, Mugardos, Huelva, Sagunto, Cartagena, Krk FSRU, Klaipeda, Nynashamn, Manga LNG (Finland)
+- Origin inference from transit_events: Suez NB laden -> Qatar/ME, Gibraltar/Dover E laden -> US Gulf LNG, Cape NB laden -> Atlantic LNG, Malacca W laden -> Asia Pacific LNG
+- US loading terminal monitoring: vessels within 80nm of Sabine Pass, Calcasieu Pass, Corpus Christi, Freeport, Cove Point; status = loading (SOG < 1.5kn) or departing with EU ETA estimate (~14-18d)
+- bcm estimate: 0.099 bcm per cargo (160k m3 TFDE LNG standard)
+- Live data (2026-06-25): 19 LNG tankers visible, 3 inbound to EU (ORION MONET -> Eemshaven 7.6h Qatar-origin, OIZMENDI -> Huelva 1.7h, SEAGAS -> Manga/Finland), 4 loading at US Gulf (Sabine Pass, Calcasieu, Freeport), 2 departing EU ETA ~12-15d
+
+**New `LngIntelligenceCard`** in Analytics Ports & Cargo tab (first card):
+- KPI bar: LNG in AIS / EU inbound / bcm inbound
+- EU terminal arrivals: vessel list by ETA, color-coded by origin, clickable -> tracker
+- Origin breakdown (mini bars) and terminal receiving list
+- US loading terminals: amber=loading, blue=departing with EU ETA estimate
+- Fleet in transit: remaining LNG carriers not yet matched to terminal
+
+**Tests**: 5 new pytest tests. Full suite 337 passed.
+
 ## 2026-06-25 - European supply intelligence: inbound vessel forecast with cargo origin inference
 
 **New endpoint `/api/analytics/european-inbound`** (Phase 54):
