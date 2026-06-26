@@ -188,6 +188,34 @@ def test_run_in_conn_persists_predictions(tmp_path):
     assert got >= 1
 
 
+def test_build_predictions_caps_absurd_long_eta(tmp_path):
+    """A barely-underway vessel far out must not yield a multi-week ETA row."""
+    conn = duckdb.connect(str(tmp_path / "an.duckdb"))
+    _seed_targets(conn)
+
+    mem = duckdb.connect(":memory:")
+    mem.execute(
+        "CREATE TABLE live_positions (mmsi BIGINT, name VARCHAR, lat DOUBLE, lon DOUBLE, "
+        "sog DOUBLE, cog DOUBLE, heading DOUBLE, kind VARCHAR, segment VARCHAR, "
+        "region VARCHAR, imo BIGINT, draught DOUBLE, updated_ts TIMESTAMP)"
+    )
+    mem.execute("CREATE TABLE ais_snapshots (snapshot_ts TIMESTAMP, mmsi BIGINT, sog DOUBLE)")
+    # ~1.2 kn, far south of Suez heading north: effective speed floors at 2 kn but
+    # the sea-route distance over hundreds of nm still implies a >2-week ETA.
+    mem.execute(
+        "INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (8001, "CRAWLER", 18.0, 40.0, 1.2, 330.0, 330.0, "tanker", "VLCC", "suez", 8000001, 20.0, _NOW),
+    )
+
+    def q(sql, params=None):
+        return mem.execute(sql, params or []).df()
+
+    preds = build_predictions(conn, q, now=_NOW)
+    # Either no row, or every emitted row is within the served horizon.
+    if not preds.empty:
+        assert (preds["eta_p50_h"] <= 336.0).all()
+
+
 def test_build_predictions_empty_when_no_live(tmp_path):
     conn = duckdb.connect(str(tmp_path / "an.duckdb"))
     _seed_targets(conn)

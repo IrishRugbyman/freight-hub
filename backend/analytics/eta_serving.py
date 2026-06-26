@@ -60,6 +60,13 @@ _AHEAD_ANGLE_DEG = 75.0
 # and a vessel ~1500 nm out has likely not committed to this target).
 _MAX_PRED_GC_NM = 1500.0
 
+# Drop any served prediction whose P50 exceeds this horizon (14 days). A barely-
+# underway vessel (effective speed floored at 2 kn) on a cape/canal sea route can
+# produce a multi-thousand-hour ETA from a 1500 nm great-circle origin - physically
+# meaningless and not worth serving. The inbound cards already filter by their own
+# (shorter) horizon, so this only trims the absurd long tail.
+_MAX_PRED_ETA_H = 336.0
+
 # Score at most this many nearest ahead targets per vessel. A vessel realistically
 # heads to one destination but may pass a chokepoint en route, so a few is plenty;
 # this bounds payload + routing cost.
@@ -275,7 +282,7 @@ def build_predictions(
                 "target_id": t["target_id"],
             }
             p50, low, high, model = _predict(obs, interval)
-            if not np.isfinite(p50):
+            if not np.isfinite(p50) or p50 > _MAX_PRED_ETA_H:
                 continue
             rows.append(
                 {

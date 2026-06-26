@@ -33,8 +33,21 @@ n=128,688.
 **api.ts**: `TrueEtaFields` mixed into `EuropeanInboundVessel` / `LngVessel`;
 `EtaAccuracyRow` / `EtaAccuracyResponse` types + `useEtaAccuracy` hook.
 
-`npm run build` clean; full vitest green (27 passed); visual check passed (chart +
-chips render, no console errors).
+**Tracker vessel-detail popup** now carries a "True ETA to <target>" row (the
+soonest resolvable target from `/api/analytics/eta?mmsi=`, via `useVesselEta`),
+alongside the relabelled "ETA (reported)" raw AIS string - the trusted computed
+estimate sits next to the untrusted reported one. Verified live (e.g. a vessel
+inbound to Rotterdam shows "True ETA to rotterdam 3.0h PHYSICS").
+
+**Serving quality fix surfaced by the popup:** `eta_serving` now drops any
+prediction whose P50 exceeds a 14-day horizon (`_MAX_PRED_ETA_H = 336h`). A
+barely-underway vessel (effective speed floored at 2 kn) on a cape/canal sea route
+from a 1500 nm great-circle origin was producing multi-thousand-hour ETAs - real
+arithmetic, but physically meaningless and not worth serving. Live max P50 is now
+335.75h; the inbound cards (shorter horizons) are unaffected.
+
+`npm run build` clean; full vitest green (27 passed) + backend 369 passed; visual
+check passed (chart + chips + popup render, 0 console errors).
 
 ## 2026-06-26 - True ETA Phase E: live serving scorer + API + inbound-card integration
 

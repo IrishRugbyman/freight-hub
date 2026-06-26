@@ -2147,6 +2147,44 @@ export interface EtaAccuracyResponse {
   rows: EtaAccuracyRow[]
 }
 
+// True ETA Phase E/F: per-vessel resolvable-target ETAs (vessel-detail popup)
+export interface EtaPrediction {
+  target_id: string
+  target_name: string | null
+  target_type: string | null
+  target_lat: number | null
+  target_lon: number | null
+  eta_p50_h: number | null
+  eta_low_h: number | null
+  eta_high_h: number | null
+  eta_naive_h: number | null
+  method: string | null
+  eta_arrival_ts: string | null
+  route_dist_nm: number | null
+  gc_dist_nm: number | null
+  route_method: string | null
+  sog: number | null
+  segment: string | null
+  laden: boolean | null
+}
+
+export interface VesselEtaResponse {
+  mmsi: number
+  as_of: string
+  n: number
+  predictions: EtaPrediction[]
+}
+
+export function useVesselEta(mmsi: number | null | undefined) {
+  return useQuery({
+    queryKey: ['vessel-eta', mmsi],
+    queryFn: () => getJSON<VesselEtaResponse>(`/api/analytics/eta?mmsi=${mmsi}`),
+    enabled: mmsi != null,
+    staleTime: 4 * 60_000,
+    refetchInterval: 4 * 60_000,
+  })
+}
+
 export function useEtaAccuracy(targetType = 'all') {
   return useQuery({
     queryKey: ['eta-accuracy', targetType],

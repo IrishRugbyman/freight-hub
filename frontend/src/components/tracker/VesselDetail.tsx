@@ -1,6 +1,7 @@
 import { X, Anchor, Navigation, ArrowLeftRight, TrendingUp, TrendingDown, Ship, AlertTriangle } from 'lucide-react'
-import { useEquasis, useVesselState, useVoyages, useVesselBehavioralRisk } from '@/lib/api'
+import { useEquasis, useVesselState, useVoyages, useVesselBehavioralRisk, useVesselEta } from '@/lib/api'
 import type { Vessel, VoyageEvent } from '@/lib/api'
+import { EtaChip } from '@/components/EtaChip'
 import { colorFor } from '@/lib/segments'
 
 const NAV_LABELS: Record<number, string> = {
@@ -181,6 +182,8 @@ export function VesselDetail({
   const { data: vesselState } = useVesselState(vessel.mmsi)
   const { data: voyages } = useVoyages(vessel.mmsi, 14)
   const { data: behavioralRisk } = useVesselBehavioralRisk(vessel.mmsi)
+  const { data: etaData } = useVesselEta(vessel.mmsi)
+  const trueEta = etaData?.predictions?.[0] ?? null  // soonest resolvable target
 
   return (
     <div className="w-64">
@@ -249,7 +252,24 @@ export function VesselDetail({
       <Section>
         <div className="text-[11px] font-semibold text-muted-foreground mb-1">Voyage</div>
         <Row label="Destination" value={vessel.destination} />
-        <Row label="ETA" value={vessel.eta} />
+        <Row label="ETA (reported)" value={vessel.eta} />
+        {trueEta?.eta_p50_h != null && (
+          <div className="flex items-baseline justify-between gap-3 py-0.5">
+            <span className="text-xs text-muted-foreground">
+              True ETA <span className="text-muted-foreground/60">to {trueEta.target_name ?? trueEta.target_id}</span>
+            </span>
+            <EtaChip
+              vessel={{
+                eta_true_h: trueEta.eta_p50_h,
+                eta_low_h: trueEta.eta_low_h,
+                eta_high_h: trueEta.eta_high_h,
+                eta_naive_h: trueEta.eta_naive_h,
+                eta_method: trueEta.method,
+              }}
+              fallbackH={trueEta.eta_naive_h}
+            />
+          </div>
+        )}
         <Row label="Draught" value={vessel.draught != null ? `${vessel.draught.toFixed(1)} m` : null} />
       </Section>
 
