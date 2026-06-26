@@ -530,9 +530,10 @@ def _run_inner(conn: duckdb.DuckDBPyConnection, reset: bool) -> None:
         log.warning("ETA label mining failed, skipping: %s", exc, exc_info=True)
 
     # ------------------------------------------------------------------
-    # 7c. ETA samples + sea-route distance (True ETA Phase B): build the
-    # per-observation training table, enrich with cached searoute distances, and
-    # re-score the naive vs naive+route baselines. Depends on 7b's arrivals.
+    # 7c. ETA samples + sea-route distance + physics ETA (True ETA Phase B/C):
+    # build the per-observation training table (with kinematic/context features),
+    # enrich with cached searoute distances, and score naive vs naive+route vs
+    # physics_v1 (effective speed + calibrated intervals). Depends on 7b's arrivals.
     # ------------------------------------------------------------------
     try:
         from .eta_samples import run_in_conn as _eta_samples_run

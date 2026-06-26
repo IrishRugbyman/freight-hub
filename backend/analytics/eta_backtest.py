@@ -46,6 +46,20 @@ _LEAD_EDGES = [0.0, 6.0, 12.0, 24.0, 48.0, np.inf]
 _LEAD_LABELS = ["0-6h", "6-12h", "12-24h", "24-48h", "48h+"]
 
 
+def _bearing_vec(lats, lons, lat0: float, lon0: float) -> np.ndarray:
+    """Initial great-circle bearing (deg, 0-360) from each (lat,lon) to (lat0,lon0).
+
+    Vectorised twin of `quant_lib.freight.initial_bearing` for the sample build.
+    The `approach_bearing` feature: the heading a vessel must take to the target.
+    """
+    phi1 = np.radians(np.asarray(lats, dtype=float))
+    phi2 = np.radians(lat0)
+    dlon = np.radians(lon0 - np.asarray(lons, dtype=float))
+    y = np.sin(dlon) * np.cos(phi2)
+    x = np.cos(phi1) * np.sin(phi2) - np.sin(phi1) * np.cos(phi2) * np.cos(dlon)
+    return (np.degrees(np.arctan2(y, x)) + 360.0) % 360.0
+
+
 def lead_bucket(remaining_h: float) -> str:
     """Return the lead-time bucket label for an actual remaining time (hours)."""
     for i in range(len(_LEAD_LABELS)):
@@ -125,7 +139,7 @@ def build_samples(
     earliest_global = (arrivals["arrival_ts"] - pd.Timedelta(hours=_MAX_LEAD_H)).min()
     mmsis = arrivals["mmsi"].astype("int64").unique().tolist()
     tracks = ais_query(
-        "SELECT mmsi, snapshot_ts, lat, lon, sog FROM ais_snapshots "
+        "SELECT mmsi, snapshot_ts, lat, lon, sog, draught FROM ais_snapshots "
         "WHERE snapshot_ts >= ? ORDER BY mmsi, snapshot_ts",
         [earliest_global.to_pydatetime()],
     )
@@ -150,12 +164,21 @@ def build_samples(
             remaining_h = (
                 arr.arrival_ts - window["snapshot_ts"]
             ).dt.total_seconds().to_numpy() / 3600.0
+            # Trailing 6h median SOG at each fix (denoised speed feature). Computed
+            # on the full window (time-ordered) before thinning so the trailing
+            # window sees every fix, not just the kept ~hourly ones.
+            trail_full = (
+                window.set_index("snapshot_ts")["sog"].rolling("6h").median().to_numpy()
+            )
             # Thin to ~1 fix per cadence bucket (keep first fix in each bucket).
             bucket = np.floor(remaining_h / _SAMPLE_CADENCE_H).astype(int)
             keep = np.concatenate(([True], np.diff(bucket) != 0))
             w = window[keep]
             rem = remaining_h[keep]
+            trail = trail_full[keep]
+            draught_w = w["draught"].to_numpy()
             gc = haversine_nm_vec(w["lat"].values, w["lon"].values, arr.t_lat, arr.t_lon)
+            bearing = _bearing_vec(w["lat"].values, w["lon"].values, arr.t_lat, arr.t_lon)
             vid = voyage_id(arr.mmsi, arr.target_id, arr.arrival_ts)
             for j in range(len(w)):
                 if rem[j] <= 0:
@@ -174,6 +197,9 @@ def build_samples(
                         "remaining_h": float(rem[j]),
                         "gc_dist_nm": float(gc[j]),
                         "sog": float(w["sog"].iloc[j]) if pd.notna(w["sog"].iloc[j]) else 0.0,
+                        "sog_trail6h": (float(trail[j]) if pd.notna(trail[j]) else None),
+                        "draught": (float(draught_w[j]) if pd.notna(draught_w[j]) else None),
+                        "approach_bearing": (float(bearing[j]) if pd.notna(bearing[j]) else None),
                         "segment": (str(arr.segment) if pd.notna(arr.segment) else None),
                         "laden": (bool(arr.laden) if pd.notna(arr.laden) else None),
                         "lead_bucket": lead_bucket(float(rem[j])),

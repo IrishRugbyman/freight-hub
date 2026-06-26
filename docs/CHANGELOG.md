@@ -1,5 +1,39 @@
 # Freight Hub Changelog
 
+## 2026-06-26 - True ETA Phase C: physics ETA, calibrated intervals, and the kinematic-ceiling finding
+
+Third phase of the True ETA build (`docs/ROADMAP_TRUE_ETA.md`). Goal: a deterministic "physics" ETA good enough to serve now and become the floor the gated ML model must beat, plus an honest confidence interval. The headline result is as much a *finding* as a model: the long-lead error is irreducible by kinematics, which is exactly why ML is gated for Phase D. No user-visible change yet (serving is Phase E).
+
+**New module `quant_lib.freight.eta`** (pure, dependency-free, exported from `quant_lib.freight`):
+- `effective_speed`, `service_speed`, `queue_wait`/`canal_dwell`, `physics_eta`, `initial_bearing`, plus `SEGMENT_SERVICE_SPEED` / `CANAL_STAGING_HOURS` constants. The model is `eta = route_dist / effective_speed + queue_wait`.
+- **Segment cruise priors are measured, not assumed**: the median SOG of *steaming* fixes (SOG >= 8 kn) per segment, taken from the hub's own AIS sample table (Capesize 12.6, VLCC 11.9, Suezmax 11.0, Small 9.8, ... kn). No synthetic numbers.
+- **`queue_wait` is proximity-gated and conservative**: a canal gate (Suez 6 h, Panama 10 h) adds a staging allowance *only* once a vessel is within 60 nm; ports add nothing. We deliberately do **not** source a port queue from `anchored_episodes`: its dwell is a flat ~6.8 h median / ~7.0 h p90 across *every* zone (Rotterdam == Singapore == a tiny port), i.e. a detection-window artifact, not a real wait. Fabricating a queue from it would be worse than admitting we cannot measure one yet.
+
+**New module `analytics/eta_physics.py`**: `physics_p50` (wraps the pure functions; gated on instantaneous SOG so all models score the identical underway set), `IntervalModel` (empirical residual P10/P90 by predicted-ETA bucket, fit leakage-free on the train split), and `make_physics_fn` (returns `{p50, low, high}` for the harness).
+
+**`eta_samples` Phase-C features populated** (created NULL in Phase B, no migration): `sog_trail6h` (trailing 6 h median SOG, computed on the full pre-thinned track), `draught` (per fix), `approach_bearing` (vessel->target initial bearing), `service_speed` (segment prior), `dest_queue_h` (the proximity-gated canal allowance). These are the inputs the Phase-D model will actually learn on.
+
+**The kinematic-ceiling finding (the rigorous core).** Several "smarter speed" point estimates were built and backtested leakage-free (voyage-grouped 50/50 split): trailing-median speed, a segment cruise-prior blend, a global speed-made-good efficiency factor, a proximity-gated SMG decay, and a 2-D empirical (distance x speed) surface. **None beat `route_dist / instantaneous_SOG` on aggregate median error.** Two facts explain why, both visible in the data:
+- At short-to-mid lead the instantaneous SOG is already the best speed proxy (any blend toward trailing/cruise adds error in the 0-12 h bucket, which dominates the sample).
+- At long lead the error is not a speed error at all. A vessel 24-48 h from arrival sits at a median sea-route distance of only ~50-60 nm - it is loitering / anchored / waiting for a canal slot, or making a fast *near-pass* whose true closest approach comes much later (for fixes 0-15 nm out at >=13 kn the actual remaining time runs p10 0.7 h / p50 6.9 h / **p90 60 h**). The route-time term is ~5 h there; no speed estimate can close a 20-50 h loiter gap. The 2-D empirical surface *could* cut the long-lead bias to ~0, but only by inflating every short-lead estimate (the distribution is bimodal and unresolvable from position+speed alone).
+
+So Phase C ships the honest thing: keep the routing P50 (at the deterministic ceiling) with a robust speed estimate for serving, and add the value kinematics *can* give - a calibrated band and the canal staging term.
+
+**Result** (re-scored over one held-out test half, 121,079 underway samples; all three models on the identical set):
+
+| lead | naive med \|err\| | +route | physics_v1 | physics bias | interval cov |
+|---|--:|--:|--:|--:|--:|
+| 0-6h | 0.65h | 1.09h | 1.09h | +0.51 | 0.68 |
+| 6-12h | 3.62h | 3.31h | **3.25h** | -0.71 | 0.95 |
+| 12-24h | 12.56h | 10.41h | **10.25h** | -9.23 | 0.99 |
+| 24-48h | 29.16h | 26.53h | **26.49h** | -26.24 | 1.00 |
+| 48h+ | 53.85h | 50.43h | 50.48h | -50.41 | 0.48 |
+| **all** | **12.72h** | **11.36h** | **11.16h** | **-8.20** | **0.796** |
+
+physics_v1 is the best point model at 6-48 h and overall (the small gain over routing comes from the canal staging term reducing optimism on Suez/Panama approaches) and never regresses 0-6 h. Its calibrated interval hits **79.6% overall coverage** (target 80%). Per-actual-bucket coverage is uneven by construction (the band is bucketed by *predicted* ETA): mid-lead over-covers, while long-actual-lead loiterers - predicted short, arriving late - escape the band (0.48 at 48 h+). That residual is precisely the loiter/congestion signal the history-gated Phase-D model is meant to learn (trailing dynamics, nav-status, anchorage state), now that its feature columns are populated.
+
+**Tests**: 6 new in `tests/test_eta.py` - effective speed prefers instantaneous with trailing/prior fallbacks and clamps; physics ETA monotonic in distance and speed with canal staging adding time (and only in-band); cardinal-direction bearings; `_add_physics_features` service-speed laden adjustment + canal-queue gating; `IntervalModel` offsets straddle zero and cover ~80% with non-negative lows; `build_samples` populates trailing speed / draught / bearing. Full backend suite green (361 passed).
+
 ## 2026-06-26 - True ETA Phase B: sea-route distance + the eta_samples training table
 
 Second phase of the True ETA build (`docs/ROADMAP_TRUE_ETA.md`). Goal: replace the great-circle distance in the ETA with the distance a ship actually sails, and persist the per-observation training table the later phases (history-gated ML, calibrated intervals) will fit on. The naive great-circle ETA cuts across continents - Fujairah->Rotterdam is 2,851 nm as the crow flies but 6,123 nm by sea (2.15x), because the real voyage rounds Arabia, threads Bab-el-Mandeb and transits Suez - and that under-distance is the dominant cause of the Phase A long-haul optimism. No user-visible change.

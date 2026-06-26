@@ -148,33 +148,7 @@ All new tables in `freight_analytics.duckdb`, written by the analytics batch job
 
 ---
 
-### Phase C - Physics ETA v1 (production model)
-*Goal: a deterministic true-ETA - real route + effective speed + canal/queue delays - that is good enough to serve now and becomes the floor the ML model must beat.*
-*Depends on: B. Estimated effort: 2 sessions.*
-
-**What's new.** The first model we would actually show: `eta = route_time(effective_speed) + canal_dwell + dest_queue_wait`, with a simple empirical interval.
-
-**Database changes.** Populate remaining `eta_samples` features: `sog_trail6h`,
-`service_speed`, `draught`, `is_canal`, `dest_queue_h`, `approach_bearing`.
-
-**Infrastructure.** New `quant_lib.freight.eta` submodule (pure functions:
-`effective_speed`, `canal_dwell`, `queue_wait`, `physics_eta`). Constants
-(segment service speeds, canal transit/queue hours) live beside `VESSEL_SPECS`.
-
-**Task checklist.**
-- Data Layer
-  - [ ] `sog_trail6h`: trailing median SOG; `effective_speed` = blend(trailing, segment service-speed prior), draught/laden adjusted.
-  - [ ] `dest_queue_h`: expected wait at the target from `anchored_episodes` dwell distribution (validate the suspiciously-flat ~6.8h median is real, not a detection cap, before trusting it).
-  - [ ] Canal dwell constants for Suez/Panama (transit + typical queue), gated on `is_canal`.
-- API
-  - [ ] (deferred to E)
-- Validation
-  - [ ] Harness run `model='physics_v1'`; require it beats `naive` and `naive+route` at 12-48h leads and does not regress 0-6h.
-  - [ ] Empirical interval: residual quantiles by lead bucket -> P10/P90 multipliers; check ~80% coverage.
-- Testing & Polish
-  - [ ] pytest the pure functions (monotonic in distance, slower speed -> later ETA, canal adds dwell, queue adds wait).
-
-**Definition of done.** `physics_v1` is the best model in `eta_model_metrics` across 12-48h leads with calibrated intervals; pure functions unit-tested.
+### Phase C - Physics ETA v1 (production model) [COMPLETE 2026-06-26]
 
 ---
 

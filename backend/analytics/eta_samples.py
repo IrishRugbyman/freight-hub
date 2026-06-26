@@ -33,8 +33,21 @@ import duckdb
 import numpy as np
 import pandas as pd
 
+from quant_lib.freight import (
+    CANAL_STAGING_HOURS,
+    DEFAULT_SERVICE_SPEED,
+    SEGMENT_SERVICE_SPEED,
+)
+from quant_lib.freight.eta import (
+    CANAL_STAGING_BAND_NM,
+    DEFAULT_CANAL_STAGING_HOURS,
+    _BALLAST_FACTOR,
+    _LADEN_FACTOR,
+)
+
 from analytics import eta_backtest as bt
 from analytics.eta_labels import ANALYTICS_DB, _default_ais_query, haversine_nm
+from analytics.eta_physics import IntervalModel, make_physics_fn
 from analytics.eta_routing import ROUTE_CACHE_SCHEMA, RouteCache, snap_cell
 
 log = logging.getLogger(__name__)
@@ -73,12 +86,41 @@ CREATE TABLE IF NOT EXISTS eta_samples (
 """
 )
 
-# Columns persisted by Phase B (the order used by the INSERT below).
+# Columns persisted to eta_samples (the order used by the INSERT below). Phase C
+# adds the kinematic/context features (`sog_trail6h`, `service_speed`, `draught`,
+# `dest_queue_h`, `approach_bearing`) the physics model and Phase-D ML consume.
 _PERSIST_COLS = [
     "voyage_id", "mmsi", "target_id", "arrival_ts", "obs_ts", "obs_lat", "obs_lon",
     "remaining_h", "route_dist_nm", "gc_dist_nm", "route_method", "sog",
+    "sog_trail6h", "service_speed", "draught", "dest_queue_h", "approach_bearing",
     "segment", "laden", "target_type", "is_canal", "lead_bucket",
 ]
+
+
+def _add_physics_features(out: pd.DataFrame) -> None:
+    """Populate the serve-time-safe Phase-C feature columns in place.
+
+    `service_speed` (segment cruise prior, laden adjusted) and `dest_queue_h`
+    (proximity-gated canal staging) are deterministic functions of columns already
+    on the frame - no label leakage - so they are computed here in bulk rather
+    than per-row in the scorer. `sog_trail6h`, `draught`, `approach_bearing` are
+    carried from `build_samples`; ensure they exist for an empty/old frame.
+    """
+    for col in ("sog_trail6h", "draught", "approach_bearing"):
+        if col not in out.columns:
+            out[col] = np.nan
+
+    seg = out["segment"].map(SEGMENT_SERVICE_SPEED).fillna(DEFAULT_SERVICE_SPEED)
+    laden = out["laden"]
+    factor = pd.Series(1.0, index=out.index)  # unknown laden state -> no adjustment
+    factor = factor.mask(laden == True, _LADEN_FACTOR)  # noqa: E712 - pandas mask needs ==
+    factor = factor.mask(laden == False, _BALLAST_FACTOR)  # noqa: E712
+    out["service_speed"] = seg * factor
+
+    dist = out["route_dist_nm"].where(np.isfinite(out["route_dist_nm"]), out["gc_dist_nm"])
+    canal = out["is_canal"].fillna(False).astype(bool) & (dist <= CANAL_STAGING_BAND_NM)
+    staging = out["target_id"].map(CANAL_STAGING_HOURS).fillna(DEFAULT_CANAL_STAGING_HOURS)
+    out["dest_queue_h"] = np.where(canal, staging, 0.0)
 
 
 def enrich_routes(conn: duckdb.DuckDBPyConnection, samples: pd.DataFrame) -> pd.DataFrame:
@@ -106,6 +148,8 @@ def enrich_routes(conn: duckdb.DuckDBPyConnection, samples: pd.DataFrame) -> pd.
         samples = samples.copy()
         samples["route_dist_nm"] = pd.Series(dtype=float)
         samples["route_method"] = pd.Series(dtype=str)
+        for col in ("sog_trail6h", "service_speed", "draught", "dest_queue_h", "approach_bearing"):
+            samples[col] = pd.Series(dtype=float)
         return samples
 
     targets = {
@@ -142,6 +186,7 @@ def enrich_routes(conn: duckdb.DuckDBPyConnection, samples: pd.DataFrame) -> pd.
     out = samples.copy()
     out["route_dist_nm"] = dists
     out["route_method"] = methods
+    _add_physics_features(out)
     return out
 
 
@@ -174,23 +219,36 @@ def persist_samples(conn: duckdb.DuckDBPyConnection, samples: pd.DataFrame) -> i
 _LONG_HAUL = ("cp:suez", "cp:singapore_malacca", "cp:cape_good_hope", "cp:bab_el_mandeb")
 
 
-def score_baselines(conn: duckdb.DuckDBPyConnection, samples: pd.DataFrame) -> pd.DataFrame:
-    """Score naive and naive+route over the same samples; persist both metric sets.
+# Fraction of voyages held out for evaluation. physics_v1 needs a train split to
+# fit its empirical interval, so all three models are scored on the SAME test half
+# for a leakage-free, apples-to-apples comparison (no voyage spans the split).
+_TEST_FRAC = 0.5
+_SPLIT_SEED = 0
 
-    Returns the combined metric table. Also exports both committed baseline CSVs.
+
+def score_baselines(conn: duckdb.DuckDBPyConnection, samples: pd.DataFrame) -> pd.DataFrame:
+    """Score naive, naive+route and physics_v1 on one held-out test split.
+
+    The physics interval is fit on the train half and evaluated on the test half;
+    the two kinematic baselines have nothing to fit but are scored on the same test
+    half so every model's metrics share an identical sample set. Persists all three
+    metric sets and exports their committed baseline CSVs. Returns the combined
+    table.
     """
     if samples.empty:
         return pd.DataFrame()
-    _, test = bt.voyage_split(samples)  # no fit for either baseline -> score all
+    train, test = bt.voyage_split(samples, test_frac=_TEST_FRAC, seed=_SPLIT_SEED)
+    interval = IntervalModel().fit(train)
+
     naive = bt.score(test, bt.naive_eta_fn, model="naive")
     route = bt.score(test, bt.route_eta_fn, model="naive+route")
-    bt.write_metrics(conn, naive)
-    bt.write_metrics(conn, route)
-    if not naive.empty:
-        bt.export_baseline(naive, "naive")
-    if not route.empty:
-        bt.export_baseline(route, "naive+route")
-    return pd.concat([naive, route], ignore_index=True)
+    physics = bt.score(test, make_physics_fn(interval), model="physics_v1", has_interval=True)
+
+    for metrics, name in ((naive, "naive"), (route, "naive+route"), (physics, "physics_v1")):
+        if not metrics.empty:
+            bt.write_metrics(conn, metrics)
+            bt.export_baseline(metrics, name)
+    return pd.concat([naive, route, physics], ignore_index=True)
 
 
 def _log_long_haul_improvement(conn: duckdb.DuckDBPyConnection, samples: pd.DataFrame) -> None:

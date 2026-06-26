@@ -421,6 +421,136 @@ def test_route_eta_fn_uses_route_distance():
     assert np.isnan(bt.route_eta_fn({"sog": 0.0, "route_dist_nm": 100.0, "gc_dist_nm": 50.0}))
 
 
+# ---------------------------------------------------------------------------
+# Phase C - physics ETA (effective speed, queue, intervals) + features
+# ---------------------------------------------------------------------------
+
+
+def test_effective_speed_prefers_instantaneous_with_fallbacks():
+    from quant_lib.freight import effective_speed, service_speed
+
+    # Instantaneous SOG is the primary estimate (best per the arrival backtest).
+    assert effective_speed(12.0, 9.0, "Capesize") == pytest.approx(12.0)
+    # Falls back to trailing speed when the instantaneous reading is missing/zero.
+    assert effective_speed(0.0, 9.0, "Capesize") == pytest.approx(9.0)
+    # Last-resort fallback is the segment cruise prior (never nan for a vessel we
+    # know the segment of) - used only when no observed speed exists at all.
+    assert effective_speed(None, None, "VLCC") == pytest.approx(service_speed("VLCC"))
+    # Clamped to a physical ceiling even with an absurd reading.
+    assert effective_speed(99.0, None, "VLCC") <= 22.0
+
+
+def test_physics_eta_monotonic_and_queue_adds_time():
+    from quant_lib.freight import physics_eta, queue_wait
+
+    base = physics_eta(120.0, 12.0)  # 10 h
+    assert base == pytest.approx(10.0)
+    # Farther target -> later ETA; slower speed -> later ETA.
+    assert physics_eta(240.0, 12.0) > base
+    assert physics_eta(120.0, 6.0) > base
+    # A canal staging wait pushes the ETA out; a port adds nothing.
+    assert physics_eta(120.0, 12.0, queue_wait(True, 20.0, "cp:suez")) > base
+    assert queue_wait(True, 20.0, "cp:suez") > 0.0
+    assert queue_wait(True, 500.0, "cp:suez") == 0.0  # out of the staging band
+    assert queue_wait(False, 5.0, "zone:rotterdam") == 0.0  # not a canal
+
+
+def test_initial_bearing_cardinal_directions():
+    from quant_lib.freight import initial_bearing
+
+    assert initial_bearing(0.0, 0.0, 10.0, 0.0) == pytest.approx(0.0, abs=1e-6)  # due north
+    assert initial_bearing(0.0, 0.0, 0.0, 10.0) == pytest.approx(90.0, abs=1e-6)  # due east
+
+
+def test_add_physics_features_service_speed_and_canal_queue():
+    import pandas as pd
+
+    from quant_lib.freight import SEGMENT_SERVICE_SPEED
+
+    df = pd.DataFrame(
+        {
+            "segment": ["Capesize", "Capesize", "VLCC"],
+            "laden": [True, False, None],
+            "is_canal": [True, False, True],
+            "route_dist_nm": [20.0, 20.0, 500.0],  # canal in-band, port, canal out-of-band
+            "gc_dist_nm": [20.0, 20.0, 500.0],
+            "target_id": ["cp:suez", "zone:rotterdam", "cp:suez"],
+        }
+    )
+    es._add_physics_features(df)
+    # Laden runs slower than ballast for the same segment.
+    assert df["service_speed"].iloc[0] < df["service_speed"].iloc[1]
+    assert df["service_speed"].iloc[1] == pytest.approx(SEGMENT_SERVICE_SPEED["Capesize"] * 1.02)
+    # Canal queue only inside the staging band; port + far-canal get none.
+    assert df["dest_queue_h"].iloc[0] > 0.0
+    assert df["dest_queue_h"].iloc[1] == 0.0
+    assert df["dest_queue_h"].iloc[2] == 0.0
+
+
+def test_interval_model_offsets_ordered_and_cover():
+    import numpy as np
+    import pandas as pd
+
+    from analytics import eta_physics as ph
+
+    # Build samples whose actual remaining brackets the physics prediction with a
+    # known spread, so the fitted P10/P90 offsets must straddle zero and cover ~80%.
+    rng = np.random.default_rng(0)
+    n = 2000
+    route = rng.uniform(50, 150, n)
+    sog = np.full(n, 10.0)
+    p50_est = route / 10.0  # physics with eff ~ sog here
+    actual = p50_est + rng.normal(0, 5, n)
+    df = pd.DataFrame(
+        {
+            "remaining_h": actual,
+            "route_dist_nm": route,
+            "gc_dist_nm": route,
+            "sog": sog,
+            "sog_trail6h": sog,
+            "segment": "Small",
+            "laden": True,
+            "is_canal": False,
+            "target_id": "zone:rotterdam",
+        }
+    )
+    iv = ph.IntervalModel().fit(df)
+    assert iv.fitted
+    lo, hi = iv.offsets(10.0)
+    assert lo < 0 < hi  # low offset negative, high positive
+    fn = ph.make_physics_fn(iv)
+    res = [fn(r) for r in df.to_dict("records")]
+    covered = np.mean(
+        [r["low"] <= a <= r["high"] for r, a in zip(res, actual) if isinstance(r, dict)]
+    )
+    assert 0.7 <= covered <= 0.9  # ~80% in-sample coverage
+    # low never implies a negative ETA.
+    assert all(r["low"] >= 0.0 for r in res if isinstance(r, dict))
+
+
+def test_build_samples_populates_phase_c_features(ais_db, analytics_conn):
+    # The straight-in vessel's fixes carry trailing speed, draught, and a bearing
+    # toward the origin target (due west -> ~270 deg).
+    q = _ais_query_for(ais_db)
+    analytics_conn.execute(
+        "INSERT OR REPLACE INTO eta_targets VALUES (?,?,?,?,?,?,?)",
+        [
+            _TARGET["target_id"], _TARGET["target_type"], _TARGET["name"],
+            _TARGET["lat"], _TARGET["lon"], _TARGET["reach_nm"], _TARGET["is_canal"],
+        ],
+    )
+    el.mine_arrivals(analytics_conn, q, targets=[_TARGET])
+    samples = bt.build_samples(analytics_conn, q)
+    assert {"sog_trail6h", "draught", "approach_bearing"}.issubset(samples.columns)
+    v1 = samples[samples["mmsi"] == 1001]
+    assert not v1.empty
+    assert (v1["draught"] == 18.0).all()
+    # Vessel approaches the origin from the west (negative lon), so it heads east:
+    # bearing ~90 deg. (Fixes move from lon -2 toward 0.)
+    assert v1["approach_bearing"].dropna().between(80, 100).all()
+    assert v1["sog_trail6h"].dropna().between(11, 13).all()
+
+
 def test_metrics_written_to_db(ais_db, analytics_conn):
     q = _ais_query_for(ais_db)
     analytics_conn.execute(
