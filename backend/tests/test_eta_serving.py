@@ -299,3 +299,68 @@ def test_eta_endpoint_unknown_vessel_empty(eta_client):
     body = r.json()
     assert body["n"] == 0
     assert body["predictions"] == []
+
+
+_METRICS_SCHEMA = """
+CREATE TABLE eta_model_metrics (
+    run_ts TIMESTAMP, model VARCHAR, lead_bucket VARCHAR, target_type VARCHAR,
+    n INTEGER, med_abs_err_h DOUBLE, bias_h DOUBLE, mape DOUBLE,
+    p90_abs_err_h DOUBLE, interval_coverage DOUBLE,
+    PRIMARY KEY (run_ts, model, lead_bucket, target_type)
+);
+"""
+
+_OLD = _NOW - timedelta(hours=3)
+_METRICS_SEED = [
+    # an older run that must NOT be served (only the latest run_ts shows)
+    (_OLD, "naive", "all", "all", 100, 99.0, 99.0, 0.5, 99.0, None),
+    # latest run: naive vs physics across two buckets + rollup
+    (_NOW, "naive", "0-6h", "all", 500, 0.65, 0.0, 0.1, 2.0, None),
+    (_NOW, "naive", "all", "all", 1000, 12.7, -8.2, 0.4, 50.0, None),
+    (_NOW, "physics_v1", "0-6h", "all", 500, 1.09, 0.5, 0.15, 8.1, 0.67),
+    (_NOW, "physics_v1", "all", "all", 1000, 11.1, -8.0, 0.4, 49.8, 0.80),
+]
+
+
+@pytest.fixture
+def metrics_client(tmp_path, monkeypatch) -> TestClient:
+    an_file = tmp_path / "freight_analytics.duckdb"
+    conn = duckdb.connect(str(an_file))
+    conn.execute(_METRICS_SCHEMA)
+    conn.executemany(
+        "INSERT INTO eta_model_metrics VALUES (" + ",".join("?" * 10) + ")", _METRICS_SEED
+    )
+    conn.close()
+    monkeypatch.setenv("ANALYTICS_DB", str(an_file))
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(tmp_path / "missing_ais.duckdb"))
+    from app.main import app
+
+    return TestClient(app)
+
+
+def test_eta_accuracy_serves_latest_run_only(metrics_client):
+    r = metrics_client.get("/api/analytics/eta-accuracy")
+    assert r.status_code == 200
+    body = r.json()
+    # Only the latest run's 4 rows, never the stale 99.0 row.
+    assert all(row["med_abs_err_h"] != 99.0 for row in body["rows"])
+    assert body["models"] == ["naive", "physics_v1"]  # baseline-first order
+    assert body["lead_order"][0] == "0-6h"
+    # physics carries interval coverage; naive does not.
+    phys_all = next(
+        x for x in body["rows"] if x["model"] == "physics_v1" and x["lead_bucket"] == "all"
+    )
+    assert phys_all["interval_coverage"] == 0.80
+    naive_all = next(
+        x for x in body["rows"] if x["model"] == "naive" and x["lead_bucket"] == "all"
+    )
+    assert naive_all["interval_coverage"] is None
+
+
+def test_eta_accuracy_empty_when_no_metrics(eta_client):
+    # eta_client has eta_predictions but no eta_model_metrics table.
+    r = eta_client.get("/api/analytics/eta-accuracy")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["run_ts"] is None
+    assert body["rows"] == []

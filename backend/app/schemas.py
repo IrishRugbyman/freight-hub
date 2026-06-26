@@ -1344,3 +1344,23 @@ class EtaResponse(BaseModel):
     n: int                          # number of resolvable targets scored
     predictions: list[EtaPrediction]
 
+
+class EtaAccuracyRow(BaseModel):
+    """One backtest metric cell: a model's error in a lead bucket / target type."""
+
+    model: str                      # 'naive' | 'naive+route' | 'physics_v1'
+    lead_bucket: str                # '0-6h' | '6-12h' | '12-24h' | '24-48h' | '48h+' | 'all'
+    target_type: str                # 'chokepoint' | 'port' | 'all'
+    n: int
+    med_abs_err_h: float | None
+    bias_h: float | None
+    p90_abs_err_h: float | None
+    interval_coverage: float | None
+
+
+class EtaAccuracyResponse(BaseModel):
+    run_ts: str | None              # ISO timestamp of the latest scored run
+    models: list[str]               # models present, baseline-first order
+    lead_order: list[str]           # lead buckets in chronological order
+    rows: list[EtaAccuracyRow]
+

@@ -35,6 +35,8 @@ from .schemas import (
     AisEvent,
     AnalyticsZone,
     ChokepointCount,
+    EtaAccuracyResponse,
+    EtaAccuracyRow,
     EtaPrediction,
     EtaResponse,
     CongestionResponse,
@@ -5849,6 +5851,75 @@ def analytics_eta(mmsi: int):
         as_of=now_iso,
         n=len(preds),
         predictions=[EtaPrediction(**{k: p.get(k) for k in EtaPrediction.model_fields}) for p in preds],
+    )
+
+
+_ETA_LEAD_ORDER = ["0-6h", "6-12h", "12-24h", "24-48h", "48h+", "all"]
+# Baseline-first model order so the scoreboard reads naive -> routed -> physics.
+_ETA_MODEL_ORDER = ["naive", "naive+route", "physics_v1", "ml"]
+
+
+@app.get("/api/analytics/eta-accuracy", response_model=EtaAccuracyResponse, tags=["analytics"])
+def analytics_eta_accuracy(target_type: str = "all"):
+    """Latest leakage-free backtest scoreboard: model error by lead bucket.
+
+    Serves `eta_model_metrics` from the most recent scored run (True ETA Phases
+    A-C), the credibility centerpiece: median |err|, bias, P90 |err| and interval
+    coverage for each model (naive -> +route -> physics) across actual-remaining
+    lead buckets. `target_type` filters to 'chokepoint' | 'port' | 'all'.
+    """
+    # Each model's most recent scored run (the three baselines may carry slightly
+    # different run_ts on older data, so a single global max() would drop some).
+    df = db.query(
+        "SELECT m.model, m.lead_bucket, m.target_type, m.n, m.med_abs_err_h, "
+        "       m.bias_h, m.p90_abs_err_h, m.interval_coverage "
+        "FROM eta_model_metrics m "
+        "JOIN (SELECT model, max(run_ts) AS rt FROM eta_model_metrics GROUP BY model) latest "
+        "  ON m.model = latest.model AND m.run_ts = latest.rt "
+        "WHERE m.target_type = ?",
+        [target_type],
+        db=db.analytics_db_path(),
+    )
+    if df.empty:
+        return EtaAccuracyResponse(run_ts=None, models=[], lead_order=_ETA_LEAD_ORDER, rows=[])
+
+    run_ts_df = db.query(
+        "SELECT max(run_ts) AS rt FROM eta_model_metrics",
+        db=db.analytics_db_path(),
+    )
+    run_ts = None
+    if not run_ts_df.empty and run_ts_df.iloc[0]["rt"] is not None:
+        rt = run_ts_df.iloc[0]["rt"]
+        run_ts = rt.isoformat() if hasattr(rt, "isoformat") else str(rt)
+
+    present = list(df["model"].unique())
+    models = [m for m in _ETA_MODEL_ORDER if m in present] + [
+        m for m in present if m not in _ETA_MODEL_ORDER
+    ]
+
+    def _num(v):
+        return float(v) if v is not None and not pd.isna(v) else None
+
+    rows = [
+        EtaAccuracyRow(
+            model=str(r["model"]),
+            lead_bucket=str(r["lead_bucket"]),
+            target_type=str(r["target_type"]),
+            n=int(r["n"]),
+            med_abs_err_h=_num(r["med_abs_err_h"]),
+            bias_h=_num(r["bias_h"]),
+            p90_abs_err_h=_num(r["p90_abs_err_h"]),
+            interval_coverage=_num(r["interval_coverage"]),
+        )
+        for _, r in df.iterrows()
+    ]
+    # Order rows by model then chronological lead bucket for a stable scoreboard.
+    lead_rank = {b: i for i, b in enumerate(_ETA_LEAD_ORDER)}
+    model_rank = {m: i for i, m in enumerate(models)}
+    rows.sort(key=lambda x: (model_rank.get(x.model, 99), lead_rank.get(x.lead_bucket, 99)))
+
+    return EtaAccuracyResponse(
+        run_ts=run_ts, models=models, lead_order=_ETA_LEAD_ORDER, rows=rows
     )
 
 

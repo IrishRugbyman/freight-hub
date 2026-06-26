@@ -240,9 +240,17 @@ def score_baselines(conn: duckdb.DuckDBPyConnection, samples: pd.DataFrame) -> p
     train, test = bt.voyage_split(samples, test_frac=_TEST_FRAC, seed=_SPLIT_SEED)
     interval = IntervalModel().fit(train)
 
-    naive = bt.score(test, bt.naive_eta_fn, model="naive")
-    route = bt.score(test, bt.route_eta_fn, model="naive+route")
-    physics = bt.score(test, make_physics_fn(interval), model="physics_v1", has_interval=True)
+    # One shared run_ts across all three models so the scoreboard's "latest run"
+    # query returns them together (microsecond-truncated now() can land on
+    # different seconds across the three score() calls otherwise).
+    from datetime import UTC, datetime
+
+    run_ts = datetime.now(UTC).replace(tzinfo=None, microsecond=0)
+    naive = bt.score(test, bt.naive_eta_fn, model="naive", run_ts=run_ts)
+    route = bt.score(test, bt.route_eta_fn, model="naive+route", run_ts=run_ts)
+    physics = bt.score(
+        test, make_physics_fn(interval), model="physics_v1", run_ts=run_ts, has_interval=True
+    )
 
     for metrics, name in ((naive, "naive"), (route, "naive+route"), (physics, "physics_v1")):
         if not metrics.empty:
