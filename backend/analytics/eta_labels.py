@@ -201,11 +201,13 @@ def _curated_port_points() -> list[dict]:
     """
     eur: dict[str, dict] = {}
     lng: list[dict] = []
+    eu_lng: dict[str, dict] = {}
     try:  # pragma: no cover - exercised in production, bypassed in unit tests
-        from app.main import _EUR_TERMINALS, _US_LNG_LOADING_TERMINALS
+        from app.main import _EUR_TERMINALS, _LNG_EU_TERMINALS, _US_LNG_LOADING_TERMINALS
 
         eur = _EUR_TERMINALS
         lng = _US_LNG_LOADING_TERMINALS
+        eu_lng = _LNG_EU_TERMINALS
     except Exception as exc:  # noqa: BLE001 - degrade gracefully
         log.warning("could not import app terminal dicts (%s); using vendored core", exc)
         eur = {
@@ -225,6 +227,20 @@ def _curated_port_points() -> list[dict]:
                 "lat": float(d["lat"]),
                 "lon": float(d["lon"]),
                 "reach_nm": _PORT_REACH_NM,
+                "is_canal": False,
+            }
+        )
+    # European LNG regas terminals - the destinations the LNG-inbound card serves.
+    # Seeding them as targets lets the live scorer attach a true ETA to each.
+    for name, d in eu_lng.items():
+        points.append(
+            {
+                "target_id": f"port:{_slug(name)}",
+                "target_type": "port",
+                "name": name,
+                "lat": float(d["lat"]),
+                "lon": float(d["lon"]),
+                "reach_nm": _LNG_REACH_NM,
                 "is_canal": False,
             }
         )

@@ -27,7 +27,7 @@ from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
-from . import db, equasis, feed as _feed, fleet as _fleet
+from . import db, equasis, feed as _feed, fleet as _fleet, runner_eta as _runner_eta
 from .runner_dispersion import run_dispersion_default
 from .runner_routes import run_routes_default
 from .schemas import (
@@ -35,6 +35,8 @@ from .schemas import (
     AisEvent,
     AnalyticsZone,
     ChokepointCount,
+    EtaPrediction,
+    EtaResponse,
     CongestionResponse,
     DensityResponse,
     DispersionResponse,
@@ -5830,6 +5832,26 @@ def _eta_bucket(h: float) -> str:
     return "24-48h"
 
 
+@app.get("/api/analytics/eta", response_model=EtaResponse, tags=["analytics"])
+def analytics_eta(mmsi: int):
+    """True ETA for one vessel to every target it is resolvably heading toward.
+
+    Serves the physics ETA + calibrated [P10, P90] interval the analytics job
+    precomputed into `eta_predictions` (True ETA Phase E), one entry per resolved
+    chokepoint / port target, soonest arrival first. Each entry carries the naive
+    great-circle baseline (`eta_naive_h`) and the method label for transparency.
+    The free-text destination is never used: targets are geometric.
+    """
+    preds = _runner_eta.vessel_predictions(mmsi)
+    now_iso = datetime.now(UTC).replace(tzinfo=None, microsecond=0).isoformat()
+    return EtaResponse(
+        mmsi=int(mmsi),
+        as_of=now_iso,
+        n=len(preds),
+        predictions=[EtaPrediction(**{k: p.get(k) for k in EtaPrediction.model_fields}) for p in preds],
+    )
+
+
 @app.get("/api/analytics/european-inbound", response_model=EuropeanInboundResponse)
 def analytics_european_inbound(horizon_h: int = 48, laden_only: bool = False):
     """Laden vessel arrival forecast for European energy import terminals.
@@ -5904,6 +5926,8 @@ def analytics_european_inbound(horizon_h: int = 48, laden_only: bool = False):
             "sog": round(sog_val, 1),
             "port": port_name,
             "port_region": terminal["region"],
+            "terminal_lat": terminal["lat"],
+            "terminal_lon": terminal["lon"],
             "destination_raw": _str_or_none(r.get("destination")),
             "current_region": _str_or_none(r.get("region")),
             "imo": _valid_imo(r.get("imo")),
@@ -5919,6 +5943,10 @@ def analytics_european_inbound(horizon_h: int = 48, laden_only: bool = False):
     # Infer cargo origins from transit history
     all_mmsis = [c["mmsi"] for c in candidates]
     origin_map = _infer_origins(all_mmsis)
+
+    # True ETA (Phase E): look up the precomputed physics ETA + interval to the
+    # terminal each vessel is matched to (nearest target centroid within ~30 nm).
+    preds_by_mmsi = _runner_eta.predictions_by_mmsi(all_mmsis)
 
     # Registry risk enrichment
     all_imos = [c["imo"] for c in candidates if c.get("imo")]
@@ -5961,10 +5989,18 @@ def analytics_european_inbound(horizon_h: int = 48, laden_only: bool = False):
             if dwt:
                 total_dwt_laden += dwt
 
+        # Attach the true ETA (physics + interval) for the matched terminal.
+        pred = _runner_eta.nearest_prediction(
+            preds_by_mmsi.get(mmsi_int, []), c["terminal_lat"], c["terminal_lon"]
+        )
+        eta_true = pred["eta_p50_h"] if pred else None
+        # Primary ETA shown is the true estimate when resolvable, else the naive one.
+        primary_eta = eta_true if eta_true is not None else c["eta_hours"]
+
         origin_key = inferred_origin or "Unknown"
         by_origin[origin_key] = by_origin.get(origin_key, 0) + 1
         by_port[c["port"]] = by_port.get(c["port"], 0) + 1
-        bucket = _eta_bucket(c["eta_hours"])
+        bucket = _eta_bucket(primary_eta)
         eta_buckets[bucket] = eta_buckets.get(bucket, 0) + 1
 
         vessels.append(EuropeanInboundVessel(
@@ -5973,7 +6009,7 @@ def analytics_european_inbound(horizon_h: int = 48, laden_only: bool = False):
             segment=c["segment"],
             kind=c["kind"],
             laden=laden_status,
-            eta_hours=c["eta_hours"],
+            eta_hours=round(primary_eta, 1),
             distance_nm=c["distance_nm"],
             sog=c["sog"],
             port=c["port"],
@@ -5983,6 +6019,11 @@ def analytics_european_inbound(horizon_h: int = 48, laden_only: bool = False):
             inferred_via=inferred_via,
             dwt_estimate=dwt,
             registry_risk=risk_m.get(c["imo"]) if c.get("imo") else None,
+            eta_true_h=round(eta_true, 1) if eta_true is not None else None,
+            eta_low_h=round(pred["eta_low_h"], 1) if pred and pred.get("eta_low_h") is not None else None,
+            eta_high_h=round(pred["eta_high_h"], 1) if pred and pred.get("eta_high_h") is not None else None,
+            eta_naive_h=c["eta_hours"],
+            eta_method=pred["method"] if pred else None,
         ))
 
     # Sort origins by count descending
@@ -6282,6 +6323,10 @@ async def get_lng_inbound(horizon_h: int = 72):
                 origin_m[mmsi] = (fallback, "region")
 
     # --- 5. Match destination to EU LNG terminal and compute ETA ---
+    # True ETA (Phase E): precomputed physics ETA + interval to the regas terminal.
+    preds_by_mmsi = _runner_eta.predictions_by_mmsi(
+        [int(m) for m in live_df["mmsi"].tolist()]
+    )
     vessels: list[LngVessel] = []
     by_origin: dict[str, int] = {}
     by_terminal: dict[str, int] = {}
@@ -6325,11 +6370,21 @@ async def get_lng_inbound(horizon_h: int = 72):
         laden_val = laden_m.get(mmsi, "unknown")
         reg_info = reg_by_imo.get(imo, {})
 
-        if terminal and eta_h is not None:
+        # True ETA for the matched regas terminal (nearest target centroid).
+        pred = None
+        if terminal is not None and terminal_lat is not None:
+            pred = _runner_eta.nearest_prediction(
+                preds_by_mmsi.get(mmsi, []), terminal_lat, terminal_lon
+            )
+        eta_true = pred["eta_p50_h"] if pred else None
+        # Primary ETA shown is the true estimate when resolvable, else the naive one.
+        primary_eta = eta_true if eta_true is not None else eta_h
+
+        if terminal and primary_eta is not None:
             by_terminal[terminal] = by_terminal.get(terminal, 0) + 1
             if inferred_origin:
                 by_origin[inferred_origin] = by_origin.get(inferred_origin, 0) + 1
-            bucket = _eta_bucket(eta_h) if eta_h <= 48 else "48-72h"
+            bucket = _eta_bucket(primary_eta) if primary_eta <= 48 else "48-72h"
             if bucket in eta_buckets:
                 eta_buckets[bucket] += 1
 
@@ -6344,13 +6399,18 @@ async def get_lng_inbound(horizon_h: int = 72):
             destination_raw=dest_raw,
             terminal=terminal,
             terminal_country=terminal_country,
-            eta_hours=round(eta_h, 1) if eta_h is not None else None,
+            eta_hours=round(primary_eta, 1) if primary_eta is not None else None,
             distance_nm=round(dist_nm, 0) if dist_nm is not None else None,
             laden=laden_val,
             inferred_origin=inferred_origin,
             inferred_via=inferred_via,
             registry_name=str(reg_info.get("name") or "") or None,
             owner=str(reg_info.get("owner") or "") or None,
+            eta_true_h=round(eta_true, 1) if eta_true is not None else None,
+            eta_low_h=round(pred["eta_low_h"], 1) if pred and pred.get("eta_low_h") is not None else None,
+            eta_high_h=round(pred["eta_high_h"], 1) if pred and pred.get("eta_high_h") is not None else None,
+            eta_naive_h=round(eta_h, 1) if eta_h is not None else None,
+            eta_method=pred["method"] if pred else None,
         ))
 
     # Sort: EU-bound first (by ETA), then others by name

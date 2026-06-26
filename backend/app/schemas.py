@@ -1232,7 +1232,7 @@ class EuropeanInboundVessel(BaseModel):
     segment: str | None
     kind: str | None
     laden: str | None
-    eta_hours: float
+    eta_hours: float              # primary ETA shown: true (physics) when available, else naive
     distance_nm: float
     sog: float
     port: str
@@ -1242,6 +1242,12 @@ class EuropeanInboundVessel(BaseModel):
     inferred_via: str | None      # chokepoint transit that gave origin, e.g. "Suez NB"
     dwt_estimate: int | None      # proxy from segment
     registry_risk: int | None
+    # True ETA (Phase E): physics estimate + calibrated band + honest naive baseline
+    eta_true_h: float | None = None    # physics P50 (None when no resolved prediction)
+    eta_low_h: float | None = None     # calibrated P10
+    eta_high_h: float | None = None    # calibrated P90
+    eta_naive_h: float | None = None   # great-circle / SOG baseline
+    eta_method: str | None = None      # 'ml' | 'physics' | 'naive'
 
 
 class EuropeanInboundResponse(BaseModel):
@@ -1269,13 +1275,19 @@ class LngVessel(BaseModel):
     # null when the vessel is outbound / in transit without an EU terminal destination
     terminal: str | None
     terminal_country: str | None
-    eta_hours: float | None
+    eta_hours: float | None       # primary ETA: true (physics) when available, else naive
     distance_nm: float | None
     laden: str | None             # laden / ballast / unknown
     inferred_origin: str | None   # Qatar / US Gulf / Norway / Australia / etc.
     inferred_via: str | None      # Suez NB, Gibraltar E, Cape NB, etc.
     registry_name: str | None
     owner: str | None
+    # True ETA (Phase E)
+    eta_true_h: float | None = None
+    eta_low_h: float | None = None
+    eta_high_h: float | None = None
+    eta_naive_h: float | None = None
+    eta_method: str | None = None
 
 
 class LngLoadingVessel(BaseModel):
@@ -1301,4 +1313,34 @@ class LngInboundResponse(BaseModel):
     by_terminal: dict[str, int]
     eta_buckets: dict[str, int]
     us_loading: list[LngLoadingVessel]  # US Gulf loading terminal activity
+
+
+# True ETA Phase E: serving the physics ETA + calibrated interval
+class EtaPrediction(BaseModel):
+    """A true-ETA estimate to one resolved target (chokepoint or port)."""
+
+    target_id: str
+    target_name: str | None
+    target_type: str | None        # 'chokepoint' | 'port'
+    target_lat: float | None
+    target_lon: float | None
+    eta_p50_h: float | None        # point estimate (hours)
+    eta_low_h: float | None        # calibrated P10
+    eta_high_h: float | None       # calibrated P90
+    eta_naive_h: float | None      # great-circle / SOG baseline (for honesty)
+    method: str | None             # 'ml' | 'physics' | 'naive'
+    eta_arrival_ts: str | None     # ISO timestamp = as_of + p50
+    route_dist_nm: float | None    # sea-route distance sailed
+    gc_dist_nm: float | None       # great-circle distance
+    route_method: str | None       # 'searoute' | 'gc'
+    sog: float | None
+    segment: str | None
+    laden: bool | None
+
+
+class EtaResponse(BaseModel):
+    mmsi: int
+    as_of: str
+    n: int                          # number of resolvable targets scored
+    predictions: list[EtaPrediction]
 

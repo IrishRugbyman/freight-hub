@@ -543,6 +543,19 @@ def _run_inner(conn: duckdb.DuckDBPyConnection, reset: bool) -> None:
         log.warning("ETA sample build failed, skipping: %s", exc, exc_info=True)
 
     # ------------------------------------------------------------------
+    # 7d. ETA serving (True ETA Phase E): score every live underway vessel to
+    # its resolvable targets (physics ETA + calibrated interval, fallback chain
+    # ml->physics->naive) into eta_predictions, the live snapshot the API serves.
+    # Fits its interval on the eta_samples just rebuilt in 7c.
+    # ------------------------------------------------------------------
+    try:
+        from .eta_serving import run_in_conn as _eta_serving_run
+
+        _eta_serving_run(conn, _ais_query)
+    except Exception as exc:
+        log.warning("ETA serving scorer failed, skipping: %s", exc, exc_info=True)
+
+    # ------------------------------------------------------------------
     # 8. Advance watermark and promote scratch to live
     # ------------------------------------------------------------------
     new_watermark = max_ts_dt

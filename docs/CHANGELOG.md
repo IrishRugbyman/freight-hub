@@ -1,5 +1,64 @@
 # Freight Hub Changelog
 
+## 2026-06-26 - True ETA Phase E: live serving scorer + API + inbound-card integration
+
+Brought the validated physics model (Phases A-C) to production. The analytics job
+now scores every live underway vessel to a true ETA with a calibrated interval and
+serves it through a new endpoint and inside the European / LNG inbound cards. No ML
+yet (Phase D is gated on >= 8 weeks of history); the fallback chain is therefore
+`ml -> physics -> naive` with physics as champion. First user-facing payoff of the
+True ETA build.
+
+**New module `analytics/eta_serving.py`** (the live scorer):
+- `build_predictions(conn, ais_query)` reads the freshest `live_positions`, keeps
+  underway vessels (SOG >= 1 kn), and resolves each to its plausible targets
+  *geometrically* (never the dirty `destination` string): a target counts when it
+  sits ahead of the vessel's COG/heading (approach bearing within 75 deg) and within
+  1500 nm great-circle. The nearest 3 such targets are scored.
+- Per (vessel, target): sea-route distance via the warm `RouteCache` (+ the same
+  cell-centre snap correction as the offline build), `effective_speed` + canal
+  staging -> `physics_eta` P50, plus the calibrated [P10, P90] band from an
+  `IntervalModel` fit on **all** accumulated `eta_samples` (correct for serving:
+  no held-out set to leak into). The `method` is recorded per row; a vessel with no
+  valid effective speed degrades to a zero-width `naive` row, labelled honestly.
+- Writes the `eta_predictions` snapshot table (rewritten each run, PK
+  `(mmsi, target_id)`), carrying P50/P10/P90, the naive baseline, route + gc
+  distance, route method, segment/laden and the target centroid. Registered in
+  `build.py`'s run order (step 7d) after the sample/physics phase so the interval is
+  fit on the freshest samples; wrapped in try/except so a failure never breaks the
+  hourly build. First live run: **5,406 predictions across 2,086 vessels**, intervals
+  monotone, zero negative lows, 54 distinct targets populated.
+
+**LNG regas terminals are now ETA targets.** `eta_labels._curated_port_points` also
+seeds the `_LNG_EU_TERMINALS` (Zeebrugge, Isle of Grain, Dunkerque LNG, Montoir,
+Eemshaven, ...), so the LNG-inbound card's destinations are first-class targets the
+scorer can attach a true ETA to (those within 20 nm of an existing port/zone, e.g.
+Gate LNG Rotterdam, dedupe into it as before).
+
+**API (`app/runner_eta.py` + `main.py`):**
+- `GET /api/analytics/eta?mmsi=` -> the vessel's resolvable-target ETAs (P50 +
+  [P10, P90] + method + arrival_ts + naive baseline), soonest first.
+- `runner_eta` is a thin read layer (mirrors `runner_routes`): `vessel_predictions`,
+  bulk `predictions_by_mmsi`, and `nearest_prediction(preds, lat, lon)` which picks
+  the prediction whose target centroid is nearest a card's resolved terminal (within
+  30 nm) - decoupling the cards from target-id slugs / the seeding dedupe.
+- `/api/analytics/european-inbound` and `/api/analytics/lng-inbound` now carry
+  `eta_true_h`, `eta_low_h`, `eta_high_h`, `eta_naive_h`, `eta_method`; `eta_hours`
+  becomes the true estimate when resolvable, else the naive one (the naive value
+  stays visible for transparency). European-inbound enriches ~half its fleet live
+  (103/210 at first run); LNG enrichment is sparse only because LNG carriers are few
+  and the currently-visible ones are anchored/arrived (excluded by the underway gate)
+  or not EU-bound - the wiring is exercised and correct.
+
+**Schemas:** new `EtaPrediction` / `EtaResponse`; `EuropeanInboundVessel` and
+`LngVessel` gained the five true-ETA fields (all optional, backward compatible).
+
+**Tests:** 5 new in `tests/test_eta_serving.py` - the scorer excludes anchored
+vessels and bearing-gates targets behind the vessel, produces monotone non-negative
+intervals with `method='physics'` and the canal-staging floor; `run_in_conn`
+persists; empty live -> empty frame; the endpoint returns soonest-first predictions
+and an empty list for an unknown vessel. Full backend suite green (366 passed).
+
 ## 2026-06-26 - True ETA Phase C: physics ETA, calibrated intervals, and the kinematic-ceiling finding
 
 Third phase of the True ETA build (`docs/ROADMAP_TRUE_ETA.md`). Goal: a deterministic "physics" ETA good enough to serve now and become the floor the gated ML model must beat, plus an honest confidence interval. The headline result is as much a *finding* as a model: the long-lead error is irreducible by kinematics, which is exactly why ML is gated for Phase D. No user-visible change yet (serving is Phase E).

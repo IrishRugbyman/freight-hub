@@ -181,26 +181,7 @@ All new tables in `freight_analytics.duckdb`, written by the analytics batch job
 
 ---
 
-### Phase E - Serving + API
-*Goal: live vessels get a true ETA with an interval and an explicit method, through one endpoint and inside the existing inbound/LNG/chokepoint cards.*
-*Depends on: C (D optional). Estimated effort: 1-2 sessions.*
-
-**Database changes.** `eta_predictions` rewritten each analytics run.
-
-**API routes.**
-- `GET /api/analytics/eta?mmsi=` -> P50 + [P10,P90] + method + arrival_ts for a vessel's resolvable targets.
-- Integrate true ETA into `/api/analytics/european-inbound`, `/api/analytics/lng-inbound`, and the chokepoint-arrivals endpoint (replace `eta_hours`, keep it as `eta_naive_h` for transparency).
-
-**Task checklist.**
-- Data Layer
-  - [ ] Live scorer in the analytics run: for each underway vessel + resolvable target, fallback chain **ml -> physics -> naive**, write `eta_predictions`.
-- API
-  - [ ] `runner_eta.py` read layer (mirrors `runner_routes.py`); Pydantic schemas with `method`, `eta_low_h`, `eta_high_h`.
-  - [ ] Wire into the three existing inbound endpoints; bucket by P50; expose both true and naive for honesty.
-- Testing & Polish
-  - [ ] pytest endpoints over seeded `eta_predictions`; assert fallback labelling and interval ordering.
-
-**Definition of done.** `/api/analytics/eta` returns calibrated true ETAs live; inbound/LNG cards consume them; naive value still visible.
+### Phase E - Serving + API [COMPLETE 2026-06-26]
 
 ---
 
