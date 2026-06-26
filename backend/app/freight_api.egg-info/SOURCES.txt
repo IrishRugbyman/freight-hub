@@ -6,3 +6,7 @@ app/freight_api.egg-info/requires.txt
 app/freight_api.egg-info/top_level.txt
 tests/test_detect.py
 tests/test_endpoints.py
+tests/test_eta.py
+tests/test_fleet.py
+tests/test_registry.py
+tests/test_risk.py

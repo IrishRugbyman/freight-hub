@@ -16,6 +16,8 @@ import numpy as np
 import pytest
 from analytics import eta_backtest as bt
 from analytics import eta_labels as el
+from analytics import eta_routing as rt
+from analytics import eta_samples as es
 
 # A custom target at the origin keeps the geometry trivial and decoupled from the
 # real chokepoint/port coordinates: at lat 0, 1 deg lon == 60 nm exactly.
@@ -313,6 +315,110 @@ def test_voyage_split_no_leakage():
     test_ids = set(test["voyage_id"])
     assert train_ids.isdisjoint(test_ids)
     assert train_ids | test_ids == {1, 2}
+
+
+# ---------------------------------------------------------------------------
+# Phase B: sea-route distance + cache
+# ---------------------------------------------------------------------------
+
+
+def test_snap_cell_centres_and_keys():
+    # A 0.25deg cell snaps to its centre; two nearby fixes share a cell, a fix in
+    # the next cell does not.
+    assert rt.snap_cell(0.10, 0.10) == (0.125, 0.125)
+    assert rt.cell_key(0.10, 0.10) == rt.cell_key(0.20, 0.05)
+    assert rt.cell_key(0.10, 0.10) != rt.cell_key(0.40, 0.10)
+    # Negative coordinates floor toward the lower cell.
+    assert rt.snap_cell(-0.10, -0.10) == (-0.125, -0.125)
+
+
+def test_routing_avoids_landmass():
+    # A real searoute path from the Gulf of Oman to Rotterdam must round Arabia and
+    # transit Suez - far longer than the great circle that cuts across land.
+    target = {"target_id": "port:rotterdam", "lat": 51.96, "lon": 4.10}
+    nm, method = rt._route_once(25.12, 56.36, target)  # Fujairah approach
+    gc = el.haversine_nm(25.12, 56.36, 51.96, 4.10)
+    assert method == rt.METHOD_SEAROUTE
+    assert nm > gc * 1.5  # sea route is far longer than the straight line
+
+
+def test_route_cache_hit_returns_identical_and_persists(analytics_conn):
+    target = {"target_id": "cp:suez", "lat": 30.50, "lon": 32.34}
+    cache = rt.RouteCache(analytics_conn)
+    nm1, m1 = cache.distance(25.12, 56.36, target)
+    nm2, m2 = cache.distance(25.20, 56.30, target)  # same 0.25deg cell -> cache hit
+    assert (nm1, m1) == (nm2, m2)
+    assert cache.misses == 1 and cache.hits == 1
+    cache.flush()
+    # A fresh cache loads the persisted value with no further routing.
+    cache2 = rt.RouteCache(analytics_conn)
+    nm3, m3 = cache2.distance(25.12, 56.36, target)
+    assert (nm3, m3) == (nm1, m1)
+    assert cache2.misses == 0 and cache2.hits == 1
+
+
+def test_route_falls_back_to_great_circle_when_searoute_unavailable(monkeypatch):
+    # When searoute cannot be imported, every row degrades to great-circle and is
+    # flagged 'gc' - the build still produces a populated table.
+    monkeypatch.setattr(rt, "_searoute", lambda: None)
+    target = {"target_id": "cp:suez", "lat": 30.50, "lon": 32.34}
+    nm, method = rt._route_once(25.12, 56.36, target)  # _route_once takes a cell centre directly
+    assert method == rt.METHOD_GC
+    assert abs(nm - el.haversine_nm(25.12, 56.36, 30.50, 32.34)) < 1e-6
+
+
+def test_route_never_shorter_than_great_circle(monkeypatch):
+    # A searoute snapping artifact that returns less than the great circle is
+    # clamped up to the physical floor (a sea route is never shorter than gc).
+    class _Stub:
+        @staticmethod
+        def searoute(o, d):
+            return {"properties": {"length": 1.0}}  # absurdly short (km)
+
+    monkeypatch.setattr(rt, "_searoute", lambda: _Stub)
+    target = {"target_id": "cp:suez", "lat": 30.50, "lon": 32.34}
+    nm, method = rt._route_once(25.12, 56.36, target)
+    gc = el.haversine_nm(25.12, 56.36, 30.50, 32.34)
+    assert method == rt.METHOD_SEAROUTE
+    assert nm == gc  # clamped to the great-circle floor
+
+
+def test_enrich_and_persist_samples_roundtrip(ais_db, analytics_conn):
+    # End-to-end: mine the test arrival, build samples, enrich with routes, persist.
+    q = _ais_query_for(ais_db)
+    analytics_conn.execute(
+        "INSERT OR REPLACE INTO eta_targets VALUES (?,?,?,?,?,?,?)",
+        [
+            _TARGET["target_id"], _TARGET["target_type"], _TARGET["name"],
+            _TARGET["lat"], _TARGET["lon"], _TARGET["reach_nm"], _TARGET["is_canal"],
+        ],
+    )
+    el.mine_arrivals(analytics_conn, q, targets=[_TARGET])
+    samples = bt.build_samples(analytics_conn, q)
+    assert {"obs_lat", "obs_lon", "arrival_ts"}.issubset(samples.columns)
+
+    enriched = es.enrich_routes(analytics_conn, samples)
+    assert "route_dist_nm" in enriched.columns
+    # Underway fixes are routed (>= great-circle by the snap-correction invariant);
+    # any non-underway fix is left NULL (not routed) - here all fixes are underway.
+    routed = enriched[enriched["route_dist_nm"].notna()]
+    assert not routed.empty
+    assert (routed["route_dist_nm"] >= routed["gc_dist_nm"] - 1e-6).all()
+    assert routed["route_method"].isin([rt.METHOD_SEAROUTE, rt.METHOD_GC]).all()
+
+    n = es.persist_samples(analytics_conn, enriched)
+    assert n == len(enriched) > 0
+    cols = {r[1] for r in analytics_conn.execute("PRAGMA table_info('eta_samples')").fetchall()}
+    # Phase C feature columns exist (created now), even though unpopulated.
+    assert {"sog_trail6h", "service_speed", "dest_queue_h", "approach_bearing"} <= cols
+
+
+def test_route_eta_fn_uses_route_distance():
+    # route_eta_fn divides the sea-route distance by SOG; falls back to gc if the
+    # row was never routed.
+    assert bt.route_eta_fn({"sog": 10.0, "route_dist_nm": 100.0, "gc_dist_nm": 50.0}) == 10.0
+    assert bt.route_eta_fn({"sog": 10.0, "route_dist_nm": float("nan"), "gc_dist_nm": 50.0}) == 5.0
+    assert np.isnan(bt.route_eta_fn({"sog": 0.0, "route_dist_nm": 100.0, "gc_dist_nm": 50.0}))
 
 
 def test_metrics_written_to_db(ais_db, analytics_conn):

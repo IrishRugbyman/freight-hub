@@ -1,5 +1,41 @@
 # Freight Hub Changelog
 
+## 2026-06-26 - True ETA Phase B: sea-route distance + the eta_samples training table
+
+Second phase of the True ETA build (`docs/ROADMAP_TRUE_ETA.md`). Goal: replace the great-circle distance in the ETA with the distance a ship actually sails, and persist the per-observation training table the later phases (history-gated ML, calibrated intervals) will fit on. The naive great-circle ETA cuts across continents - Fujairah->Rotterdam is 2,851 nm as the crow flies but 6,123 nm by sea (2.15x), because the real voyage rounds Arabia, threads Bab-el-Mandeb and transits Suez - and that under-distance is the dominant cause of the Phase A long-haul optimism. No user-visible change.
+
+**New tables** (`freight_analytics.duckdb`, written by the analytics job):
+- `eta_samples` - one row per (approach, observation): label `remaining_h`, both distances (`route_dist_nm`, `gc_dist_nm`), `route_method`, `sog`, `segment`, `laden`, `target_type`, `is_canal`, `lead_bucket`. 756,440 rows; 240,951 underway and routed. The Phase C feature columns (`sog_trail6h`, `service_speed`, `draught`, `dest_queue_h`, `approach_bearing`) are created now and left NULL, so Phase C needs no schema migration. PK `(mmsi, target_id, arrival_ts, obs_ts)`; `voyage_id` is the train/test split unit.
+- `eta_route_cache` - memoized `(snapped 0.25deg cell, target)` -> sea-route distance, with the method and compute timestamp. 2,293 distinct cells after the cold backfill. Persists across analytics runs (survives the atomic DB swap), so steady-state hourly builds route only never-before-seen cells.
+
+**New module `analytics/eta_routing.py`**:
+- `searoute` (PyPI 1.6.0, added as a backend dep) computes shortest paths over a vendored marnet GeoJSON graph that respects canals and capes. It ships its data in-package and runs fully offline - no runtime network call.
+- **Grid snapping for memoization**: routing is the expensive step (~90 routes/s warm), so every origin is snapped to a 0.25deg cell centre (~15 nm) and the (cell, target) distance is cached. An hourly approach track revisits the same handful of cells, collapsing 240,951 routed fixes onto 2,293 distinct cell routings.
+- **Fallback chain searoute -> great-circle**, method flagged on every row. The roadmap's middle "vendored marnet" tier is redundant in practice (searoute *is* the vendored marnet shortest path), so the honest chain is two real tiers. A missing/broken searoute degrades cleanly to great-circle for the whole build.
+- **Great-circle floor**: a routed value shorter than its great circle can only be a graph-snapping artifact (both endpoints landing on one nearby node), so it is clamped to the physical lower bound at routing time.
+
+**New module `analytics/eta_samples.py`** (registered in `build.py` run order after the Phase-A labels, also standalone via `python -m analytics.eta_samples`):
+- `enrich_routes()`: adds `route_dist_nm` + `route_method` via one `RouteCache` over the whole frame. **Underway filter** - only fixes with `sog >= 1` are routed (a drifting/anchored fix has no kinematic ETA, is never scored, carries no routing signal); the other ~3x of rows get `route_dist_nm = NULL`, cutting the cold-cache budget threefold.
+- **Snap correction (the key rigor decision)**: the cache stores the route from each cell *centre*, but a fix sits inside its cell, so the per-fix distance is `cell_route - gc(cell_centre -> target) + gc(fix -> target)`. This swaps the cell-centre's straight leg for the fix's own. At short range over open water the two gc terms cancel and `route_dist -> gc(fix->target)`, so routing never adds snapping noise to the already-excellent 0-6h naive estimate; at long range the gc terms are near-equal while `cell_route` carries the cape/canal detour, so the full routing gain survives. Because `cell_route >= gc(cell->target)`, the result is provably never shorter than `gc(fix->target)`.
+- **Crash-safe cold backfill**: `RouteCache` flushes every 2,000 new cells, so an interruption during the first run over fresh history keeps everything routed so far. The full backfill (756,440 samples, 240,951 routed) took ~1h40m cold; subsequent builds are mostly cache hits.
+
+**`analytics/eta_backtest.py`**: `build_samples()` now emits the obs lat/lon, `arrival_ts`, `segment`, `laden` and `is_canal` needed to persist `eta_samples`; new `route_eta_fn` divides `route_dist_nm` (falling back to `gc_dist_nm` when NULL) by SOG.
+
+**Result - routing beats naive everywhere, most where geometry demands it.** Re-scored over the same 240,951 underway test samples (`eta_model_metrics`, models `naive` vs `naive+route`):
+
+| lead | naive med \|err\| (all) | +route | naive bias | +route bias |
+|---|--:|--:|--:|--:|
+| 0-6h | 0.65h | 1.10h | +0.02 | +0.52 |
+| 6-12h | 3.63h | 3.32h | -2.74 | -0.60 |
+| 12-24h | 12.54h | 10.42h | -12.25 | -9.03 |
+| 24-48h | 29.35h | 26.65h | -29.24 | -26.21 |
+| 48h+ | 53.61h | 50.36h | -53.54 | -50.20 |
+| **all** | **12.53h** | **11.17h** | **-11.39** | **-7.56** |
+
+Aggregate bias drops 34% (-11.4h -> -7.6h) and median |err| 12.5h -> 11.2h. The chokepoint *targets* themselves improve only modestly (the strait gate is reachable in a near-straight line over water - median gc to Malacca is 6nm, to Suez 52nm - so there is little detour to recover); the win concentrates in the port targets inside the `all` aggregate and where geometry is unavoidable (Cape of Good Hope: median route 874nm vs gc 33nm). The large residual long-lead bias (still -50h at 48h+) is a speed/queueing problem, not a distance one - it is what Phase C (trailing speed, service-speed prior, anchorage wait) and the history-gated model target.
+
+**Tests**: 7 new in `tests/test_eta.py` - snap-cell centring + key stability, routing avoids landmass (a Gulf-of-Aden->Rotterdam route is materially longer than its great circle), cache hit returns an identical value and persists, fallback to great-circle when searoute is unavailable, route never shorter than great-circle, enrich+persist round-trips with the >=gc invariant on routed rows, and `route_eta_fn` uses the route distance. Full backend suite green (355 passed).
+
 ## 2026-06-25 - True ETA Phase A: ground truth + naive baseline harness
 
 First phase of the True ETA build (`docs/ROADMAP_TRUE_ETA.md`). Goal: make every ETA function in the repo scoreable against reconstructed real arrivals, by lead bucket and target, with one command, and commit the naive baseline as the reference all later phases must beat. No user-visible change.

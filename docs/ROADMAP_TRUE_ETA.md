@@ -144,35 +144,7 @@ All new tables in `freight_analytics.duckdb`, written by the analytics batch job
 
 ---
 
-### Phase B - Sea-route distance
-*Goal: ETAs use the distance ships actually sail, not straight lines - killing the long-haul under-distance error.*
-*Depends on: A. Estimated effort: 1-2 sessions.*
-
-**What's new.** A cached sea-routing distance function and a re-scored baseline
-("naive + routing") proving the distance fix alone.
-
-**Database changes.** Create `eta_route_cache`; add `route_dist_nm` + `gc_dist_nm`
-to `eta_samples` (table created here, populated for every arrival's approach).
-
-**API routes.** None yet.
-
-**Infrastructure.** Add `searoute` to `backend/pyproject.toml`; vendor a marnet
-GeoJSON fallback under `backend/analytics/data/` so the build never depends on a
-network call at runtime.
-
-**Task checklist.**
-- Setup
-  - [ ] Add `searoute` dep; `uv lock`. Smoke-test it routes Fujairah->Rotterdam via Suez (not over land).
-- Data Layer
-  - [ ] `route_distance(lat, lon, target_id)` snapping origin to a 0.25deg grid cell, memoized in `eta_route_cache` (cuts repeat routing cost massively across an approach track).
-  - [ ] Fallback chain: searoute -> vendored marnet shortest path -> great-circle (flag the method on the row).
-  - [ ] Build `eta_samples` for all `eta_arrivals`: sample approach fixes (e.g. every ~1h of remaining time up to 72h), compute `route_dist_nm`, `gc_dist_nm`, `sog`, `remaining_h`, `voyage_id`.
-- Validation
-  - [ ] Re-run harness with `eta_fn = route_dist / sog`; write `model='naive+route'`; assert long-haul (Suez/Malacca/Cape) bias shrinks materially vs Phase A.
-- Testing & Polish
-  - [ ] pytest: routing avoids a known landmass; cache hit returns identical value; fallback triggers when searoute unavailable.
-
-**Definition of done.** `eta_samples` populated with both distances; the routing-only model beats naive on long-haul targets in `eta_model_metrics`; tests green.
+### Phase B - Sea-route distance [COMPLETE 2026-06-25]
 
 ---
 

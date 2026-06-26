@@ -74,6 +74,23 @@ def naive_eta_fn(obs: dict) -> float:
     return obs["gc_dist_nm"] / sog
 
 
+def route_eta_fn(obs: dict) -> float:
+    """Routing baseline ETA: sea-route distance / instantaneous SOG (hours).
+
+    Identical to `naive_eta_fn` except it uses the distance ships actually sail
+    (Phase B `route_dist_nm`) instead of the straight line. Isolating the distance
+    fix this way is the cleanest demonstration that routing alone shrinks the
+    long-haul bias. Falls back to the great-circle distance if a row was never
+    routed (so it can never score worse than naive for lack of a value)."""
+    sog = obs.get("sog") or 0.0
+    if sog < _MIN_SOG_KN:
+        return float("nan")
+    dist = obs.get("route_dist_nm")
+    if dist is None or not np.isfinite(dist):
+        dist = obs["gc_dist_nm"]
+    return dist / sog
+
+
 # ---------------------------------------------------------------------------
 # Approach-sample reconstruction
 # ---------------------------------------------------------------------------
@@ -93,7 +110,7 @@ def build_samples(
     conn.execute(ETA_SCHEMA)
     arrivals = conn.execute(
         "SELECT a.mmsi, a.target_id, a.arrival_ts, a.approach_start_ts, a.segment, a.laden, "
-        "       t.lat AS t_lat, t.lon AS t_lon, t.target_type "
+        "       t.lat AS t_lat, t.lon AS t_lon, t.target_type, t.is_canal "
         "FROM eta_arrivals a JOIN eta_targets t USING (target_id)"
     ).df()
     if arrivals.empty:
@@ -149,10 +166,16 @@ def build_samples(
                         "mmsi": int(arr.mmsi),
                         "target_id": arr.target_id,
                         "target_type": arr.target_type,
+                        "is_canal": bool(arr.is_canal),
+                        "arrival_ts": arr.arrival_ts.to_pydatetime(),
                         "obs_ts": w["snapshot_ts"].iloc[j].to_pydatetime(),
+                        "obs_lat": float(w["lat"].iloc[j]),
+                        "obs_lon": float(w["lon"].iloc[j]),
                         "remaining_h": float(rem[j]),
                         "gc_dist_nm": float(gc[j]),
                         "sog": float(w["sog"].iloc[j]) if pd.notna(w["sog"].iloc[j]) else 0.0,
+                        "segment": (str(arr.segment) if pd.notna(arr.segment) else None),
+                        "laden": (bool(arr.laden) if pd.notna(arr.laden) else None),
                         "lead_bucket": lead_bucket(float(rem[j])),
                     }
                 )

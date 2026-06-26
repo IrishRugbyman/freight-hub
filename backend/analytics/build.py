@@ -530,6 +530,18 @@ def _run_inner(conn: duckdb.DuckDBPyConnection, reset: bool) -> None:
         log.warning("ETA label mining failed, skipping: %s", exc, exc_info=True)
 
     # ------------------------------------------------------------------
+    # 7c. ETA samples + sea-route distance (True ETA Phase B): build the
+    # per-observation training table, enrich with cached searoute distances, and
+    # re-score the naive vs naive+route baselines. Depends on 7b's arrivals.
+    # ------------------------------------------------------------------
+    try:
+        from .eta_samples import run_in_conn as _eta_samples_run
+
+        _eta_samples_run(conn, _ais_query)
+    except Exception as exc:
+        log.warning("ETA sample build failed, skipping: %s", exc, exc_info=True)
+
+    # ------------------------------------------------------------------
     # 8. Advance watermark and promote scratch to live
     # ------------------------------------------------------------------
     new_watermark = max_ts_dt
