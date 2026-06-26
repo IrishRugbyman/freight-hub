@@ -9,10 +9,11 @@ import {
   usePortArrivals, usePortFlow, usePortCongestion, useAnchorageOccupancy,
   useTradeLaneMatrix, useDestinationFlows, useCargoTransitions,
   useCargoStateChanges, useLaden, useDensity, useEuropeanInbound,
-  useLngInbound, useTransitRateTimeline,
+  useLngInbound, useTransitRateTimeline, useEtaAccuracy,
   type EuropeanInboundVessel, type LngVessel,
 } from '@/lib/api'
 import { fmt, EmptyState, ChartSkeleton, TOOLTIP_STYLE, LEGEND_STYLE, REGION_LABELS } from './-analyticsShared'
+import { EtaChip } from '@/components/EtaChip'
 
 function useGoToTracker() {
   const navigate = useNavigate()
@@ -1003,7 +1004,7 @@ function EtaBucketGroup({
               </div>
             </div>
             <div className="shrink-0 text-right text-[10px] tabular-nums">
-              <span className="font-semibold text-foreground/80">{v.eta_hours.toFixed(1)}h</span>
+              <EtaChip vessel={v} fallbackH={v.eta_hours} className="justify-end text-[11px]" />
               <div className="text-muted-foreground/50">{v.sog.toFixed(1)} kn</div>
             </div>
           </button>
@@ -1079,6 +1080,7 @@ export function EuropeanInboundCard() {
             <CardTitle className="text-sm">European Supply Intelligence</CardTitle>
             <p className="mt-0.5 text-xs text-muted-foreground">
               Inbound vessel arrivals at European import terminals with cargo origin inference from transit history.
+              ETA is the calibrated physics estimate (sea-route distance + speed + canal staging) where resolvable, else naive; hover for the 80% band and the vs-naive delta.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -1235,10 +1237,6 @@ function LngOriginBar({ byOrigin }: { byOrigin: Record<string, number> }) {
 }
 
 function LngVesselRow({ v, onNavigate }: { v: LngVessel; onNavigate: (mmsi: number, lat: number, lon: number) => void }) {
-  const etaLabel = v.eta_hours != null
-    ? v.eta_hours < 1 ? '<1h' : `${Math.round(v.eta_hours)}h`
-    : '-'
-
   return (
     <button
       type="button"
@@ -1251,7 +1249,9 @@ function LngVesselRow({ v, onNavigate }: { v: LngVessel; onNavigate: (mmsi: numb
       {v.terminal_country && (
         <span className="text-[10px] text-muted-foreground/70">{COUNTRY_FLAG[v.terminal_country] ?? v.terminal_country}</span>
       )}
-      <span className="w-8 text-right tabular-nums text-foreground/80">{etaLabel}</span>
+      {v.terminal != null
+        ? <EtaChip vessel={v} fallbackH={v.eta_hours} showBand={false} className="shrink-0" />
+        : <span className="shrink-0 text-right tabular-nums text-muted-foreground/60">-</span>}
     </button>
   )
 }
@@ -1492,6 +1492,136 @@ export function LngIntelligenceCard() {
 }
 
 // ---------------------------------------------------------------------------
+// True ETA accuracy scoreboard (Phase F) - the credibility centerpiece.
+// ---------------------------------------------------------------------------
+
+// Model display + chart color. Baseline -> routed -> physics, cool to warm.
+const ETA_MODEL_META: Record<string, { label: string; hex: string }> = {
+  naive: { label: 'Naive (gc / SOG)', hex: '#a1a1aa' },        // zinc
+  'naive+route': { label: '+ Sea route', hex: '#fbbf24' },     // amber
+  physics_v1: { label: 'Physics (+ speed, staging)', hex: '#38bdf8' }, // sky
+  ml: { label: 'ML (gated)', hex: '#a78bfa' },                 // violet
+}
+
+function EtaAccuracyCard() {
+  const { data, isLoading } = useEtaAccuracy('all')
+
+  const chartData = React.useMemo(() => {
+    if (!data) return []
+    const buckets = data.lead_order.filter(b => b !== 'all')
+    return buckets.map(bucket => {
+      const row: Record<string, number | string> = { bucket }
+      for (const m of data.models) {
+        const cell = data.rows.find(r => r.model === m && r.lead_bucket === bucket)
+        if (cell?.med_abs_err_h != null) row[m] = Number(cell.med_abs_err_h.toFixed(2))
+      }
+      return row
+    })
+  }, [data])
+
+  const rollup = React.useMemo(
+    () => (data?.models ?? []).map(m => ({
+      model: m,
+      cell: data?.rows.find(r => r.model === m && r.lead_bucket === 'all'),
+    })),
+    [data],
+  )
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardHeader><CardTitle className="text-sm">True ETA Accuracy</CardTitle></CardHeader>
+        <CardContent><ChartSkeleton /></CardContent>
+      </Card>
+    )
+  }
+
+  if (!data || data.rows.length === 0) {
+    return (
+      <Card>
+        <CardHeader><CardTitle className="text-sm">True ETA Accuracy</CardTitle></CardHeader>
+        <CardContent>
+          <EmptyState message="No backtest metrics yet - the scoreboard populates once the analytics job has scored arrivals." />
+        </CardContent>
+      </Card>
+    )
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <CardTitle className="text-sm">True ETA Accuracy</CardTitle>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Leakage-free backtest (voyage-grouped split) over reconstructed AIS arrivals: median absolute
+              error per model by actual lead time. Lower is better; physics is the shipping champion.
+            </p>
+          </div>
+          {data.run_ts && (
+            <span className="shrink-0 text-[10px] text-muted-foreground/50">
+              scored {new Date(data.run_ts).toLocaleDateString()}
+            </span>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="h-64">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={chartData} margin={{ top: 8, right: 8, left: -8, bottom: 4 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+              <XAxis dataKey="bucket" tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
+              <YAxis tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))"
+                label={{ value: 'median |err| (h)', angle: -90, position: 'insideLeft', style: { fontSize: 10, fill: 'hsl(var(--muted-foreground))' } }} />
+              <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(val, name) => [`${val}h`, ETA_MODEL_META[String(name)]?.label ?? String(name)]} />
+              <Legend wrapperStyle={LEGEND_STYLE} formatter={name => ETA_MODEL_META[String(name)]?.label ?? String(name)} />
+              {data.models.map(m => (
+                <Bar key={m} dataKey={m} fill={ETA_MODEL_META[m]?.hex ?? '#888'} radius={[2, 2, 0, 0]} />
+              ))}
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full text-xs tabular-nums">
+            <thead>
+              <tr className="text-left text-muted-foreground">
+                <th className="py-1 pr-3 font-medium">Model (overall)</th>
+                <th className="py-1 pr-3 text-right font-medium">median |err|</th>
+                <th className="py-1 pr-3 text-right font-medium">bias</th>
+                <th className="py-1 pr-3 text-right font-medium">P90 |err|</th>
+                <th className="py-1 pr-3 text-right font-medium">80% coverage</th>
+                <th className="py-1 text-right font-medium">n</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rollup.map(({ model, cell }) => (
+                <tr key={model} className="border-t border-border/50">
+                  <td className="py-1 pr-3">
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="inline-block h-2 w-2 rounded-sm" style={{ backgroundColor: ETA_MODEL_META[model]?.hex ?? '#888' }} />
+                      {ETA_MODEL_META[model]?.label ?? model}
+                    </span>
+                  </td>
+                  <td className="py-1 pr-3 text-right font-semibold text-foreground/90">{cell?.med_abs_err_h != null ? `${cell.med_abs_err_h.toFixed(2)}h` : '-'}</td>
+                  <td className="py-1 pr-3 text-right text-muted-foreground">{cell?.bias_h != null ? `${cell.bias_h > 0 ? '+' : ''}${cell.bias_h.toFixed(1)}h` : '-'}</td>
+                  <td className="py-1 pr-3 text-right text-muted-foreground">{cell?.p90_abs_err_h != null ? `${cell.p90_abs_err_h.toFixed(1)}h` : '-'}</td>
+                  <td className="py-1 pr-3 text-right text-muted-foreground">{cell?.interval_coverage != null ? `${(cell.interval_coverage * 100).toFixed(0)}%` : '-'}</td>
+                  <td className="py-1 text-right text-muted-foreground/60">{cell?.n != null ? cell.n.toLocaleString() : '-'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-2 text-[10px] text-muted-foreground/50">
+          History starts at the collection date and cannot be backfilled; the learned (ML) model is gated until enough clean history accrues, so physics carries production today.
+        </p>
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Default export: Ports & Cargo tab component
 // ---------------------------------------------------------------------------
 export default function PortsCargoTab() {
@@ -1499,6 +1629,7 @@ export default function PortsCargoTab() {
     <div className="space-y-6">
       <LngIntelligenceCard />
       <EuropeanInboundCard />
+      <EtaAccuracyCard />
       <PortArrivalForecastCard />
       <PortFlowCard />
       <PortCongestionCard />

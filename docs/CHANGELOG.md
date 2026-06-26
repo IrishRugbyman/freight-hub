@@ -1,5 +1,41 @@
 # Freight Hub Changelog
 
+## 2026-06-26 - True ETA Phase F: ETA chip + interval + method badge + accuracy scoreboard
+
+The visible payoff of the True ETA build. Inbound cards now show the calibrated
+physics ETA with its method badge and an on-hover band + vs-naive delta, and a new
+public accuracy scoreboard proves the upgrade against the honest baseline. Frontend
+only; no backend changes (the `/api/analytics/eta-accuracy` endpoint shipped with
+the prior commit).
+
+**New `lib/eta.ts`** (pure, vitest-covered): `formatEtaHours` (m / h / d), the
+urgency color ramp, the method-badge token map, and `resolveEta(vessel, fallback)`
+which turns the raw true-ETA fields into the chip's display model - primary value
+(true when resolvable, else naive), the `P10-P90` band label, the method, the
+signed true-minus-naive delta, and a tooltip. 9 unit tests.
+
+**New `components/EtaChip.tsx`**: renders the primary ETA (colored by urgency) +
+optional band + a small `physics`/`ml`/`naive` badge, with the tooltip on hover.
+Colors come from `lib/eta.ts`, never hardcoded. Wired into the European Supply
+Intelligence rows (full chip with band) and the LNG carrier rows (compact, badge
+only); both keep the naive value visible (hover delta). Verified live: ~86 physics
+badges on the European card, naive fallback where no target resolved, 0 console
+errors.
+
+**New `EtaAccuracyCard`** (Ports & Cargo tab, count 12 -> 13): the credibility
+centerpiece. A grouped Recharts bar of median |err| by lead bucket for naive ->
++sea-route -> physics, plus an overall rollup table (median |err|, bias, P90 |err|,
+80% interval coverage, n) and the honest "history starts at collection date; ML is
+gated" note. Consumes `useEtaAccuracy` -> `/api/analytics/eta-accuracy`. Live
+numbers: naive 12.72h -> +route 11.18h -> physics 10.95h overall, 80% coverage,
+n=128,688.
+
+**api.ts**: `TrueEtaFields` mixed into `EuropeanInboundVessel` / `LngVessel`;
+`EtaAccuracyRow` / `EtaAccuracyResponse` types + `useEtaAccuracy` hook.
+
+`npm run build` clean; full vitest green (27 passed); visual check passed (chart +
+chips render, no console errors).
+
 ## 2026-06-26 - True ETA Phase E: live serving scorer + API + inbound-card integration
 
 Brought the validated physics model (Phases A-C) to production. The analytics job

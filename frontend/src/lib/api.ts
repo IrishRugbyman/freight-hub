@@ -2024,7 +2024,16 @@ export function useOwnerFleetStatus(kind?: string, minVessels = 1, limit = 30) {
 }
 
 // Phase 54: European Supply Intelligence
-export interface EuropeanInboundVessel {
+// True ETA (Phase E/F): optional physics estimate + calibrated band + method.
+export interface TrueEtaFields {
+  eta_true_h: number | null
+  eta_low_h: number | null
+  eta_high_h: number | null
+  eta_naive_h: number | null
+  eta_method: string | null
+}
+
+export interface EuropeanInboundVessel extends TrueEtaFields {
   mmsi: number
   name: string | null
   segment: string | null
@@ -2065,7 +2074,7 @@ export function useEuropeanInbound(horizonH = 48, ladenOnly = false) {
 }
 
 // Phase 55: LNG Intelligence
-export interface LngVessel {
+export interface LngVessel extends TrueEtaFields {
   mmsi: number
   imo: number
   name: string | null
@@ -2116,5 +2125,34 @@ export function useLngInbound(horizonH = 72) {
     queryFn: () => getJSON<LngInboundResponse>(`/api/analytics/lng-inbound?horizon_h=${horizonH}`),
     staleTime: 5 * 60_000,
     refetchInterval: 5 * 60_000,
+  })
+}
+
+// True ETA Phase F: accuracy scoreboard (leakage-free backtest metrics)
+export interface EtaAccuracyRow {
+  model: string
+  lead_bucket: string
+  target_type: string
+  n: number
+  med_abs_err_h: number | null
+  bias_h: number | null
+  p90_abs_err_h: number | null
+  interval_coverage: number | null
+}
+
+export interface EtaAccuracyResponse {
+  run_ts: string | null
+  models: string[]
+  lead_order: string[]
+  rows: EtaAccuracyRow[]
+}
+
+export function useEtaAccuracy(targetType = 'all') {
+  return useQuery({
+    queryKey: ['eta-accuracy', targetType],
+    queryFn: () =>
+      getJSON<EtaAccuracyResponse>(`/api/analytics/eta-accuracy?target_type=${targetType}`),
+    staleTime: 10 * 60_000,
+    refetchInterval: 10 * 60_000,
   })
 }

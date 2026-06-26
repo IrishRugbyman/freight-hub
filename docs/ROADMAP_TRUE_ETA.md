@@ -185,24 +185,11 @@ All new tables in `freight_analytics.duckdb`, written by the analytics batch job
 
 ---
 
-### Phase F - Frontend: ETA + interval + accuracy scoreboard
-*Goal: the showcase visibly demonstrates the upgrade - ETAs show a confidence band and method, and a public scoreboard proves accuracy vs the naive baseline.*
-*Depends on: E. Estimated effort: 1-2 sessions.*
+### Phase F - Frontend: ETA + interval + accuracy scoreboard [COMPLETE 2026-06-26]
 
-**Frontend.**
-- Inbound/LNG/chokepoint cards: show `P50 (P10-P90)`, a small `ml`/`physics` method badge, and keep the honest "vs naive" delta on hover.
-- New **ETA Accuracy** panel (Analytics tab or its own route): rolling `eta_model_metrics` - median |err| and interval coverage by lead bucket and target, plus the naive baseline line. This is the credibility centerpiece.
-- Vessel detail popup: ETA to its nearest resolvable target with interval.
-
-**Task checklist.**
-- Frontend
-  - [ ] `lib/api.ts` types + hooks for `/api/analytics/eta` and a metrics endpoint.
-  - [ ] ETA chip component (P50 + band + method badge); reuse `lib/segments.ts` color conventions, no hardcoded colors.
-  - [ ] Accuracy scoreboard with Recharts; baseline vs model series; honest "starts at collection date" note.
-- Testing & Polish
-  - [ ] vitest for the ETA chip formatting + bucket logic; `npm run build` clean; quick visual check.
-
-**Definition of done.** Cards render true ETA + interval + method; scoreboard live; build + vitest green; visual check passes.
+Remaining seam (not blocking): the tracker vessel-detail popup could show the
+nearest-target ETA + band (the `/api/analytics/eta?mmsi=` endpoint already serves
+it). The inbound/LNG cards and the accuracy scoreboard are done.
 
 ---
 
