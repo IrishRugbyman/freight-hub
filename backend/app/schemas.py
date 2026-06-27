@@ -37,6 +37,7 @@ class ChokepointCount(BaseModel):
     bbox: list[list[float]]  # [[lat_min, lon_min], [lat_max, lon_max]]
     total: int
     by_segment: dict[str, int]
+    has_coverage: bool = True  # False = no terrestrial AIS receivers feed this basin
 
 
 class Meta(BaseModel):

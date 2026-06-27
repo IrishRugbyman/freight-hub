@@ -323,6 +323,17 @@ _live_cache_lock = _threading.Lock()
 _live_cache: dict = {"df": None, "ts": 0.0, "path": ""}
 _LIVE_CACHE_TTL = 30.0  # seconds
 
+# Self-healing coverage flag: a region has terrestrial AIS coverage iff the collector
+# has captured any snapshot there in the trailing window. Nine of the 24 subscribed
+# basins (Hormuz, Arab Gulf, Bab-el-Mandeb, etc.) are permanently empty because
+# aisstream.io's free terrestrial network has no receivers there - not a config bug,
+# and unfixable without paid satellite AIS. Rather than hardcode a dead-list, we derive
+# coverage from real data so a basin lights up automatically if it ever gets a receiver.
+_coverage_cache_lock = _threading.Lock()
+_coverage_cache: dict = {"regions": None, "ts": 0.0, "path": ""}
+_COVERAGE_CACHE_TTL = 3600.0  # seconds; full snapshot scan, refreshed hourly
+_COVERAGE_WINDOW_DAYS = 7
+
 
 def _live_all():
     """Return the full live_positions DataFrame, served from a 30s in-process cache."""
@@ -347,6 +358,42 @@ def _live_all():
         # DB was locked on same path - return stale cache rather than propagating 0s
         return _live_cache["df"]
     return df
+
+
+def _covered_regions() -> set[str]:
+    """Regions with any AIS snapshot in the trailing window (1h-cached).
+
+    The discriminator for "has terrestrial coverage": basins with real receivers are
+    never empty over a week, the nine dead basins have produced zero rows since
+    collection began. Self-heals within the window if a basin ever comes online.
+    """
+    import time
+
+    now = time.monotonic()
+    current_path = str(db.db_path())
+    with _coverage_cache_lock:
+        path_match = _coverage_cache["path"] == current_path
+        fresh = now - _coverage_cache["ts"] < _COVERAGE_CACHE_TTL
+        if path_match and _coverage_cache["regions"] is not None and fresh:
+            return _coverage_cache["regions"]
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=_COVERAGE_WINDOW_DAYS)
+    df = db.query(
+        "SELECT DISTINCT region FROM ais_snapshots WHERE snapshot_ts > ? AND region IS NOT NULL",
+        [cutoff],
+    )
+    if df.empty:
+        # Missing table or locked DB: don't cache an empty set (would flag every zone
+        # as dead). Fall back to a stale set if we have one, else treat all as covered.
+        with _coverage_cache_lock:
+            if _coverage_cache["regions"] is not None and path_match:
+                return _coverage_cache["regions"]
+        return set(REGIONS)
+    regions = set(df["region"].tolist())
+    with _coverage_cache_lock:
+        _coverage_cache["regions"] = regions
+        _coverage_cache["ts"] = now
+        _coverage_cache["path"] = current_path
+    return regions
 
 
 def _live(where: str = "", params: list | None = None):
@@ -1387,6 +1434,7 @@ def chokepoints():
     df = _live_all()
     if not df.empty:
         df = df[df["region"].notna()]
+    covered = _covered_regions()
     out = []
     for name, bbox in REGIONS.items():
         sub = df[df["region"] == name] if not df.empty else df
@@ -1395,7 +1443,15 @@ def chokepoints():
             if not sub.empty
             else {}
         )
-        out.append(ChokepointCount(region=name, bbox=bbox, total=len(sub), by_segment=by_seg))
+        out.append(
+            ChokepointCount(
+                region=name,
+                bbox=bbox,
+                total=len(sub),
+                by_segment=by_seg,
+                has_coverage=name in covered,
+            )
+        )
     return out
 
 

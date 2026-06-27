@@ -11,10 +11,16 @@ export function ChokepointLayer() {
         <Rectangle
           key={c.region}
           bounds={c.bbox}
-          pathOptions={{ color: '#38bdf8', weight: 1, fillOpacity: c.total > 0 ? 0.06 : 0 }}
+          pathOptions={
+            c.has_coverage
+              ? { color: '#38bdf8', weight: 1, fillOpacity: c.total > 0 ? 0.06 : 0 }
+              : { color: '#64748b', weight: 1, dashArray: '4 4', fillOpacity: 0 }
+          }
         >
           <Tooltip direction="center" permanent className="chokepoint-label">
-            {c.region.replace(/_/g, ' ')} · {c.total}
+            {c.has_coverage
+              ? `${c.region.replace(/_/g, ' ')} · ${c.total}`
+              : `${c.region.replace(/_/g, ' ')} · no terrestrial AIS coverage`}
           </Tooltip>
         </Rectangle>
       ))}

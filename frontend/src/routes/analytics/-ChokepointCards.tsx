@@ -6,7 +6,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   useChokepointStatus, useChokepointAnomaly, useChokepointHeatmap,
-  useTransitRateTimeline, useTransits, useCongestion,
+  useTransitRateTimeline, useTransits, useCongestion, useChokepoints,
   type ChokepointStatusRow,
 } from '@/lib/api'
 import { fmt, EmptyState, ChartSkeleton, TOOLTIP_STYLE, LEGEND_STYLE } from './-analyticsShared'
@@ -138,7 +138,13 @@ function statusRow(row: ChokepointStatusRow) {
 
 export function ChokepointStatusCard() {
   const { data, isLoading } = useChokepointStatus()
+  const { data: coverage } = useChokepoints()
   const rows = data?.rows ?? []
+
+  // Chokepoints the free terrestrial AIS feed does not reach (no receivers in-basin).
+  const noCoverage = (coverage ?? [])
+    .filter(c => CHOKEPOINTS.includes(c.region) && !c.has_coverage)
+    .map(c => fmt(c.region))
 
   return (
     <Card className="bg-card/60 backdrop-blur border-border/40">
@@ -156,6 +162,13 @@ export function ChokepointStatusCard() {
           <div className="space-y-2">
             {rows.map(row => statusRow(row))}
           </div>
+        )}
+        {noCoverage.length > 0 && (
+          <p className="mt-3 text-[10px] leading-relaxed text-muted-foreground/80 border-t border-border/30 pt-2">
+            No terrestrial AIS coverage: <span className="text-muted-foreground">{noCoverage.join(', ')}</span>.
+            The free aisstream.io network has no receivers in these basins, so transits there
+            cannot be observed. Mid-strait coverage needs paid satellite AIS (out of scope).
+          </p>
         )}
       </CardContent>
     </Card>

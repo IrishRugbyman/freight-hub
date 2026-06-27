@@ -121,6 +121,7 @@ export interface ChokepointCount {
   bbox: [[number, number], [number, number]]
   total: number
   by_segment: Record<string, number>
+  has_coverage: boolean
 }
 
 export interface Meta {

@@ -70,6 +70,20 @@ def test_chokepoints(client):
     assert by_region["singapore_malacca"]["bbox"] == [[-2.0, 100.0], [6.0, 105.5]]
 
 
+def test_chokepoints_coverage_default(client):
+    # No ais_snapshots seeded -> can't prove any basin is dead, default to covered.
+    cps = client.get("/api/chokepoints").json()
+    assert all(c["has_coverage"] for c in cps)
+
+
+def test_chokepoints_coverage_flag(client_with_snaps):
+    # Snapshots seeded only in hormuz (recent): it reads as covered and a basin with
+    # no snapshot reads as no-coverage - the self-healing discriminator.
+    cov = {c["region"]: c for c in client_with_snaps.get("/api/chokepoints").json()}
+    assert cov["hormuz"]["has_coverage"] is True
+    assert cov["singapore_malacca"]["has_coverage"] is False
+
+
 def test_meta(client):
     m = client.get("/api/meta").json()
     assert m["total_tracked"] == 4
