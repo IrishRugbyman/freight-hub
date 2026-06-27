@@ -23,6 +23,10 @@ class Vessel(BaseModel):
     draught: float | None = None
     nav_status: int | None = None
     eta: str | None = None
+    flag: str | None = None          # country, derived from MMSI MID
+    flag_code: str | None = None     # ISO2
+    flag_foc: bool = False           # flag of convenience
+    flag_shadow: bool = False        # high shadow-fleet activity flag
 
 
 class TrackPoint(BaseModel):
@@ -356,6 +360,41 @@ class FlagRiskRow(BaseModel):
 class FlagRiskResponse(BaseModel):
     as_of: str
     rows: list[FlagRiskRow]
+
+
+class FleetFlagRow(BaseModel):
+    flag: str
+    flag_code: str | None
+    vessel_count: int
+    length_sum_m: float          # tonnage proxy (sum of length_m)
+    is_foc: bool
+    is_shadow: bool
+    by_segment: dict[str, int]
+
+
+class FleetFlagsResponse(BaseModel):
+    as_of: str
+    total_with_flag: int
+    total_unresolved: int        # live vessels whose MMSI did not resolve to a flag
+    foc_count: int               # vessels under any flag of convenience
+    shadow_count: int            # vessels under any high-shadow-activity flag
+    rows: list[FleetFlagRow]     # sorted by vessel_count desc
+
+
+class FlagMismatchRow(BaseModel):
+    mmsi: int
+    imo: int | None
+    name: str | None
+    segment: str | None
+    mmsi_flag: str               # derived from the MMSI MID
+    mmsi_flag_code: str | None
+    registry_flag: str           # from the Equasis registry
+    registry_flag_code: str | None
+
+
+class FlagMismatchResponse(BaseModel):
+    as_of: str
+    rows: list[FlagMismatchRow]
 
 
 class HighRiskPosition(BaseModel):

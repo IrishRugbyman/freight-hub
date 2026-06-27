@@ -4924,3 +4924,126 @@ def test_lng_inbound_bcm_estimate(lng_client):
     d = r.json()
     # 1 inbound vessel * 0.099 bcm
     assert abs(d["bcm_inbound"] - 0.099) < 0.001, f"bcm should be ~0.099, got {d['bcm_inbound']}"
+
+
+# ---------------------------------------------------------------------------
+# MMSI flag-state endpoints
+# ---------------------------------------------------------------------------
+def _flag_client(tmp_path, monkeypatch):
+    """TestClient seeded with valid 9-digit MMSIs + a registry for mismatch tests."""
+    import duckdb
+    from datetime import UTC, datetime
+
+    from fastapi.testclient import TestClient
+
+    now = datetime.now(UTC).replace(tzinfo=None, microsecond=0)
+    ais_schema = """
+    CREATE TABLE live_positions (
+        mmsi BIGINT PRIMARY KEY, name VARCHAR, lat DOUBLE, lon DOUBLE,
+        sog DOUBLE, cog DOUBLE, heading DOUBLE, destination VARCHAR,
+        ship_type INTEGER, length_m DOUBLE, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, updated_ts TIMESTAMP, imo BIGINT, draught DOUBLE,
+        nav_status INTEGER, eta VARCHAR
+    );
+    CREATE TABLE ais_snapshots (
+        snapshot_ts TIMESTAMP, mmsi BIGINT, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, lat DOUBLE, lon DOUBLE, ship_type INTEGER, length_m DOUBLE,
+        sog DOUBLE, nav_status INTEGER, draught DOUBLE, destination VARCHAR,
+        PRIMARY KEY (snapshot_ts, mmsi)
+    );
+    """
+    rows = [
+        # Liberia (FOC), imo 1000001 -> registry says Panama -> mismatch
+        (636000001, "LIBERIA VLCC", 25.0, 56.0, 14.0, 270.0, 271.0, "AEFJR", 80, 330,
+         "tanker", "VLCC", "hormuz", now, 1000001, 20.0, 0, None),
+        # Gabon (shadow), imo 1000002 -> not in registry
+        (626000002, "GABON VLCC", 25.1, 56.1, 13.0, 270.0, 271.0, "AEFJR", 80, 320,
+         "tanker", "VLCC", "hormuz", now, 1000002, 19.0, 0, None),
+        # UK (neither), imo 1000003 -> registry says GB -> no mismatch
+        (235000003, "UK CAPE", 1.3, 103.7, 12.0, 90.0, 91.0, "SGSIN", 70, 290,
+         "bulk", "Capesize", "singapore_malacca", now, 1000003, 18.0, 0, None),
+        # Short MMSI -> unresolved flag, imo NULL
+        (1001, "NOFLAG BULK", 1.4, 103.8, 11.0, 90.0, None, "SGSIN", 70, 200,
+         "bulk", "Supramax", "singapore_malacca", now, None, 10.0, 0, None),
+    ]
+    ais_file = tmp_path / "ais.duckdb"
+    conn = duckdb.connect(str(ais_file))
+    conn.execute(ais_schema)
+    conn.executemany(
+        "INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows
+    )
+    conn.close()
+
+    reg_schema = """
+    CREATE TABLE vessel_registry (
+        imo BIGINT PRIMARY KEY, ship_name VARCHAR, flag VARCHAR, flag_code VARCHAR,
+        fetch_ok BOOLEAN
+    )
+    """
+    reg_file = tmp_path / "registry.duckdb"
+    rconn = duckdb.connect(str(reg_file))
+    rconn.execute(reg_schema)
+    rconn.executemany(
+        "INSERT INTO vessel_registry VALUES (?,?,?,?,?)",
+        [
+            # Registry uses ISO3 codes (as Equasis does); normalization must still
+            # detect LR != PA (mismatch) and GB == GBR (match).
+            (1000001, "LIBERIA VLCC", "Panama", "PAN", True),   # MMSI=LR -> mismatch
+            (1000003, "UK CAPE", "United Kingdom", "GBR", True),  # MMSI=GB -> match
+        ],
+    )
+    rconn.close()
+
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
+    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
+    from app.main import app
+    return TestClient(app)
+
+
+def test_vessels_carry_flag(tmp_path, monkeypatch):
+    client = _flag_client(tmp_path, monkeypatch)
+    by_mmsi = {v["mmsi"]: v for v in client.get("/api/vessels").json()}
+    lib = by_mmsi[636000001]
+    assert lib["flag"] == "Liberia" and lib["flag_code"] == "LR"
+    assert lib["flag_foc"] is True and lib["flag_shadow"] is False
+    gab = by_mmsi[626000002]
+    assert gab["flag_code"] == "GA" and gab["flag_shadow"] is True
+    nf = by_mmsi[1001]
+    assert nf["flag"] is None and nf["flag_foc"] is False
+
+
+def test_vessels_flag_filters(tmp_path, monkeypatch):
+    client = _flag_client(tmp_path, monkeypatch)
+    foc = client.get("/api/vessels?foc=true").json()
+    assert {v["mmsi"] for v in foc} == {636000001}
+    shadow = client.get("/api/vessels?shadow=true").json()
+    assert {v["mmsi"] for v in shadow} == {626000002}
+    by_code = client.get("/api/vessels?flag=LR").json()
+    assert {v["mmsi"] for v in by_code} == {636000001}
+    by_country = client.get("/api/vessels?flag=Gabon").json()
+    assert {v["mmsi"] for v in by_country} == {626000002}
+
+
+def test_fleet_flags(tmp_path, monkeypatch):
+    client = _flag_client(tmp_path, monkeypatch)
+    d = client.get("/api/analytics/fleet-flags").json()
+    assert d["total_with_flag"] == 3
+    assert d["total_unresolved"] == 1
+    assert d["foc_count"] == 1
+    assert d["shadow_count"] == 1
+    by_code = {r["flag_code"]: r for r in d["rows"]}
+    assert by_code["LR"]["vessel_count"] == 1 and by_code["LR"]["is_foc"] is True
+    assert by_code["GA"]["is_shadow"] is True
+    assert by_code["LR"]["length_sum_m"] == 330.0
+    assert by_code["GA"]["by_segment"] == {"VLCC": 1}
+
+
+def test_flag_mismatches(tmp_path, monkeypatch):
+    client = _flag_client(tmp_path, monkeypatch)
+    rows = client.get("/api/analytics/flag-mismatches").json()["rows"]
+    # Only the Liberia/Panama disagreement; the GB/GB match is excluded.
+    assert len(rows) == 1
+    r = rows[0]
+    assert r["imo"] == 1000001
+    assert r["mmsi_flag_code"] == "LR"
+    assert r["registry_flag_code"] == "PAN"

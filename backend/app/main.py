@@ -23,6 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import Response, StreamingResponse
 from loaders.freight import load_ais_dispersion
+from quant_lib.freight import flag_from_mmsi, to_iso2
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -46,9 +47,13 @@ from .schemas import (
     DensityResponse,
     DispersionResponse,
     EventsResponse,
+    FlagMismatchResponse,
+    FlagMismatchRow,
     FlagRiskResponse,
     FlagRiskRow,
     FleetFacets,
+    FleetFlagRow,
+    FleetFlagsResponse,
     FleetKPIs,
     FleetResponse,
     HighRiskPosition,
@@ -419,13 +424,38 @@ def health() -> dict:
 
 
 @app.get("/api/vessels", response_model=list[Vessel])
-def vessels(kind: str | None = None, segment: str | None = None, region: str | None = None):
-    """Fresh vessel positions, optionally filtered by kind / segment / region."""
+def vessels(
+    kind: str | None = None,
+    segment: str | None = None,
+    region: str | None = None,
+    flag: str | None = None,
+    foc: bool | None = None,
+    shadow: bool | None = None,
+):
+    """Fresh vessel positions, optionally filtered by kind / segment / region / flag.
+
+    `flag` matches either the ISO2 code or the country name. `foc` / `shadow` filter
+    to flags of convenience / high-shadow-activity flags (derived from the MMSI MID).
+    """
     df = _live_all()
     if not df.empty:
         for col, val in (("kind", kind), ("segment", segment), ("region", region)):
             if val:
                 df = df[df[col] == val]
+    if df.empty:
+        return []
+    # Derive flag state from the MMSI MID (free, ~100% coverage).
+    flags = {int(m): flag_from_mmsi(int(m)) for m in df["mmsi"].dropna().unique()}
+    df["flag"] = df["mmsi"].map(lambda m: (f := flags.get(int(m))) and f.country or None)
+    df["flag_code"] = df["mmsi"].map(lambda m: (f := flags.get(int(m))) and f.code or None)
+    df["flag_foc"] = df["mmsi"].map(lambda m: bool((f := flags.get(int(m))) and f.is_foc))
+    df["flag_shadow"] = df["mmsi"].map(lambda m: bool((f := flags.get(int(m))) and f.is_shadow))
+    if flag:
+        df = df[(df["flag_code"] == flag.upper()) | (df["flag"].str.lower() == flag.lower())]
+    if foc:
+        df = df[df["flag_foc"]]
+    if shadow:
+        df = df[df["flag_shadow"]]
     if df.empty:
         return []
     # Round to AIS-native resolution: cuts JSON size ~35% before gzip, lossless for display
@@ -456,6 +486,10 @@ def vessels(kind: str | None = None, segment: str | None = None, region: str | N
             draught=getattr(r, "draught", None) if "draught" in cols else None,
             nav_status=getattr(r, "nav_status", None) if "nav_status" in cols else None,
             eta=getattr(r, "eta", None) if "eta" in cols else None,
+            flag=getattr(r, "flag", None),
+            flag_code=getattr(r, "flag_code", None),
+            flag_foc=bool(getattr(r, "flag_foc", False)),
+            flag_shadow=bool(getattr(r, "flag_shadow", False)),
         )
         for r in df.itertuples()
     ]
@@ -1453,6 +1487,127 @@ def chokepoints():
             )
         )
     return out
+
+
+@app.get("/api/analytics/fleet-flags", response_model=FleetFlagsResponse)
+def fleet_flags(top_n: int = 40):
+    """Live fleet grouped by flag state derived from the MMSI MID.
+
+    Free, ~100%-coverage complement to the Equasis-gated /api/fleet/flag-risk.
+    top_n clamped to 5-100. Unresolved MMSIs (coast/SAR/aids, unassigned MIDs)
+    are counted, not grouped.
+    """
+    top_n = max(5, min(100, top_n))
+    as_of = _iso(datetime.now(UTC).replace(tzinfo=None)) or ""
+    df = _live_all()
+    if df.empty:
+        return FleetFlagsResponse(
+            as_of=as_of, total_with_flag=0, total_unresolved=0,
+            foc_count=0, shadow_count=0, rows=[],
+        )
+    flags = {int(m): flag_from_mmsi(int(m)) for m in df["mmsi"].dropna().unique()}
+    unresolved = int(sum(flags.get(int(m)) is None for m in df["mmsi"] if pd.notna(m)))
+
+    rows: list[FleetFlagRow] = []
+    foc_total = shadow_total = with_flag = 0
+    # Group by resolved flag code.
+    grouped: dict[str, list] = {}
+    for r in df.itertuples():
+        f = flags.get(int(r.mmsi)) if pd.notna(r.mmsi) else None
+        if f is None:
+            continue
+        grouped.setdefault(f.code, []).append((f, r))
+
+    for code, items in grouped.items():
+        f0 = items[0][0]
+        seg_counts: dict[str, int] = {}
+        length_sum = 0.0
+        for _f, r in items:
+            seg = _str_or_none(getattr(r, "segment", None))
+            if seg:
+                seg_counts[seg] = seg_counts.get(seg, 0) + 1
+            lm = getattr(r, "length_m", None)
+            if lm is not None and pd.notna(lm):
+                length_sum += float(lm)
+        n = len(items)
+        with_flag += n
+        if f0.is_foc:
+            foc_total += n
+        if f0.is_shadow:
+            shadow_total += n
+        rows.append(FleetFlagRow(
+            flag=f0.country,
+            flag_code=code,
+            vessel_count=n,
+            length_sum_m=round(length_sum, 1),
+            is_foc=f0.is_foc,
+            is_shadow=f0.is_shadow,
+            by_segment=seg_counts,
+        ))
+
+    rows.sort(key=lambda r: r.vessel_count, reverse=True)
+    return FleetFlagsResponse(
+        as_of=as_of,
+        total_with_flag=with_flag,
+        total_unresolved=unresolved,
+        foc_count=foc_total,
+        shadow_count=shadow_total,
+        rows=rows[:top_n],
+    )
+
+
+@app.get("/api/analytics/flag-mismatches", response_model=FlagMismatchResponse)
+def flag_mismatches():
+    """Live vessels whose MMSI-MID flag disagrees with their Equasis registry flag.
+
+    A disagreement can indicate a recent reflag or identity obfuscation. Joins live
+    positions (mmsi -> imo) to vessel_registry (imo -> flag_code). Empty when the
+    registry has no usable rows.
+    """
+    as_of = _iso(datetime.now(UTC).replace(tzinfo=None)) or ""
+    df = _live_all()
+    if df.empty or "imo" not in df.columns:
+        return FlagMismatchResponse(as_of=as_of, rows=[])
+    live = df[df["imo"].notna()].copy()
+    if live.empty:
+        return FlagMismatchResponse(as_of=as_of, rows=[])
+
+    reg = db.query(
+        "SELECT imo, flag AS registry_flag, flag_code AS registry_flag_code "
+        "FROM vessel_registry WHERE fetch_ok = true AND flag_code IS NOT NULL",
+        db=db.registry_db_path(),
+    )
+    if reg.empty:
+        return FlagMismatchResponse(as_of=as_of, rows=[])
+    reg_by_imo = {int(r.imo): r for r in reg.itertuples()}
+
+    rows: list[FlagMismatchRow] = []
+    for r in live.itertuples():
+        imo = int(r.imo)
+        rr = reg_by_imo.get(imo)
+        if rr is None:
+            continue
+        f = flag_from_mmsi(int(r.mmsi)) if pd.notna(r.mmsi) else None
+        if f is None or not f.code:
+            continue
+        reg_iso2 = to_iso2(str(rr.registry_flag_code))
+        # Skip when the registry code can't be normalized (Equasis special codes)
+        # or genuinely matches the MMSI-derived flag.
+        if reg_iso2 is None or f.code == reg_iso2:
+            continue
+        rows.append(FlagMismatchRow(
+            mmsi=int(r.mmsi),
+            imo=imo,
+            name=_str_or_none(getattr(r, "name", None)),
+            segment=_str_or_none(getattr(r, "segment", None)),
+            mmsi_flag=f.country,
+            mmsi_flag_code=f.code,
+            registry_flag=str(rr.registry_flag),
+            registry_flag_code=str(rr.registry_flag_code),
+        ))
+
+    rows.sort(key=lambda r: (r.segment or "", r.name or ""))
+    return FlagMismatchResponse(as_of=as_of, rows=rows)
 
 
 @app.get("/api/meta", response_model=Meta)
