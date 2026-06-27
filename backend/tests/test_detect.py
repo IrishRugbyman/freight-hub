@@ -12,6 +12,7 @@ import json
 from analytics.detect import (
     ais_gap_events,
     anchored_episodes,
+    current_anchored,
     laden_status,
     loitering_events,
     sts_candidates,
@@ -640,3 +641,83 @@ def test_spoof_no_fire_long_gap():
     ]
     result = gps_spoof_events(_spoof_df(rows))
     assert len(result) == 0
+
+
+# ---------------------------------------------------------------------------
+# current_anchored - reconstruct present vessels from closed episode chains
+# ---------------------------------------------------------------------------
+
+_MAXEND = datetime(2026, 6, 27, 14, 0, 0)
+
+
+def _ep(mmsi, zone, start_h, end_h):
+    """Episode ending end_h hours before _MAXEND, starting start_h before."""
+    return {
+        "mmsi": mmsi,
+        "zone": zone,
+        "start_ts": _MAXEND - timedelta(hours=start_h),
+        "end_ts": _MAXEND - timedelta(hours=end_h),
+    }
+
+
+def test_current_anchored_empty():
+    assert current_anchored(pd.DataFrame(), _MAXEND) == []
+    assert current_anchored(pd.DataFrame([_ep(1, "rotterdam", 6, 0)]), None) == []
+
+
+def test_current_anchored_merges_overlapping_chain():
+    # One continuous anchoring fragmented into three overlapping 6h windows.
+    rows = [
+        _ep(1, "rotterdam", 18, 12),
+        _ep(1, "rotterdam", 13, 7),
+        _ep(1, "rotterdam", 7, 0),  # latest fragment ends at _MAXEND
+    ]
+    out = current_anchored(pd.DataFrame(rows), _MAXEND)
+    assert len(out) == 1
+    assert out[0]["mmsi"] == 1
+    assert out[0]["zone"] == "rotterdam"
+    # True span is 18h (start 18h before max) to 0h -> 18h dwell, not the 6-7h fragment.
+    assert out[0]["dwell_hours"] == 18.0
+
+
+def test_current_anchored_excludes_departed():
+    # Vessel last seen 5h ago (> 2h window) -> not currently anchored.
+    rows = [_ep(2, "antwerp", 11, 5)]
+    out = current_anchored(pd.DataFrame(rows), _MAXEND)
+    assert out == []
+
+
+def test_current_anchored_splits_on_gap():
+    # Two separate anchorings split by a >2h gap; only the recent one counts,
+    # and dwell reflects just that span (not bridged across the gap).
+    rows = [
+        _ep(3, "busan", 30, 24),   # old anchoring, ends 24h ago
+        _ep(3, "busan", 6, 0),     # current anchoring, 6h span
+    ]
+    out = current_anchored(pd.DataFrame(rows), _MAXEND)
+    assert len(out) == 1
+    assert out[0]["dwell_hours"] == 6.0
+
+
+def test_current_anchored_one_zone_per_vessel():
+    # A vessel with episodes at two zones is assigned only to its latest span.
+    rows = [
+        _ep(4, "singapore_west", 20, 14),  # earlier, elsewhere
+        _ep(4, "rotterdam", 5, 0),         # latest -> current zone
+    ]
+    out = current_anchored(pd.DataFrame(rows), _MAXEND)
+    assert len(out) == 1
+    assert out[0]["zone"] == "rotterdam"
+
+
+def test_current_anchored_counts_per_zone():
+    rows = [
+        _ep(10, "rotterdam", 6, 0),
+        _ep(11, "rotterdam", 6, 0),
+        _ep(12, "antwerp", 6, 0),
+    ]
+    out = current_anchored(pd.DataFrame(rows), _MAXEND)
+    by_zone: dict[str, int] = {}
+    for r in out:
+        by_zone[r["zone"]] = by_zone.get(r["zone"], 0) + 1
+    assert by_zone == {"rotterdam": 2, "antwerp": 1}

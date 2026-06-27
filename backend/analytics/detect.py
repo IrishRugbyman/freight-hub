@@ -276,6 +276,104 @@ def anchored_episodes(df: pd.DataFrame) -> list[dict]:
     return results
 
 
+# --- currently-anchored reconstruction ---------------------------------------
+# The analytics job processes a sliding window (watermark - OVERLAP_HOURS), so a
+# single continuous anchoring is persisted as a *chain* of overlapping ~6h
+# episodes, every one of them closed (end_ts set to its window's last fix). There
+# are no open (end_ts IS NULL) episodes, so "currently anchored" cannot be read
+# directly. We recover it by merging each vessel's episode chain back into
+# continuous spans and treating a vessel as present *now* when its latest span
+# ends within `window_h` of the freshest episode in the table.
+
+# A vessel is "still anchored as of the latest run" if its most recent episode
+# ends within this many hours of the table's max end_ts (one analytics cadence).
+CURRENT_ANCHOR_WINDOW_H = 2.0
+
+
+def merge_anchored_spans(episodes: pd.DataFrame, gap_h: float = _EPISODE_GAP_H) -> list[dict]:
+    """Merge the fragmented episode chains back into continuous anchoring spans.
+
+    `episodes` needs columns mmsi, zone, start_ts, end_ts. The sliding-window
+    analytics job stores one continuous anchoring as many overlapping ~6h closed
+    fragments; this collapses fragments for the same (mmsi, zone) that overlap or
+    sit within `gap_h` of each other into a single span with the true start/end.
+
+    Returns one dict per merged span: {mmsi, zone, start_ts, end_ts} (Timestamps).
+    """
+    if episodes is None or episodes.empty:
+        return []
+    df = episodes.dropna(subset=["start_ts", "end_ts", "zone"]).copy()
+    if df.empty:
+        return []
+    df["start_ts"] = pd.to_datetime(df["start_ts"])
+    df["end_ts"] = pd.to_datetime(df["end_ts"])
+    gap = pd.Timedelta(hours=gap_h)
+
+    spans: list[dict] = []
+    for (mmsi, zone), grp in df.groupby(["mmsi", "zone"], sort=False):
+        grp = grp.sort_values("start_ts")
+        span_start = None
+        span_end = None
+        for s, e in zip(grp["start_ts"], grp["end_ts"]):
+            if span_start is None:
+                span_start, span_end = s, e
+            elif s <= span_end + gap:
+                if e > span_end:
+                    span_end = e
+            else:
+                spans.append({"mmsi": int(mmsi), "zone": str(zone),
+                              "start_ts": span_start, "end_ts": span_end})
+                span_start, span_end = s, e
+        if span_start is not None:
+            spans.append({"mmsi": int(mmsi), "zone": str(zone),
+                          "start_ts": span_start, "end_ts": span_end})
+    return spans
+
+
+def current_anchored(
+    episodes: pd.DataFrame,
+    max_end_ts,
+    window_h: float = CURRENT_ANCHOR_WINDOW_H,
+    gap_h: float = _EPISODE_GAP_H,
+) -> list[dict]:
+    """Reconstruct currently-anchored vessels from the closed-episode chains.
+
+    Merges each vessel's episode chain (see `merge_anchored_spans`) and reports a
+    vessel present at the zone of its single latest span when that span ends
+    within `window_h` of `max_end_ts`. A vessel is never double-counted across
+    zones (it can only be at one anchorage at a time).
+
+    Returns one dict per current vessel: {mmsi, zone, dwell_hours, end_ts}, where
+    `dwell_hours` is the merged-span length (true dwell), not a window fragment.
+    """
+    if max_end_ts is None:
+        return []
+    spans = merge_anchored_spans(episodes, gap_h=gap_h)
+    if not spans:
+        return []
+    max_end = pd.Timestamp(max_end_ts)
+    cutoff = max_end - pd.Timedelta(hours=window_h)
+
+    # Keep each vessel's single latest span (a vessel is at one anchorage now).
+    latest: dict[int, dict] = {}
+    for sp in spans:
+        cur = latest.get(sp["mmsi"])
+        if cur is None or sp["end_ts"] > cur["end_ts"]:
+            latest[sp["mmsi"]] = sp
+
+    out: list[dict] = []
+    for mmsi, sp in latest.items():
+        if sp["end_ts"] >= cutoff:
+            dwell = (sp["end_ts"] - sp["start_ts"]).total_seconds() / 3600
+            out.append({
+                "mmsi": int(mmsi),
+                "zone": sp["zone"],
+                "dwell_hours": round(float(dwell), 1),
+                "end_ts": sp["end_ts"].to_pydatetime(),
+            })
+    return out
+
+
 # --- fleet density snapshot --------------------------------------------------
 
 

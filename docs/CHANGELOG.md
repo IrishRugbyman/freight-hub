@@ -1,5 +1,39 @@
 # Freight Hub Changelog
 
+## 2026-06-27 - Fix: Port Congestion Monitor + Anchorage Dwell showed zero current vessels
+
+Reported from the live Ports & Cargo tab: every zone in the Port Congestion
+Monitor read `Now = 0` / `0.00x LOW` despite large baselines (Rotterdam baseline
+893.5 but Now=0). Root cause: both endpoints derived "currently anchored" from
+`anchored_episodes WHERE end_ts IS NULL`, but the analytics job **never leaves an
+episode open**. Its sliding window (`watermark - 6h overlap`) stores one
+continuous anchoring as a *chain* of overlapping ~6h CLOSED fragments, every one
+with `end_ts` set to its window's last fix. So `end_ts IS NULL` matched nothing
+(0 of 248,581 episodes open) and the "now" count was always zero. The same flaw
+made the baseline ~4x too high: it summed `dwell_hours` over all overlapping
+fragments (Rotterdam 893.5 vs the true ~204).
+
+**New pure helpers in `analytics/detect.py`** (unit-tested, 11 cases):
+`merge_anchored_spans()` collapses a vessel's fragment chain (overlap or within
+the 2h episode gap) back into continuous spans with the true start/end;
+`current_anchored()` builds on it, reporting a vessel present at the zone of its
+single latest span when that span ends within 2h of the freshest episode (a
+vessel is never double-counted across zones).
+
+**`/api/analytics/port-congestion`** now reconstructs both sides from merged
+spans: current = `current_anchored`, baseline = avg concurrent vessels over the
+window **excluding the present** (each span clipped to `[since, max_end - 2h]`,
+so the factor stays a current-vs-typical comparison and a zone whose only
+presence is right now correctly has no baseline -> factor 1.0). Live result:
+Rotterdam now=255 baseline=204 factor=1.25x, Port Said 2.08x (congested), Busan
+0.89x (below normal). **`/api/analytics/anchorage-dwell`** uses the same
+reconstruction (30-day lookback so long anchorings merge to a true dwell) instead
+of the dead open-episode query.
+
+**Tests**: 6 new `current_anchored`/merge cases in `test_detect.py`; updated the
+`dwell_client` and `congestion_client` fixtures + assertions to the closed-episode
+model (open episodes were never produced in production). Full suite 416 passing.
+
 ## 2026-06-27 - Ground-truth arrivals ranking (actual vs stated destination)
 
 Surfaced the `eta_arrivals` table (mined by True ETA Phase A, ~30k closest-approach

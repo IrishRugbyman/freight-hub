@@ -1596,26 +1596,46 @@ def analytics_congestion(zone: str = "singapore_west", days: int = 30):
 def analytics_anchorage_dwell(zone: str = "singapore_west", limit: int = 50):
     """Vessels currently anchored at a zone, ranked by dwell time (longest first).
 
-    Joins anchored_episodes (open end_ts) + vessel_state + live_positions + registry.
-    Long dwell vessels are likely ready to depart - a freight market timing signal.
+    Reconstructs currently-anchored vessels from the closed-episode chains (the
+    analytics job never leaves an episode open) via detect.current_anchored, then
+    enriches with vessel_state + live_positions + registry. Long dwell vessels are
+    likely ready to depart - a freight market timing signal.
     """
+    from analytics.detect import current_anchored
+
     limit = max(5, min(200, limit))
     now = datetime.now(UTC).replace(tzinfo=None)
+    # 30-day lookback so a long anchoring's full chain is available to merge into
+    # a true dwell; current_anchored then keeps only vessels still present now.
+    since = now - timedelta(days=30)
 
-    # Open episodes (end_ts IS NULL) at the requested zone
-    ep_df = db.query(
-        "SELECT mmsi, zone, start_ts, kind, segment "
-        "FROM anchored_episodes WHERE zone = ? AND end_ts IS NULL "
-        "ORDER BY start_ts ASC LIMIT ?",
-        [zone, limit],
+    ep_all = db.query(
+        "SELECT mmsi, zone, start_ts, end_ts, kind, segment "
+        "FROM anchored_episodes WHERE end_ts >= ?",
+        [since],
         db=db.analytics_db_path(),
     )
-    if ep_df.empty:
-        return AnchorageDwellResponse(
-            as_of=_iso(now) or "", zone=zone, rows=[]
-        )
+    max_end = pd.to_datetime(ep_all["end_ts"]).max() if not ep_all.empty else None
+    current = current_anchored(ep_all, max_end) if max_end is not None else []
+    here = [c for c in current if c["zone"] == zone]
+    if not here:
+        return AnchorageDwellResponse(as_of=_iso(now) or "", zone=zone, rows=[])
 
-    all_mmsis = list(set(int(m) for m in ep_df["mmsi"].dropna().tolist()))
+    # kind/segment per mmsi from this zone's fragments (latest wins).
+    meta: dict[int, dict] = {}
+    if not ep_all.empty:
+        zsub = ep_all[ep_all["zone"] == zone].sort_values("end_ts")
+        for _, r in zsub.iterrows():
+            meta[int(r["mmsi"])] = {
+                "kind": _str_or_none(r.get("kind")),
+                "segment": _str_or_none(r.get("segment")),
+            }
+
+    # Longest dwell first, capped at limit.
+    here.sort(key=lambda c: c["dwell_hours"], reverse=True)
+    here = here[:limit]
+
+    all_mmsis = [int(c["mmsi"]) for c in here]
     ph = ",".join("?" * len(all_mmsis))
 
     # Vessel names
@@ -1664,10 +1684,11 @@ def analytics_anchorage_dwell(zone: str = "singapore_west", limit: int = 50):
             }
 
     rows = []
-    for _, ep in ep_df.iterrows():
-        mmsi_val = int(ep["mmsi"])
-        start = pd.Timestamp(ep["start_ts"])
-        dwell_h = round((pd.Timestamp(now) - start).total_seconds() / 3600, 1)
+    for c in here:
+        mmsi_val = int(c["mmsi"])
+        dwell_h = float(c["dwell_hours"])
+        start_ts = c["end_ts"] - timedelta(hours=dwell_h)
+        m = meta.get(mmsi_val, {})
 
         imo_val = mmsi_imo.get(mmsi_val)
         risk_info = imo_risk.get(imo_val, {}) if imo_val else {}
@@ -1676,10 +1697,10 @@ def analytics_anchorage_dwell(zone: str = "singapore_west", limit: int = 50):
         rows.append(AnchoredVessel(
             mmsi=mmsi_val,
             name=mmsi_name.get(mmsi_val),
-            zone=str(ep["zone"]),
-            kind=_str_or_none(ep.get("kind")),
-            segment=_str_or_none(ep.get("segment")),
-            start_ts=_iso(ep["start_ts"]) or "",
+            zone=zone,
+            kind=m.get("kind"),
+            segment=m.get("segment"),
+            start_ts=_iso(start_ts) or "",
             dwell_hours=dwell_h,
             laden=mmsi_laden.get(mmsi_val),
             risk_score=rs,
@@ -3355,74 +3376,90 @@ def analytics_port_congestion(kind: str = "", days: int = 14):
     Zones with no historical baseline still appear if vessels are currently anchored:
     they get congestion_factor=1.0 (no comparison available).
     """
+    from analytics.detect import CURRENT_ANCHOR_WINDOW_H, current_anchored, merge_anchored_spans
+
     days = max(3, min(90, days))
     now_ts = datetime.now(UTC).replace(tzinfo=None)
     since = now_ts - timedelta(days=days)
 
-    # Step 1: Current open anchored episodes (end_ts IS NULL)
     kind_cond = " AND kind = ?" if kind else ""
     kind_params = [kind] if kind else []
 
-    # Cannot JOIN across DuckDB files - fetch open episodes then look up region separately
-    open_df = db.query(
-        f"SELECT mmsi, zone, start_ts, kind, segment "
+    # The analytics job never leaves an episode open (end_ts IS NULL): each run's
+    # sliding window stores a continuous anchoring as a chain of overlapping ~6h
+    # CLOSED fragments. So we fetch every fragment in the window and reconstruct
+    # both the current presence and the baseline from MERGED spans - counting raw
+    # fragments would inflate dwell (and the baseline) ~6x. See
+    # detect.merge_anchored_spans / current_anchored.
+    ep_df = db.query(
+        f"SELECT mmsi, zone, start_ts, end_ts, kind "
         f"FROM anchored_episodes "
-        f"WHERE end_ts IS NULL{kind_cond}",
-        kind_params,
-        db=db.analytics_db_path(),
-    )
-
-    # Enrich with region from live_positions (separate DB)
-    open_df["region"] = None
-    if not open_df.empty:
-        open_mmsis = [int(m) for m in open_df["mmsi"].unique()]
-        ph_open = ",".join("?" * len(open_mmsis))
-        region_df = db.query(
-            f"SELECT mmsi, region FROM live_positions WHERE mmsi IN ({ph_open})",
-            open_mmsis,
-        )
-        if not region_df.empty:
-            region_map = {int(r["mmsi"]): _str_or_none(r.get("region")) for _, r in region_df.iterrows()}
-            open_df["region"] = open_df["mmsi"].apply(lambda m: region_map.get(int(m)))
-
-    # Step 2: Completed historical episodes for baseline
-    hist_df = db.query(
-        f"SELECT zone, kind, start_ts, end_ts, "
-        f"       DATEDIFF('hour', start_ts, end_ts) AS dwell_hours "
-        f"FROM anchored_episodes "
-        f"WHERE end_ts IS NOT NULL AND start_ts >= ?{kind_cond}",
+        f"WHERE end_ts >= ?{kind_cond}",
         [since] + kind_params,
         db=db.analytics_db_path(),
     )
 
-    now_pd = pd.Timestamp(now_ts)
+    max_end = pd.to_datetime(ep_df["end_ts"]).max() if not ep_df.empty else None
+    spans = merge_anchored_spans(ep_df) if not ep_df.empty else []
+    current = current_anchored(ep_df, max_end) if max_end is not None else []
 
-    # Build current state: zone -> {vessels, avg_dwell}
-    zone_current: dict[str, dict] = {}
-    if not open_df.empty:
-        open_df["dwell_hours_so_far"] = (
-            (now_pd - pd.to_datetime(open_df["start_ts"])).dt.total_seconds() / 3600
+    # Enrich currently-anchored vessels with region from live_positions (separate DB).
+    region_map: dict[int, str | None] = {}
+    if current:
+        cur_mmsis = [int(c["mmsi"]) for c in current]
+        ph_cur = ",".join("?" * len(cur_mmsis))
+        region_df = db.query(
+            f"SELECT mmsi, region FROM live_positions WHERE mmsi IN ({ph_cur})",
+            cur_mmsis,
         )
-        for zone_key, grp in open_df.groupby("zone"):
+        if not region_df.empty:
+            region_map = {int(r["mmsi"]): _str_or_none(r.get("region")) for _, r in region_df.iterrows()}
+
+    kind_map: dict[int, str | None] = {}
+    if not ep_df.empty:
+        for _, r in ep_df.dropna(subset=["mmsi"]).iterrows():
+            kind_map.setdefault(int(r["mmsi"]), _str_or_none(r.get("kind")))
+
+    # Build current state: zone -> {vessels, avg_dwell, region, kind}
+    zone_current: dict[str, dict] = {}
+    cur_df = pd.DataFrame(current)
+    if not cur_df.empty:
+        for zone_key, grp in cur_df.groupby("zone"):
+            mmsis = [int(m) for m in grp["mmsi"]]
+            regions = [region_map.get(m) for m in mmsis if region_map.get(m)]
+            kinds = [kind_map.get(m) for m in mmsis if kind_map.get(m)]
             zone_current[str(zone_key)] = {
-                "current_vessels": len(grp),
-                "avg_current_dwell_hours": round(float(grp["dwell_hours_so_far"].mean()), 1),
-                "region": _str_or_none(grp["region"].iloc[0]) if not grp["region"].isnull().all() else None,
-                "kind": _str_or_none(grp["kind"].iloc[0]),
+                "current_vessels": int(len(grp)),
+                "avg_current_dwell_hours": round(float(grp["dwell_hours"].mean()), 1),
+                "region": regions[0] if regions else None,
+                "kind": kinds[0] if kinds else None,
             }
 
-    # Build historical baseline: zone -> avg_count per snapshot, avg_dwell
+    # Build historical baseline from merged spans: avg concurrent vessels over the
+    # window EXCLUDING the present (each span is clipped to [since, baseline_end],
+    # where baseline_end = max_end - current-window). This keeps the factor a
+    # current-vs-typical comparison rather than comparing the present to itself; a
+    # zone whose only presence is right now has no baseline (factor falls back to 1).
     zone_baseline: dict[str, dict] = {}
-    if not hist_df.empty:
-        hist_df["dwell_hours"] = pd.to_numeric(hist_df["dwell_hours"], errors="coerce")
-        for zone_key, grp in hist_df.groupby("zone"):
-            valid_dwell = grp["dwell_hours"].dropna()
-            # Estimate concurrent vessel count: sum(dwell_hours) / observation_window_hours
-            obs_hours = max((now_ts - since).total_seconds() / 3600, 1)
-            avg_concurrent = float(valid_dwell.sum()) / obs_hours
+    span_df = pd.DataFrame(spans)
+    if not span_df.empty and max_end is not None:
+        baseline_end = pd.Timestamp(max_end) - pd.Timedelta(hours=CURRENT_ANCHOR_WINDOW_H)
+        since_pd = pd.Timestamp(since)
+        obs_hours = max((baseline_end - since_pd).total_seconds() / 3600, 1)
+        clip_start = span_df["start_ts"].clip(lower=since_pd)
+        clip_end = span_df["end_ts"].clip(upper=baseline_end)
+        span_df["overlap_h"] = (
+            (clip_end - clip_start).dt.total_seconds() / 3600
+        ).clip(lower=0)
+        span_df["dwell_hours"] = (
+            (span_df["end_ts"] - span_df["start_ts"]).dt.total_seconds() / 3600
+        )
+        for zone_key, grp in span_df.groupby("zone"):
+            overlap_sum = float(grp["overlap_h"].sum())
+            hist = grp[grp["overlap_h"] > 0]["dwell_hours"]
             zone_baseline[str(zone_key)] = {
-                "baseline_avg_vessels": round(avg_concurrent, 2),
-                "baseline_avg_dwell_hours": round(float(valid_dwell.mean()), 1) if len(valid_dwell) else None,
+                "baseline_avg_vessels": round(overlap_sum / obs_hours, 2) if overlap_sum > 0 else None,
+                "baseline_avg_dwell_hours": round(float(hist.mean()), 1) if len(hist) else None,
             }
 
     # Combine: include zones with current vessels or historical baseline

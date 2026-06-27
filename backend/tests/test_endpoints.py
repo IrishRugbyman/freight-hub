@@ -895,17 +895,18 @@ def dwell_client(tmp_path, monkeypatch):
     an_file = tmp_path / "analytics.duckdb"
     an_conn = duckdb.connect(str(an_file))
     an_conn.execute(an_schema)
-    # Open episode (end_ts IS NULL) - 12 hours ago
+    # Episodes are always CLOSED (the job never leaves end_ts NULL); a vessel is
+    # "currently anchored" when its latest episode ends within ~2h of the freshest
+    # episode. 6001 still anchored 12h (ends now); 6002 still anchored 4h (ends now).
     an_conn.execute(
-        "INSERT INTO anchored_episodes VALUES (6001,'singapore_west',?,NULL,'tanker','VLCC')",
-        [_now - timedelta(hours=12)],
+        "INSERT INTO anchored_episodes VALUES (6001,'singapore_west',?,?,'tanker','VLCC')",
+        [_now - timedelta(hours=12), _now],
     )
-    # Also a shorter one (4h ago)
     an_conn.execute(
-        "INSERT INTO anchored_episodes VALUES (6002,'singapore_west',?,NULL,'bulk','Capesize')",
-        [_now - timedelta(hours=4)],
+        "INSERT INTO anchored_episodes VALUES (6002,'singapore_west',?,?,'bulk','Capesize')",
+        [_now - timedelta(hours=4), _now],
     )
-    # Closed episode - should NOT appear
+    # Departed episode (ended 5h ago, > 2h window) - should NOT appear as current.
     an_conn.execute(
         "INSERT INTO anchored_episodes VALUES (6003,'singapore_west',?,?,'tanker','Aframax')",
         [_now - timedelta(hours=20), _now - timedelta(hours=5)],
@@ -933,8 +934,8 @@ def test_anchorage_dwell_structure(dwell_client):
             assert key in row
 
 
-def test_anchorage_dwell_only_open_episodes(dwell_client):
-    """Only episodes with end_ts IS NULL appear; closed episode (6003) excluded."""
+def test_anchorage_dwell_only_current(dwell_client):
+    """Only currently-anchored vessels appear; departed vessel (6003) excluded."""
     r = dwell_client.get("/api/analytics/anchorage-dwell?zone=singapore_west")
     d = r.json()
     mmsis = {row["mmsi"] for row in d["rows"]}
@@ -1506,12 +1507,12 @@ def congestion_client(tmp_path, monkeypatch):
     """Client seeded with anchored_episodes for congestion testing.
 
     Zone 'singapore_west' (tanker/VLCC):
-      - 2 open episodes (current anchored vessels)
-      - 3 completed historical episodes spanning ~24h total dwell
+      - 2 vessels anchored now (closed episodes ending now, 8h/10h dwell)
+      - 3 completed historical episodes (24h each) -> the baseline
 
     Zone 'hormuz_wait' (tanker/VLCC):
-      - 1 open episode
-      - No history -> congestion_factor = 1.0 (no baseline)
+      - 1 vessel arrived <2h ago (no historical overlap)
+      - No baseline -> congestion_factor = 1.0
     """
     import duckdb
     from datetime import UTC, datetime, timedelta
@@ -1584,13 +1585,13 @@ def congestion_client(tmp_path, monkeypatch):
     an_conn = duckdb.connect(str(an_file))
     an_conn.execute(an_schema)
 
-    # Open episodes at singapore_west (these are the current 2 vessels)
+    # Currently anchored at singapore_west: closed episodes ending now (8h, 10h dwell).
     for i in range(2):
         an_conn.execute(
-            "INSERT INTO anchored_episodes VALUES (?,?,?,NULL,'tanker','VLCC')",
-            [6100 + i, 'singapore_west', now - timedelta(hours=8 + i * 2)],
+            "INSERT INTO anchored_episodes VALUES (?,?,?,?,'tanker','VLCC')",
+            [6100 + i, 'singapore_west', now - timedelta(hours=8 + i * 2), now],
         )
-    # Historical completed episodes at singapore_west (past 7 days)
+    # Historical completed episodes at singapore_west (past 7 days) - the baseline.
     for i in range(3):
         start = now - timedelta(days=3 + i, hours=12)
         end = start + timedelta(hours=24)
@@ -1599,10 +1600,11 @@ def congestion_client(tmp_path, monkeypatch):
             [7000 + i, 'singapore_west', start, end],
         )
 
-    # Open episode at hormuz_wait (no history)
+    # Currently anchored at hormuz_wait, arrived <2h ago (entirely within the
+    # current window) so it has no historical baseline -> factor falls back to 1.0.
     an_conn.execute(
-        "INSERT INTO anchored_episodes VALUES (6200,'hormuz_wait',?,NULL,'tanker','VLCC')",
-        [now - timedelta(hours=5)],
+        "INSERT INTO anchored_episodes VALUES (6200,'hormuz_wait',?,?,'tanker','VLCC')",
+        [now - timedelta(hours=1), now],
     )
 
     an_conn.close()
@@ -1656,7 +1658,7 @@ def test_port_congestion_dwell_hours(congestion_client):
     rows = {row["zone"]: row for row in r.json()["rows"]}
     sg = rows.get("singapore_west")
     if sg:
-        # 2 open episodes started 8h and 10h ago -> avg ~9h
+        # 2 current vessels anchored 8h and 10h -> avg ~9h
         if sg["avg_current_dwell_hours"] is not None:
             assert 7.0 <= sg["avg_current_dwell_hours"] <= 12.0
 
