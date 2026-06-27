@@ -1,5 +1,36 @@
 # Freight Hub Changelog
 
+## 2026-06-27 - Fix: duplicate ports in the live destination-distribution lists
+
+Reported from the live Ports & Cargo tab: Rotterdam appeared as five separate
+rows (`NLRTM` 115, `ROTTERDAM` 91, `NL RTM` 24, `ROTTERDAM 3E PETROHA` 12,
+`ROTTERDAM BOTLEK BO` 9), Antwerp as seven, Amsterdam as five. Cause:
+`/api/analytics/ports` and `/api/analytics/destination-flows` grouped by raw
+`UPPER(TRIM(destination))`, so every AIS free-text spelling of one port became
+its own entry. Three duplication classes: spaced-vs-unspaced UN/LOCODE
+(`NL RTM` = `NLRTM`), LOCODE-vs-name (`NLRTM` = `ROTTERDAM`), and name+berth
+(`ROTTERDAM 3E PETROHA`).
+
+**New `_canonical_port()` in `app/main.py`** folds a raw destination onto a
+canonical city: collapses the `XX YYY` LOCODE space, resolves a curated
+LOCODE/name alias map (`_PORT_CANON`, 27 ports), folds name+berth on the leading
+token, and falls back to a cleaned label for unrecognised destinations - never
+fabricating a port it is not sure of (uncurated LOCODEs like `CNSHA`/`ZACPT` pass
+through as the raw code). Deliberately *not* reusing `_EUR_TERMINALS`, which is
+coarse on purpose (it lumps Amsterdam/Ghent into Rotterdam/Antwerp energy
+clusters); this map keeps each city distinct. This is descriptive aggregation
+only - it is not an ETA target, so the "destination text stays untrusted for ETA"
+rule is unaffected.
+
+Both endpoints now group by raw destination in SQL, fold to canonical in Python,
+then apply `top_n` (folding after the LIMIT would split a port across spellings).
+Live result: Rotterdam one row (370), Antwerp one (280), Amsterdam one (136).
+
+**Tests**: new `test_canonical_port.py` (27 cases: variant folding, LOCODE space
+collapse, distinct-cities-not-merged, TRIST=Istanbul vs ITTRS=Trieste, junk
+dropped, unknown-not-guessed). Updated two destination-flows endpoint tests where
+`KRPUS` now correctly reads `Busan`. Full suite 405 passing.
+
 ## 2026-06-27 - True ETA Phase G (monitoring half): champion drift watch
 
 Closed the monitoring half of Phase G. Key finding while scoping it: the "nightly

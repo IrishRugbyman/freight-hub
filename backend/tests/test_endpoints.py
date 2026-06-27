@@ -1783,8 +1783,8 @@ def test_destination_flows_laden_only(flow_client):
     r = flow_client.get("/api/analytics/destination-flows?laden_only=true")
     d = r.json()
     destinations = {row["destination"] for row in d["rows"]}
-    assert "CNSHA" in destinations   # 2 laden VLCCs
-    assert "KRPUS" in destinations   # 1 laden Capesize
+    assert "CNSHA" in destinations   # 2 laden VLCCs (Shanghai LOCODE, uncurated -> raw)
+    assert "Busan" in destinations   # 1 laden Capesize (KRPUS folds to canonical Busan)
     # Ballast vessel destination AEFJR must be excluded
     assert "AEFJR" not in destinations
 
@@ -1808,7 +1808,7 @@ def test_destination_flows_kind_filter(flow_client):
     r = flow_client.get("/api/analytics/destination-flows?laden_only=true&kind=bulk")
     d = r.json()
     destinations = {row["destination"] for row in d["rows"]}
-    assert "KRPUS" in destinations      # only the Capesize
+    assert "Busan" in destinations      # only the Capesize (KRPUS -> Busan)
     assert "CNSHA" not in destinations  # VLCCs (tanker) excluded
 
 
@@ -1817,12 +1817,12 @@ def test_destination_flows_sorted_by_count(flow_client):
     rows = r.json()["rows"]
     counts = [row["vessel_count"] for row in rows]
     assert counts == sorted(counts, reverse=True)
-    # CNSHA should be first (2 vessels) before KRPUS (1 vessel)
+    # CNSHA should be first (2 vessels) before Busan (1 vessel, from KRPUS)
     if len(rows) >= 2:
         cnsha = next((r for r in rows if r["destination"] == "CNSHA"), None)
-        krpus = next((r for r in rows if r["destination"] == "KRPUS"), None)
-        if cnsha and krpus:
-            assert cnsha["vessel_count"] >= krpus["vessel_count"]
+        busan = next((r for r in rows if r["destination"] == "Busan"), None)
+        if cnsha and busan:
+            assert cnsha["vessel_count"] >= busan["vessel_count"]
 
 
 # ---------------------------------------------------------------------------

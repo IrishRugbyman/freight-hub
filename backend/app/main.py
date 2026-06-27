@@ -226,6 +226,90 @@ def _norm_dest(s: str) -> str:
     return _re.sub(r'\s+', ' ', _re.sub(r'[^A-Z0-9 ]', '', s.strip().upper())).strip()
 
 
+# Canonical port resolver for the live destination-distribution lists.
+#
+# Raw AIS `destination` is free-text: the same physical port shows up as a
+# UN/LOCODE ("NLRTM"), the spaced LOCODE ("NL RTM"), the city name ("ROTTERDAM"),
+# and name+berth strings ("ROTTERDAM 3E PETROHA", "ROTTERDAM BOTLEK BO"). Grouped
+# raw, one port becomes five rows. This is purely for *descriptive* aggregation of
+# what the fleet is broadcasting - it is NOT an ETA target (those stay geometric,
+# per the True ETA rule). `_EUR_TERMINALS` is deliberately coarse (it lumps
+# Amsterdam/Ghent into Rotterdam/Antwerp energy clusters), so it is unsuitable
+# here; this map keeps each city distinct.
+#
+# canonical display name -> aliases (LOCODEs without the internal space + name
+# spellings, all in _norm_dest form). The first token of a name+berth string is
+# matched too, so unlisted berths still fold into the city.
+_PORT_CANON: dict[str, list[str]] = {
+    "Rotterdam":    ["NLRTM", "ROTTERDAM", "EUROPOORT", "BOTLEK", "MAASVLAKTE", "PERNIS"],
+    "Amsterdam":    ["NLAMS", "AMSTERDAM"],
+    "Antwerp":      ["BEANR", "ANTWERPEN", "ANTWERP"],
+    "Ghent":        ["BEGNE", "GENT", "GHENT"],
+    "Zeebrugge":    ["BEZEE", "ZEEBRUGGE", "ZEEBRUGE"],
+    "Vlissingen":   ["NLVLI", "VLISSINGEN", "FLUSHING"],
+    "Terneuzen":    ["NLTNZ", "TERNEUZEN"],
+    "Dordrecht":    ["NLDOR", "DORDRECHT"],
+    "Moerdijk":     ["NLMOE", "MOERDIJK"],
+    "Vlaardingen":  ["NLVLA", "VLAARDINGEN"],
+    "Harlingen":    ["NLHAR", "HARLINGEN"],
+    "Delfzijl":     ["NLDZL", "DELFZIJL", "EEMSHAVEN", "NLEEM"],
+    "Dunkirk":      ["FRDKK", "DUNKIRK", "DUNKERQUE"],
+    "Le Havre":     ["FRLEH", "LEHAVRE", "LE HAVRE", "HAVRE"],
+    "Southampton":  ["GBSOU", "SOUTHAMPTON"],
+    "Gibraltar":    ["GIGIB", "GIBRALTAR"],
+    "Algeciras":    ["ESALG", "ALGECIRAS"],
+    "Singapore":    ["SGSIN", "SINGAPORE"],
+    "Busan":        ["KRPUS", "BUSAN", "PUSAN"],
+    "Incheon":      ["KRINC", "INCHEON"],
+    "Houston":      ["USHOU", "HOUSTON"],
+    "Port Said":    ["EGPSD", "PORTSAID", "PORT SAID"],
+    "Istanbul":     ["TRIST", "ISTANBUL"],
+    "Tuzla":        ["TRTUZ", "TUZLA"],
+    "Trieste":      ["ITTRS", "TRIESTE"],
+    "Tallinn":      ["EETLL", "TALLINN", "MUUGA"],
+}
+
+# Flat alias -> canonical name (normalised; LOCODE spaces removed so "NL RTM"
+# collapses onto "NLRTM"). Longest aliases first so multi-word names win.
+_PORT_ALIAS: dict[str, str] = {}
+for _pcanon, _paliases in _PORT_CANON.items():
+    for _pa in _paliases:
+        _PORT_ALIAS[_pa.replace(" ", "")] = _pcanon
+
+_LOCODE_RE = _re.compile(r"^([A-Z]{2}) ([A-Z]{3})$")
+
+
+def _canonical_port(raw: str | None) -> str | None:
+    """Fold a raw AIS destination onto a canonical port name for aggregation.
+
+    Returns the canonical city for known ports (LOCODE / spaced LOCODE / name /
+    name+berth), a title-cased clean string for unrecognised destinations, and
+    None for empty/junk so callers can drop it. Never fabricates a match it is
+    not confident about: unknown strings are normalised, not guessed at.
+    """
+    if not raw:
+        return None
+    norm = _norm_dest(raw)
+    if not norm or norm in {"FOR ORDERS", "ORDERS", "TBN", "UNKNOWN", "NA", "NONE"}:
+        return None
+    # Collapse a "XX YYY" spaced UN/LOCODE to "XXYYY" before lookup.
+    m = _LOCODE_RE.match(norm)
+    key = (m.group(1) + m.group(2)) if m else norm.replace(" ", "")
+    if key in _PORT_ALIAS:
+        return _PORT_ALIAS[key]
+    # Name + berth/terminal suffix: fold on the leading token ("ROTTERDAM 3E ...").
+    first = norm.split(" ", 1)[0]
+    if first in _PORT_ALIAS:
+        return _PORT_ALIAS[first]
+    # Unrecognised: present a clean, de-duplicated label without guessing a port.
+    # A LOCODE-shaped token (5 letters, e.g. "CN SHA"/"CNSHA") keeps its collapsed
+    # uppercase form so spaced and unspaced spellings of an uncurated port merge;
+    # everything else is title-cased with its words intact. No city is fabricated.
+    if key.isalpha() and len(key) == 5:
+        return key
+    return norm.title()
+
+
 import threading as _threading
 
 # In-process cache for the full live_positions DataFrame.
@@ -657,6 +741,9 @@ def analytics_ports(kind: str | None = None, top_n: int = 20):
         kind_clause = "AND kind = ?"
         params.append(kind)
 
+    # Group by RAW destination in SQL, then fold onto canonical ports in Python
+    # (one port has many raw spellings, so the LIMIT must be applied after the
+    # fold or tail spellings of a top port would be dropped).
     df = db.query(
         f"SELECT "
         f"  UPPER(TRIM(destination)) AS dest, "
@@ -666,8 +753,8 @@ def analytics_ports(kind: str | None = None, top_n: int = 20):
         f"FROM live_positions "
         f"WHERE updated_ts > ? {kind_clause} "
         f"  AND destination IS NOT NULL AND TRIM(destination) != '' "
-        f"GROUP BY dest ORDER BY cnt DESC LIMIT ?",
-        params + [top_n],
+        f"GROUP BY dest",
+        params,
     )
 
     total_df = db.query(
@@ -678,17 +765,21 @@ def analytics_ports(kind: str | None = None, top_n: int = 20):
     )
     total_with_dest = int(total_df.iloc[0]["n"]) if not total_df.empty else 0
 
-    ports = []
+    agg: dict[str, dict[str, int]] = {}
     if not df.empty:
         for _, r in df.iterrows():
-            ports.append(
-                PortDestItem(
-                    destination=str(r["dest"]),
-                    count=int(r["cnt"]),
-                    tankers=int(r["tankers"]),
-                    bulkers=int(r["bulkers"]),
-                )
-            )
+            canon = _canonical_port(str(r["dest"]))
+            if canon is None:
+                continue  # junk / "FOR ORDERS" / blank-after-normalise
+            slot = agg.setdefault(canon, {"count": 0, "tankers": 0, "bulkers": 0})
+            slot["count"] += int(r["cnt"])
+            slot["tankers"] += int(r["tankers"])
+            slot["bulkers"] += int(r["bulkers"])
+
+    ports = [
+        PortDestItem(destination=name, count=v["count"], tankers=v["tankers"], bulkers=v["bulkers"])
+        for name, v in sorted(agg.items(), key=lambda kv: -kv[1]["count"])[:top_n]
+    ]
 
     return PortFlowResponse(
         as_of=_iso(datetime.now(UTC).replace(tzinfo=None)) or "",
@@ -3048,13 +3139,13 @@ def analytics_destination_flows(
         conds.append("region = ?")
         params.append(region)
 
-    params.append(top_n)
+    # Group by RAW destination in SQL, fold onto canonical ports in Python, then
+    # apply top_n (folding after the LIMIT would split one port across spellings).
     flow_df = db.query(
         "SELECT region AS origin_region, destination, segment, kind, COUNT(*) AS vessel_count "
         "FROM live_positions "
         f"WHERE {' AND '.join(conds)} "
-        "GROUP BY region, destination, segment, kind "
-        "ORDER BY vessel_count DESC LIMIT ?",
+        "GROUP BY region, destination, segment, kind",
         params,
     )
 
@@ -3063,15 +3154,24 @@ def analytics_destination_flows(
             as_of=_iso(now_ts) or "", laden_only=laden_only, total_laden=total_laden, rows=[]
         )
 
+    flow_agg: dict[tuple, int] = {}
+    for _, r in flow_df.iterrows():
+        canon = _canonical_port(str(r["destination"]))
+        if canon is None:
+            continue
+        fkey = (
+            _str_or_none(r.get("origin_region")) or "unknown",
+            canon,
+            _str_or_none(r.get("segment")),
+            _str_or_none(r.get("kind")),
+        )
+        flow_agg[fkey] = flow_agg.get(fkey, 0) + int(r["vessel_count"])
+
     rows_out = [
         DestinationFlowRow(
-            origin_region=_str_or_none(r.get("origin_region")) or "unknown",
-            destination=str(r["destination"]).strip(),
-            segment=_str_or_none(r.get("segment")),
-            kind=_str_or_none(r.get("kind")),
-            vessel_count=int(r["vessel_count"]),
+            origin_region=k[0], destination=k[1], segment=k[2], kind=k[3], vessel_count=c
         )
-        for _, r in flow_df.iterrows()
+        for k, c in sorted(flow_agg.items(), key=lambda kv: -kv[1])[:top_n]
     ]
 
     return DestinationFlowsResponse(
