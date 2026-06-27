@@ -27,10 +27,31 @@ if _ENV_FILE.exists():
 logger = logging.getLogger(__name__)
 
 _LOGIN_URL = "https://www.equasis.org/EquasisWeb/authen/HomePage?fs=HomePage"
+_PUBLIC_HOME = "https://www.equasis.org/EquasisWeb/public/HomePage?fs=HomePage"
 _SHIP_URL = "https://www.equasis.org/EquasisWeb/restricted/ShipInfo?fs=ShipInfo&P_IMO={imo}"
 
 _CACHE_TTL = 12 * 3600  # seconds
 _cache: dict[int, tuple[float, dict]] = {}
+
+# Equasis locks an account for 7 days when its consultation quota is exceeded;
+# the lock page carries this message. Detecting it lets the crawler stop dead
+# instead of hammering a locked account (which is what got us here).
+_LOCK_RE = re.compile(r"account is locked|download limit reached|consultation.{0,20}limit", re.I)
+# Positive markers that a page really is a populated ShipInfo page (logged in,
+# not bounced to the login form). Used instead of trusting nav strings.
+_SHIP_MARKERS = ("Gross tonnage", "Type of ship", "Year of build", "Registered owner")
+
+
+class EquasisAccountLocked(RuntimeError):
+    """Raised when Equasis reports the account is locked / over its quota."""
+
+
+def _is_locked(html: str) -> bool:
+    return bool(_LOCK_RE.search(html))
+
+
+def _looks_like_ship_page(html: str) -> bool:
+    return any(m in html for m in _SHIP_MARKERS)
 
 # Bootstrap label -> result key mapping
 _LABEL_MAP = {
@@ -52,6 +73,7 @@ class EquasisClient:
         self._pwd = os.getenv("EQUASIS_PWD", "")
         self._client: httpx.Client | None = None
         self._logged_in = False
+        self._locked = False
 
     def _client_(self) -> httpx.Client:
         if self._client is None:
@@ -71,34 +93,50 @@ class EquasisClient:
         if not self._email or not self._pwd:
             logger.warning("Equasis credentials not configured")
             return False
+        client = self._client_()
         try:
-            resp = self._client_().post(
+            # Seed the JSESSIONID cookie from the public home before posting creds;
+            # Equasis ties the authenticated session to that cookie.
+            try:
+                client.get(_PUBLIC_HOME)
+            except Exception:
+                pass
+            resp = client.post(
                 _LOGIN_URL,
-                data={"j_email": self._email, "j_password": self._pwd, "submit": "log in"},
+                data={"j_email": self._email, "j_password": self._pwd, "submit": "login"},
             )
-            # Successful login lands on restricted area or shows username
-            ok = resp.status_code == 200 and (
-                "restricted" in str(resp.url) or "My Equasis" in resp.text
-            )
-            self._logged_in = ok
-            if not ok:
-                logger.error("Equasis login failed (status %s)", resp.status_code)
-            return ok
         except Exception as exc:
             logger.error("Equasis login error: %s", exc)
             return False
 
-    @staticmethod
-    def _is_expired(html: str) -> bool:
-        return "authen/HomePage" in html or "j_email" in html
+        if _is_locked(resp.text):
+            self._locked = True
+            self._logged_in = False
+            logger.error("Equasis account is LOCKED (consultation quota exceeded) - aborting")
+            return False
+        # Optimistic: a non-locked 200 means the session is usable. The real gate
+        # is whether the ShipInfo fetch returns a populated ship page; relying on
+        # login-page heuristics here caused false negatives (every page shows a
+        # login form in the header even when authenticated).
+        self._logged_in = resp.status_code == 200
+        if not self._logged_in:
+            logger.error("Equasis login failed (status %s)", resp.status_code)
+        return self._logged_in
 
     def fetch_ship_info(self, imo: int) -> dict | None:
+        """Fetch + parse one ship. Raises EquasisAccountLocked if the account is
+        locked (so the caller can stop the whole run); returns None on a genuine
+        miss (ship not in Equasis or transient error)."""
         cached = _cache.get(imo)
         if cached and time.time() - cached[0] < _CACHE_TTL:
             return cached[1]
+        if self._locked:
+            raise EquasisAccountLocked()
 
         client = self._client_()
         if not self._logged_in and not self._login():
+            if self._locked:
+                raise EquasisAccountLocked()
             return None
 
         url = _SHIP_URL.format(imo=imo)
@@ -108,14 +146,28 @@ class EquasisClient:
             logger.error("Equasis fetch error for IMO %s: %s", imo, exc)
             return None
 
-        if self._is_expired(resp.text):
+        if _is_locked(resp.text):
+            self._locked = True
+            raise EquasisAccountLocked()
+
+        # If we didn't land on a real ship page, the session may have lapsed - try
+        # one re-login + refetch before giving up. Positive ship-page detection
+        # avoids the old false-positive that re-logged-in on every single fetch.
+        if not _looks_like_ship_page(resp.text):
             if not self._login():
+                if self._locked:
+                    raise EquasisAccountLocked()
                 return None
             try:
                 resp = client.get(url)
             except Exception as exc:
                 logger.error("Equasis fetch error after re-login: %s", exc)
                 return None
+            if _is_locked(resp.text):
+                self._locked = True
+                raise EquasisAccountLocked()
+            if not _looks_like_ship_page(resp.text):
+                return None  # genuinely not in Equasis (or unparseable)
 
         if resp.status_code != 200:
             return None

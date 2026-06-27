@@ -30,7 +30,7 @@ import pandas as pd
 
 from app.db import analytics_db_path as _analytics_db_path
 from app.db import query as _db_query
-from app.equasis import get_ship_info
+from app.equasis import EquasisAccountLocked, get_ship_info
 from registry.risk import risk_score as _risk_score
 
 logger = logging.getLogger(__name__)
@@ -41,7 +41,10 @@ _DEFAULT_AIS_DB = Path(os.environ.get(
     "~/quant/shared/market-data/data/ais_positions.duckdb"
 )).expanduser()
 
-_MAX_PER_RUN = 200
+# Equasis enforces a per-account consultation quota; exceeding it locks the
+# account for 7 days. With a daily timer this cap keeps us comfortably under that
+# quota (one fetch per ship now that the re-login-every-fetch bug is fixed).
+_MAX_PER_RUN = 100
 _SLEEP_MIN = 6.0
 _SLEEP_MAX = 10.0
 _RETRY_FAILED_DAYS = 7
@@ -221,12 +224,24 @@ def run(
     n_new = n_refreshed = n_failed = 0
     existing_imos = set(reg_df["imo"].astype(int).tolist()) if not reg_df.empty else set()
 
+    n_locked_abort = False
     for imo in candidates:
         if dry_run:
             logger.info("DRY RUN: would fetch IMO %d", imo)
             continue
 
-        data = get_ship_info(imo)
+        try:
+            data = get_ship_info(imo)
+        except EquasisAccountLocked:
+            # Stop immediately - hammering a locked account only prolongs the lock
+            # and is exactly the abuse the project forbids. Remaining candidates
+            # are left untouched (not marked failed) and retried next run.
+            logger.error(
+                "Equasis account LOCKED - aborting run after %d new / %d refreshed / %d failed",
+                n_new, n_refreshed, n_failed,
+            )
+            n_locked_abort = True
+            break
         # Require at least one meaningful field beyond imo/ship_name - Equasis error
         # pages can parse a "We're sorry..." ship_name but have no registry data
         _meaningful = {"flag", "owner", "class_society", "ship_type", "ism_manager"}
@@ -261,9 +276,10 @@ def run(
         time.sleep(sleep_s)
 
     if not dry_run:
+        status = "ABORTED (account locked)" if n_locked_abort else "complete"
         logger.info(
-            "Crawl complete: %d new, %d refreshed, %d failed (of %d candidates)",
-            n_new, n_refreshed, n_failed, len(candidates),
+            "Crawl %s: %d new, %d refreshed, %d failed (of %d candidates)",
+            status, n_new, n_refreshed, n_failed, len(candidates),
         )
 
     reg_conn.close()

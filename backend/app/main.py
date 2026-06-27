@@ -1370,7 +1370,12 @@ def vessel_equasis(imo: int):
         return result
 
     # Fall back to live scrape (result cached in-process 12h)
-    data = equasis.get_ship_info(imo)
+    try:
+        data = equasis.get_ship_info(imo)
+    except equasis.EquasisAccountLocked:
+        # Account temporarily locked (quota). Don't 500; signal unavailable so the
+        # frontend hides the registry panel rather than erroring.
+        raise HTTPException(status_code=503, detail="Equasis temporarily unavailable") from None
     if data is None:
         raise HTTPException(status_code=503, detail="Equasis unavailable")
     return data

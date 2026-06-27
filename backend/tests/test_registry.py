@@ -253,3 +253,76 @@ def test_equasis_unavailable_503(tmp_path, monkeypatch):
 
     r = client.get("/api/vessels/9999998/equasis")
     assert r.status_code == 503
+
+
+# ---------------------------------------------------------------------------
+# Account-lock detection (the cause of the historical 87% failure rate)
+# ---------------------------------------------------------------------------
+
+_FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def test_is_locked_detects_lock_page():
+    from app.equasis import _is_locked, _looks_like_ship_page
+
+    html = (_FIXTURES / "equasis_locked.html").read_text()
+    assert _is_locked(html) is True
+    # The lock page is the logged-out home, not a populated ship page.
+    assert _looks_like_ship_page(html) is False
+
+
+def test_is_locked_false_on_ship_page():
+    from app.equasis import _is_locked, _looks_like_ship_page
+
+    ship_html = "<html><body><b>Gross tonnage</b> 50000 <b>Type of ship</b> Bulk</body></html>"
+    assert _is_locked(ship_html) is False
+    assert _looks_like_ship_page(ship_html) is True
+
+
+def test_equasis_endpoint_locked_returns_503(tmp_path, monkeypatch):
+    """A locked account raises EquasisAccountLocked; the endpoint must 503, not 500."""
+    from app.equasis import EquasisAccountLocked
+
+    client = _make_registry_client(tmp_path, monkeypatch, [])
+
+    def locked(imo):
+        raise EquasisAccountLocked()
+
+    monkeypatch.setattr("app.equasis.get_ship_info", locked)
+    r = client.get("/api/vessels/9555555/equasis")
+    assert r.status_code == 503
+
+
+def test_crawl_aborts_on_lock(tmp_path, monkeypatch):
+    """When Equasis is locked, the crawl stops dead and marks nothing as failed."""
+    from app.equasis import EquasisAccountLocked
+    from registry import crawl
+
+    ais_file = tmp_path / "ais.duckdb"
+    ac = duckdb.connect(str(ais_file))
+    ac.execute("CREATE TABLE live_positions (mmsi BIGINT, imo BIGINT)")
+    ac.executemany("INSERT INTO live_positions VALUES (?,?)",
+                   [(111, 9111111), (222, 9222222), (333, 9333333)])
+    ac.close()
+
+    reg_file = tmp_path / "registry.duckdb"
+
+    # Stub out network-touching deps: OFAC list + event counts.
+    monkeypatch.setattr("registry.ofac.fetch_sanctioned_imos", lambda: set())
+
+    calls = []
+
+    def locked(imo):
+        calls.append(imo)
+        raise EquasisAccountLocked()
+
+    monkeypatch.setattr("registry.crawl.get_ship_info", locked)
+
+    crawl.run(ais_path=ais_file, reg_path=reg_file, limit=50)
+
+    # Aborted after the very first fetch raised; no rows written (nothing marked failed).
+    assert len(calls) == 1
+    rc = duckdb.connect(str(reg_file))
+    n = rc.execute("SELECT COUNT(*) FROM vessel_registry").fetchone()[0]
+    rc.close()
+    assert n == 0

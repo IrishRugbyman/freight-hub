@@ -1,5 +1,41 @@
 # Freight Hub Changelog
 
+## 2026-06-27 - Fix: Equasis registry crawler kept getting the account locked
+
+Investigating low owner/registry coverage (only 1,926 of 15,235 live IMOs had
+`fetch_ok=true`; 13,309 "failed"). The failures were **not** bad IMOs - 99.6% of
+the failed IMOs have a valid IMO check digit. A live diagnostic found the real
+cause: the Equasis login response carries *"User page download limit reached. Your
+account is locked for 7 days."* The crawler was **over-querying and getting the
+account locked**, so most "fetches" hit a logged-out page that parses empty.
+
+Two compounding causes: (1) `EquasisClient._is_expired()` flagged *every* page as
+logged-out because it keyed on `"authen/HomePage"`/`"j_email"`, strings that appear
+in the nav/header of every authenticated page too - so the scraper re-logged-in on
+**every single fetch**, tripling request volume; (2) the timer ran every 2h x 200
+ships = ~2,400 ships/day, x3 for the re-login = ~7,000 requests/day, far over the
+free-account quota. `_login()` also false-positived on `"My Equasis"` (a nav link
+present when logged out), so it never noticed the lock.
+
+**Fixes (`app/equasis.py`):** positive ship-page detection (`_looks_like_ship_page`
+checks for real markers like "Gross tonnage"/"Registered owner") replaces the
+false-positive `_is_expired`, so a re-login happens only on a genuine bounce, not
+every fetch. `_is_locked()` detects the lock page; `fetch_ship_info` now raises a
+new `EquasisAccountLocked` on it. `_login()` seeds the JSESSIONID from the public
+home before posting creds and stops trusting nav-string heuristics. **Crawler
+(`registry/crawl.py`):** catches `EquasisAccountLocked` and **aborts the run
+immediately** (marking nothing as failed - hammering a locked account only prolongs
+the lock and is exactly the abuse the project forbids); per-run cap cut 200 -> 100.
+**Timer:** every-2h -> once daily (04:30 UTC), so ~100 ships/day, comfortably under
+quota. **API:** `/api/vessels/{imo}/equasis` maps the lock to a graceful 503.
+
+**Tests:** new lock-page fixture + 4 cases (lock detection, ship-page detection,
+endpoint 503 on lock, crawler aborts and writes nothing). Suite 420 passing.
+**Caveat:** the account is currently locked (~7 days), so the successful-login path
+can't be re-verified live until it unlocks; the lock-detection + rate fixes are
+verified by tests and the live diagnostic. Historical spurious failures self-heal
+as the 7-day retry path re-attempts them under the new sustainable cadence.
+
 ## 2026-06-27 - Fix: Port Congestion Monitor + Anchorage Dwell showed zero current vessels
 
 Reported from the live Ports & Cargo tab: every zone in the Port Congestion
