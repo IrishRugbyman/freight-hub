@@ -1,5 +1,49 @@
 # Freight Hub Changelog
 
+## 2026-06-27 - Feature: MMSI-derived flag state (FOC / shadow-fleet / mismatch)
+
+**Tried:** Borrowed the one genuinely new idea from the open-source Hormuz tracker
+(yasumorishima/hormuz-ship-tracker) teardown - deriving flag state from the MMSI MID.
+The existing flag intelligence (`/api/fleet/flag-risk`) is rich (MOU/OFAC) but gated on
+the Equasis crawler, which covers only ~13% of live IMOs. The MMSI's first three digits
+are the ITU Maritime Identification Digits, which map deterministically to a flag, giving
+a free ~100%-coverage flag layer for every AIS vessel.
+
+**Found:** Live, 4079 of 4080 vessels resolved a flag (1 unresolved). Distribution is
+realistic (Liberia/Panama/Marshall Islands/Malta lead the FOC flags; 1374 FOC, 130 shadow).
+The flag-mismatch signal (MMSI-MID flag vs Equasis registry flag) initially showed 395
+"mismatches" because the registry stores ISO3 codes (LBR) and the MID derivation produces
+ISO2 (LR); adding an ISO3->ISO2 normalization (`to_iso2`) dropped it to 6 genuine
+country disagreements (e.g. Somalia-MMSI vs Cameroon-registry), which are plausible
+recent-reflag / obfuscation signals.
+
+**Decision:** Pure derivation lives in `quant_lib.freight.flags` (ITU MID table, ITF
+flags-of-convenience set, curated high-shadow-activity set, `flag_from_mmsi`, `to_iso2`).
+We categorize *flags* against public lists, never assert a specific vessel is sanctioned -
+staying inside the roadmap's "public facts only, no sanctions matching" line. Backend adds
+flag fields + `flag`/`foc`/`shadow` filters to `/api/vessels` and two endpoints
+(`/api/analytics/fleet-flags`, `/api/analytics/flag-mismatches`). Frontend adds a
+vessel-detail flag badge, an Intelligence "Live Fleet by Flag" card, a Risk "Flag
+Mismatches" card, and tracker flag-class/flag-state filters. Design spec at
+`docs/superpowers/specs/2026-06-27-mmsi-flag-state-design.md`. 14 backend tests added.
+
+**Artifacts:** `quant_lib/freight/flags.py`; backend `flag-state` schemas + endpoints;
+frontend `FleetFlagsCard`, `FlagMismatchCard`, flag filter in `FilterControls`.
+
+## 2026-06-27 - Feature: disclose basins with no terrestrial AIS coverage
+
+**Tried:** Investigated the "AIS region coverage gap" (9 of 24 subscribed basins -
+Hormuz, Arab Gulf, Bab-el-Mandeb, etc. - empty). Confirmed it is upstream, not a config
+bug: all 24 boxes are subscribed with correct coordinates, but aisstream.io's free
+terrestrial network has no receivers there. A purpose-built Hormuz tracker on the same
+feed hit the same wall (43k positions, zero strait transits). Unfixable without paid
+satellite AIS.
+
+**Decision:** Disclose rather than hide. `/api/chokepoints` carries a self-healing
+`has_coverage` flag (any snapshot in the trailing 7 days); the map draws dead zones
+dashed/muted with a "no terrestrial AIS coverage" label and the Chokepoints tab lists them
+in a footnote. Self-heals if a basin ever gets a receiver.
+
 ## 2026-06-27 - Fix: Equasis registry crawler kept getting the account locked
 
 Investigating low owner/registry coverage (only 1,926 of 15,235 live IMOs had
