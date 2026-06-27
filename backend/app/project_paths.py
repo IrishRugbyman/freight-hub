@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-_RESEARCH_ROOT = Path("~/quant/research").expanduser()
+_RESEARCH_ROOT = Path("~/quant/freight/research").expanduser()
 
 _SLUGS = {"transport-arb", "freight-dispersion"}
 

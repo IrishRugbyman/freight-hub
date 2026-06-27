@@ -14,10 +14,21 @@ accuracy scoreboard). Critical path A->B->C->E->F ships a real upgrade without M
 
 Standalone freight/maritime web app, live at **https://freight.lbzgiu.xyz**. First and
 currently only page is a **live vessel tracker** (interactive Leaflet map of tankers +
-bulk carriers from AIS). Built as a hub designed to later absorb `transport-arb` and
-`freight-dispersion` from quant-portfolio (the nav has disabled "Routes"/"Dispersion"
-seams). Separate from quant-portfolio because it is a *live* app, not the static
-precompute showcase.
+bulk carriers from AIS). The nav has disabled "Routes"/"Dispersion" seams for the two
+freight-domain research projects now living in `research/` (see below). Separate from
+quant-portfolio because it is a *live* app, not the static precompute showcase.
+
+## Research subprojects (`research/`)
+
+Freight-domain backtests co-located here for eventual wiring into the Routes/Dispersion tabs.
+Each is a standalone Python project with its own venv (symlinked from `~/data/`).
+
+- **`research/transport-arb/`** - Forward-adjusted crude/products transport arbitrage matrix (8 routes).
+  Runner: `backend/app/runner_routes.py`. Target tab: `/routes`.
+- **`research/freight-dispersion/`** - Capesize 5TC FFA vs fleet geographic dispersion backtest.
+  Runner: `backend/app/runner_dispersion.py`. Target tab: `/dispersion`.
+
+`uv.lock` paths point one level deeper than `research/` projects elsewhere: `../../../shared/`.
 
 ## Stack
 
