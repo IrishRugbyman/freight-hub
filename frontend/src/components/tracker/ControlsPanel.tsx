@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { SlidersHorizontal, X } from 'lucide-react'
-import type { Vessel } from '@/lib/api'
+import { useFleetFlags, type Vessel } from '@/lib/api'
 import type { Filters, LayerState } from './types'
 import { FilterControls } from './FilterControls'
 import { LayerToggles } from './LayerToggles'
@@ -26,6 +26,10 @@ export function ControlsPanel({
   onVesselSelect: (v: Vessel) => void
 }) {
   const [open, setOpen] = useState(true)
+  const { data: fleetFlags } = useFleetFlags(100)
+  const flagOptions = (fleetFlags?.rows ?? [])
+    .filter((r) => r.flag_code)
+    .map((r) => ({ code: r.flag_code as string, name: r.flag }))
 
   if (!open) {
     return (
@@ -61,7 +65,12 @@ export function ControlsPanel({
         </div>
 
         {/* Filters */}
-        <FilterControls filters={filters} regions={regions} onChange={onFiltersChange} />
+        <FilterControls
+          filters={filters}
+          regions={regions}
+          flags={flagOptions}
+          onChange={onFiltersChange}
+        />
 
         {/* Layer toggles */}
         <div className="border-t border-border px-3 py-2">

@@ -17,13 +17,17 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 export function FilterControls({
   filters,
   regions,
+  flags = [],
   onChange,
 }: {
   filters: Filters
   regions: string[]
+  flags?: { code: string; name: string }[]
   onChange: (f: Filters) => void
 }) {
   const segments = segmentsForKind((filters.kind as Kind) || '')
+  // "Flag class" select maps to the foc/shadow booleans.
+  const flagClass = filters.shadow ? 'shadow' : filters.foc ? 'foc' : ''
   return (
     <div className="space-y-2 px-3 py-2">
       <Field label="Vessel type">
@@ -65,6 +69,36 @@ export function FilterControls({
           ))}
         </select>
       </Field>
+      <Field label="Flag class">
+        <select
+          className={selectCls}
+          value={flagClass}
+          onChange={(e) => {
+            const v = e.target.value
+            onChange({ ...filters, foc: v === 'foc' || undefined, shadow: v === 'shadow' || undefined })
+          }}
+        >
+          <option value="">All flags</option>
+          <option value="foc">Flags of convenience</option>
+          <option value="shadow">Shadow-fleet flags</option>
+        </select>
+      </Field>
+      {flags.length > 0 && (
+        <Field label="Flag state">
+          <select
+            className={selectCls}
+            value={filters.flag ?? ''}
+            onChange={(e) => onChange({ ...filters, flag: e.target.value || undefined })}
+          >
+            <option value="">All states</option>
+            {flags.map((f) => (
+              <option key={f.code} value={f.code}>
+                {f.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+      )}
     </div>
   )
 }

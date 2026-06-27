@@ -114,6 +114,10 @@ export interface Vessel {
   draught: number | null
   nav_status: number | null
   eta: string | null
+  flag: string | null
+  flag_code: string | null
+  flag_foc: boolean
+  flag_shadow: boolean
 }
 
 export interface ChokepointCount {
@@ -136,6 +140,9 @@ export interface VesselFilters {
   kind?: string
   segment?: string
   region?: string
+  flag?: string
+  foc?: boolean
+  shadow?: boolean
 }
 
 async function getJSON<T>(url: string): Promise<T> {
@@ -149,6 +156,9 @@ function vesselsUrl(f: VesselFilters): string {
   if (f.kind) q.set('kind', f.kind)
   if (f.segment) q.set('segment', f.segment)
   if (f.region) q.set('region', f.region)
+  if (f.flag) q.set('flag', f.flag)
+  if (f.foc) q.set('foc', 'true')
+  if (f.shadow) q.set('shadow', 'true')
   const s = q.toString()
   return `/api/vessels${s ? `?${s}` : ''}`
 }
@@ -714,10 +724,63 @@ export interface FlagRiskResponse {
   rows: FlagRiskRow[]
 }
 
+export interface FleetFlagRow {
+  flag: string
+  flag_code: string | null
+  vessel_count: number
+  length_sum_m: number
+  is_foc: boolean
+  is_shadow: boolean
+  by_segment: Record<string, number>
+}
+
+export interface FleetFlagsResponse {
+  as_of: string
+  total_with_flag: number
+  total_unresolved: number
+  foc_count: number
+  shadow_count: number
+  rows: FleetFlagRow[]
+}
+
+export interface FlagMismatchRow {
+  mmsi: number
+  imo: number | null
+  name: string | null
+  segment: string | null
+  mmsi_flag: string
+  mmsi_flag_code: string | null
+  registry_flag: string
+  registry_flag_code: string | null
+}
+
+export interface FlagMismatchResponse {
+  as_of: string
+  rows: FlagMismatchRow[]
+}
+
 export function useFlagRisk(topN = 30) {
   return useQuery({
     queryKey: ['flag-risk', topN],
     queryFn: () => getJSON<FlagRiskResponse>(`/api/fleet/flag-risk?top_n=${topN}`),
+    staleTime: ANALYTICS_STALE,
+    refetchInterval: REFETCH_MS,
+  })
+}
+
+export function useFleetFlags(topN = 40) {
+  return useQuery({
+    queryKey: ['fleet-flags', topN],
+    queryFn: () => getJSON<FleetFlagsResponse>(`/api/analytics/fleet-flags?top_n=${topN}`),
+    staleTime: ANALYTICS_STALE,
+    refetchInterval: REFETCH_MS,
+  })
+}
+
+export function useFlagMismatches() {
+  return useQuery({
+    queryKey: ['flag-mismatches'],
+    queryFn: () => getJSON<FlagMismatchResponse>('/api/analytics/flag-mismatches'),
     staleTime: ANALYTICS_STALE,
     refetchInterval: REFETCH_MS,
   })

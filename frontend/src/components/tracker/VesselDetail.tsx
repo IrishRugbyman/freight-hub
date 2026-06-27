@@ -338,6 +338,17 @@ export function VesselDetail({
         <div className="text-[11px] font-semibold text-muted-foreground mb-1">Identity</div>
         <Row label="MMSI" value={vessel.mmsi} />
         {vessel.imo != null && <Row label="IMO" value={vessel.imo} />}
+        {vessel.flag && (
+          <div className="flex items-baseline justify-between gap-3 py-0.5">
+            <span className="text-xs text-muted-foreground">Flag</span>
+            <span className="flex items-center gap-1.5 text-right text-xs font-mono">
+              {vessel.flag}
+              {vessel.flag_code && <span className="text-muted-foreground/60">{vessel.flag_code}</span>}
+              {vessel.flag_foc && <span className="rounded bg-amber-500/20 px-1 py-px text-[9px] font-bold uppercase text-amber-400">FOC</span>}
+              {vessel.flag_shadow && <span className="rounded bg-red-500/20 px-1 py-px text-[9px] font-bold uppercase text-red-400">shadow</span>}
+            </span>
+          </div>
+        )}
         <Row label="Region" value={vessel.region?.replace(/_/g, ' ')} />
         <Row label="Position" value={`${vessel.lat.toFixed(3)}, ${vessel.lon.toFixed(3)}`} />
         <Row label="Last seen" value={new Date(vessel.updated_ts + 'Z').toLocaleTimeString()} />

@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   useAnomalyWatchlist, useDestinationChanges, useStsProximity,
   useStsOffenders, useReroutes, useRiskEvents, useEventRateTimeline,
-  useShadowFleet,
+  useShadowFleet, useFleetFlags, useFlagMismatches,
   type RerouteRiskEvent,
 } from '@/lib/api'
 import { EmptyState, TOOLTIP_STYLE, LEGEND_STYLE } from './-analyticsShared'
@@ -630,12 +630,82 @@ export function ShadowFleetCard() {
 }
 
 // ---------------------------------------------------------------------------
+// FleetFlagsCard - live fleet by flag state (MMSI-derived, ~100% coverage)
+// ---------------------------------------------------------------------------
+export function FleetFlagsCard() {
+  const { data, isLoading } = useFleetFlags(40)
+  const { data: mismatch } = useFlagMismatches()
+  const rows = data?.rows ?? []
+  const maxCount = rows.reduce((m, r) => Math.max(m, r.vessel_count), 0)
+  const mismatchCount = mismatch?.rows.length ?? 0
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex flex-wrap items-center justify-between gap-2">
+          <span>Live Fleet by Flag</span>
+          {data && (
+            <div className="flex flex-wrap gap-2 text-xs font-normal">
+              <span className="rounded bg-muted/30 px-1.5 py-px tabular-nums">{data.total_with_flag} flagged</span>
+              <span className="rounded bg-amber-500/20 px-1.5 py-px font-semibold text-amber-400 tabular-nums">{data.foc_count} FOC</span>
+              <span className="rounded bg-red-500/20 px-1.5 py-px font-semibold text-red-400 tabular-nums">{data.shadow_count} shadow</span>
+              {data.total_unresolved > 0 && (
+                <span className="rounded bg-muted/20 px-1.5 py-px text-muted-foreground tabular-nums">{data.total_unresolved} no flag</span>
+              )}
+            </div>
+          )}
+        </CardTitle>
+        <p className="text-xs text-muted-foreground">
+          Flag state derived from each vessel&apos;s MMSI (ITU MID), covering the whole live fleet.
+          Amber = flag of convenience (ITF), red = high shadow-fleet activity.
+          {mismatchCount > 0 && (
+            <> {mismatchCount} vessel{mismatchCount === 1 ? '' : 's'} disagree with their registry flag (see Risk tab).</>
+          )}
+        </p>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="h-64 animate-pulse rounded bg-muted/40" />
+        ) : rows.length === 0 ? (
+          <EmptyState message="No flag data available." />
+        ) : (
+          <div className="space-y-0.5 max-h-96 overflow-y-auto pr-1">
+            {rows.map((row, i) => {
+              const pct = maxCount > 0 ? (row.vessel_count / maxCount) * 100 : 0
+              const barColor = row.is_shadow ? 'bg-red-500/50' : row.is_foc ? 'bg-amber-500/50' : 'bg-sky-500/40'
+              return (
+                <div key={row.flag_code ?? row.flag} className="rounded px-2 py-1 bg-muted/10">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <span className="w-5 shrink-0 text-[10px] text-muted-foreground/60 tabular-nums">{i + 1}</span>
+                      <span className="text-sm font-medium truncate">{row.flag}</span>
+                      {row.flag_code && <span className="text-[10px] text-muted-foreground/60">{row.flag_code}</span>}
+                      {row.is_foc && <span className="rounded bg-amber-500/20 px-1 py-px text-[9px] font-bold uppercase text-amber-400">FOC</span>}
+                      {row.is_shadow && <span className="rounded bg-red-500/20 px-1 py-px text-[9px] font-bold uppercase text-red-400">shadow</span>}
+                    </div>
+                    <span className="shrink-0 text-sm font-semibold tabular-nums">{row.vessel_count}</span>
+                  </div>
+                  <div className="mt-1 h-1.5 w-full rounded-full bg-muted/30 overflow-hidden">
+                    <div className={`h-full rounded-full ${barColor}`} style={{ width: `${pct}%` }} />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Default export: Intelligence tab component
 // ---------------------------------------------------------------------------
 export default function IntelligenceTab() {
   return (
     <div className="space-y-6">
       <ShadowFleetCard />
+      <FleetFlagsCard />
       <AnomalyWatchlistCard />
       <div className="grid gap-4 lg:grid-cols-2">
         <DestinationChangesCard />

@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   useVesselRiskScores, useOwnerIntelligence, useOwnerRisk,
   useFlagRisk, useFleetAge, useTransitRisk, useAnchorageDwell, useStsRisk,
+  useFlagMismatches,
 } from '@/lib/api'
 import { fmt, EmptyState, ChartSkeleton, TOOLTIP_STYLE, LEGEND_STYLE } from './-analyticsShared'
 
@@ -613,6 +614,60 @@ export function StsRiskCard() {
 // ---------------------------------------------------------------------------
 // Default export: Risk tab component
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// FlagMismatchCard - MMSI-MID flag vs Equasis registry flag disagreements
+// ---------------------------------------------------------------------------
+export function FlagMismatchCard() {
+  const { data, isLoading } = useFlagMismatches()
+  const goToTracker = useGoToTracker()
+  const rows = data?.rows ?? []
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center justify-between gap-2">
+          <span>Flag Mismatches</span>
+          {data && <span className="text-sm font-normal text-muted-foreground tabular-nums">{rows.length}</span>}
+        </CardTitle>
+        <p className="text-xs text-muted-foreground">
+          Live vessels whose MMSI-derived flag disagrees with their Equasis registry flag,
+          a possible recent reflag or identity obfuscation. Code systems are normalized
+          (ISO3 to ISO2) so only genuine country disagreements are shown.
+        </p>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="h-48 animate-pulse rounded bg-muted/40" />
+        ) : rows.length === 0 ? (
+          <EmptyState message="No flag mismatches in the live fleet." />
+        ) : (
+          <div className="space-y-0.5 max-h-96 overflow-y-auto pr-1">
+            {rows.map(row => (
+              <div
+                key={row.mmsi}
+                className="cursor-pointer rounded bg-muted/15 px-2 py-1.5 hover:bg-muted/30"
+                onClick={() => goToTracker(row.mmsi)}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    <span className="text-sm font-medium truncate">{row.name ?? `MMSI ${row.mmsi}`}</span>
+                    {row.segment && <span className="text-xs text-muted-foreground">{row.segment}</span>}
+                  </div>
+                  <div className="shrink-0 text-xs tabular-nums">
+                    <span className="font-semibold text-sky-400">{row.mmsi_flag}</span>
+                    <span className="mx-1 text-muted-foreground/50">vs</span>
+                    <span className="font-semibold text-amber-400">{row.registry_flag}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 export default function RiskTab() {
   return (
     <div className="space-y-6">
@@ -622,6 +677,7 @@ export default function RiskTab() {
         <OwnerRiskCard />
         <FlagRiskCard />
       </div>
+      <FlagMismatchCard />
       <FleetAgeCard />
       <div className="grid gap-4 lg:grid-cols-2">
         <TransitRiskCard />
