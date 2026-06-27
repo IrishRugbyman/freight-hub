@@ -28,9 +28,7 @@ Only worth doing if the Leaflet map feels like the performance bottleneck. Every
 
 Promote to a phase only with a written plan:
 
-- **Port-call history:** derive arrival/departure events per vessel from anchored episodes + destination changes; per-vessel voyage timeline on the detail panel.
-- **Owner/fleet dashboards:** aggregate analytics by owner (which owners' VLCCs are laden vs ballast right now); needs registry join.
-- ~~**Email/RSS digest:** daily summary of new high-risk events.~~ Done 2026-06-14 (Phase 53): Atom + JSON Feed at `/api/feed.xml` and `/api/feed.json`, plus Subscribe popover on the Events page. Delivered as feeds (no accounts/SMTP) per the public-showcase stance.
+- **Owner/fleet dashboards:** aggregate analytics by owner (which owners' VLCCs are laden vs ballast right now); needs the registry join. Constraint: Equasis owner data is currently filled for only ~1,925 of 15,235 IMOs (~13%), so an owner view would be sparse until the crawler covers more of the live fleet.
 
 ---
 
