@@ -1,5 +1,49 @@
 # Freight Hub Changelog
 
+## 2026-06-27 - True ETA Phase G (monitoring half): champion drift watch
+
+Closed the monitoring half of Phase G. Key finding while scoping it: the "nightly
+ETA-refresh timer" the roadmap called for is **redundant** - the existing
+`freight-analytics.timer` already runs `analytics.build` hourly, and that job
+already mines labels (`eta_labels`), rebuilds samples + scores naive/+route/physics
+(`eta_samples`), and refreshes the live serving snapshot (`eta_serving`). So
+`eta_model_metrics` is always current. Adding a second timer doing the same work
+would just risk write contention for no gain. What was genuinely missing was an
+*alert* when the champion quietly degrades - so that is what got built, and no new
+timer was installed.
+
+**New `analytics/eta_drift.py`**. Pure, unit-tested `assess_drift(history)` reads
+the champion (`physics_v1`) overall-aggregate rows (`lead_bucket='all',
+target_type='all'`) per run and flags two regressions: (1) interval coverage
+leaving the `[0.70, 0.90]` band (the P10-P90 interval is nominally 80%, so this
+catches calibration breaking too-tight or too-wide), and (2) median |err| jumping
+more than +50% **and** +1h above its 7-day trailing median (the absolute floor
+suppresses noise on the near-zero short buckets; min 3 prior runs before comparing).
+`run_in_conn` persists any alerts to a new `eta_drift_alerts` table (idempotent per
+run_ts/kind) and emits a `log.warning` (so degradation shows in `journalctl`).
+
+**Wired into `build.py`** as step 7e, after the serving scorer, inside the same
+try/except-guarded, atomically-swapped scratch build. Runs every hour for free.
+
+**API**: `/api/analytics/eta-accuracy` now carries a `drift` array (latest run's
+active alerts only, so a recovered past blip does not linger). New `EtaDriftAlert`
+schema; defensive query returns `[]` if the table is absent on an older DB.
+
+**Frontend**: `EtaAccuracyCard` shows an amber drift banner listing active alert
+details when present, and the footer note documents the watch so the feature is
+discoverable when healthy. New `EtaDriftAlert` type + optional `drift` on
+`EtaAccuracyResponse`.
+
+**Tests**: 9 new in `test_eta_drift.py` (clean / empty / coverage below=alert /
+coverage above=warn / err regression fires / abs-floor suppresses / min-trail
+guard / persistence is idempotent / missing-table safe). Full backend suite 378
+passing; TSC + vite build clean. Verified live: endpoint returns `drift: []` on
+current data (coverage 0.797, in band).
+
+**Remaining in Phase G**: the weekly *gated retrain + auto-promote challenger*
+loop, which depends on the ML model (Phase D) and is therefore still history-gated
+(~8 weeks; collection started 2026-06-09).
+
 ## 2026-06-26 - True ETA Phase F: ETA chip + interval + method badge + accuracy scoreboard
 
 The visible payoff of the True ETA build. Inbound cards now show the calibrated

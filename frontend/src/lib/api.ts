@@ -2140,11 +2140,22 @@ export interface EtaAccuracyRow {
   interval_coverage: number | null
 }
 
+export interface EtaDriftAlert {
+  run_ts: string
+  model: string
+  kind: string
+  severity: string
+  metric: number
+  reference: number
+  detail: string
+}
+
 export interface EtaAccuracyResponse {
   run_ts: string | null
   models: string[]
   lead_order: string[]
   rows: EtaAccuracyRow[]
+  drift?: EtaDriftAlert[]
 }
 
 // True ETA Phase E/F: per-vessel resolvable-target ETAs (vessel-detail popup)

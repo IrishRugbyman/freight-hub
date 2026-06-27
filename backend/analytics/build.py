@@ -556,6 +556,19 @@ def _run_inner(conn: duckdb.DuckDBPyConnection, reset: bool) -> None:
         log.warning("ETA serving scorer failed, skipping: %s", exc, exc_info=True)
 
     # ------------------------------------------------------------------
+    # 7e. ETA drift watch (True ETA Phase G): compare the champion's just-scored
+    # accuracy against its trailing history + the calibration band, and persist
+    # any degradation to eta_drift_alerts (+ log warning). Pure monitoring; the
+    # refresh itself is already covered by this hourly job.
+    # ------------------------------------------------------------------
+    try:
+        from .eta_drift import run_in_conn as _eta_drift_run
+
+        _eta_drift_run(conn)
+    except Exception as exc:
+        log.warning("ETA drift watch failed, skipping: %s", exc, exc_info=True)
+
+    # ------------------------------------------------------------------
     # 8. Advance watermark and promote scratch to live
     # ------------------------------------------------------------------
     new_watermark = max_ts_dt

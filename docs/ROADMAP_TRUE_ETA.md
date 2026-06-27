@@ -131,6 +131,12 @@ All new tables in `freight_analytics.duckdb`, written by the analytics batch job
   run_ts TIMESTAMP, model TEXT, lead_bucket TEXT, target_type TEXT,
   n INT, med_abs_err_h, bias_h, mape, p90_abs_err_h, interval_coverage DOUBLE
 
+### eta_drift_alerts   *(Phase G monitoring: champion-accuracy degradation flags)*
+  run_ts TIMESTAMP, model TEXT, kind TEXT,           -- 'coverage' | 'med_abs_err'
+  severity TEXT,                                       -- 'warn' | 'alert'
+  metric DOUBLE, reference DOUBLE, detail TEXT
+  PRIMARY KEY (run_ts, model, kind)
+
 ### Relationships
 - `eta_arrivals` belongs to one `eta_targets` via `target_id`.
 - `eta_samples` belong to one `eta_arrivals` voyage via `(mmsi,target_id,arrival_ts)`; `voyage_id` is the train/test split unit (no voyage spans the split).
@@ -193,22 +199,20 @@ it). The inbound/LNG cards and the accuracy scoreboard are done.
 
 ---
 
-### Phase G - Retraining + monitoring
-*Goal: the model stays honest and improves as history grows, automatically.*
-*Depends on: D, E, F. Estimated effort: 1 session.*
+### Phase G - Gated retrain + auto-promote (monitoring half COMPLETE 2026-06-27)
+*Goal: the model improves as history grows, automatically, without ever promoting a worse model.*
+*Depends on: D (ML). The refresh + drift-watch half shipped 2026-06-27; this remaining half is gated on the ML model existing.*
 
-**Infrastructure.** `eta-refresh.timer` (systemd, mirrors `energy-refresh.timer`):
-nightly label mine + metrics refresh; weekly gated retrain + auto-promote
-challenger only if it beats champion on the latest walk-forward.
+The nightly-refresh + drift-watch deliverables are done: refresh already runs
+hourly via the existing `freight-analytics.timer` (no separate timer needed), and a
+champion drift watch (`analytics/eta_drift.py`, surfaced on the accuracy scoreboard)
+now flags coverage/median-error regressions every run. See CHANGELOG 2026-06-27.
 
-**Task checklist.**
-- Infra
-  - [ ] systemd timer + unit; document in `freight/CLAUDE.md` services table.
-  - [ ] Drift watch: alert (log + Events feed entry) if rolling median |err| or interval coverage degrades past a threshold.
-- Testing & Polish
-  - [ ] Dry-run the retrain path on current data; confirm no-promote when challenger loses.
+**What's left (ML-dependent).**
+- [ ] Weekly gated retrain: re-fit the LightGBM challenger on accumulated history and auto-promote per segment/lead-bucket *only* if it beats the champion on the latest leakage-free walk-forward (median |err| down, coverage stays in [0.75, 0.85]).
+- [ ] Dry-run the retrain path on current data; confirm no-promote when the challenger loses.
 
-**Definition of done.** Timer installed; a retrain cycle runs end-to-end and correctly keeps the better model; monitoring emits on degradation.
+**Definition of done.** A retrain cycle runs end-to-end and correctly keeps the better model.
 
 ---
 

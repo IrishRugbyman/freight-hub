@@ -1358,9 +1358,22 @@ class EtaAccuracyRow(BaseModel):
     interval_coverage: float | None
 
 
+class EtaDriftAlert(BaseModel):
+    """A persisted champion-accuracy degradation flag (True ETA Phase G)."""
+
+    run_ts: str                     # ISO timestamp of the run that tripped it
+    model: str                      # champion model the alert is about
+    kind: str                       # 'coverage' | 'med_abs_err'
+    severity: str                   # 'warn' | 'alert'
+    metric: float                   # observed value that tripped the check
+    reference: float                # band edge / trailing median compared against
+    detail: str                     # human-readable message
+
+
 class EtaAccuracyResponse(BaseModel):
     run_ts: str | None              # ISO timestamp of the latest scored run
     models: list[str]               # models present, baseline-first order
     lead_order: list[str]           # lead buckets in chronological order
     rows: list[EtaAccuracyRow]
+    drift: list[EtaDriftAlert] = []  # active drift alerts from the latest run
 

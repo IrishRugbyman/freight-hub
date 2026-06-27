@@ -1566,6 +1566,19 @@ function EtaAccuracyCard() {
         </div>
       </CardHeader>
       <CardContent>
+        {(data.drift?.length ?? 0) > 0 && (
+          <div className="mb-3 space-y-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+            <div className="flex items-center gap-1.5 text-xs font-medium text-amber-300">
+              <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
+              Drift watch: champion accuracy degraded
+            </div>
+            {data.drift!.map(a => (
+              <p key={a.kind} className="text-[11px] text-amber-200/80">
+                {a.detail}
+              </p>
+            ))}
+          </div>
+        )}
         <div className="h-64">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={chartData} margin={{ top: 8, right: 8, left: -8, bottom: 4 }}>
@@ -1614,7 +1627,7 @@ function EtaAccuracyCard() {
           </table>
         </div>
         <p className="mt-2 text-[10px] text-muted-foreground/50">
-          History starts at the collection date and cannot be backfilled; the learned (ML) model is gated until enough clean history accrues, so physics carries production today.
+          History starts at the collection date and cannot be backfilled; the learned (ML) model is gated until enough clean history accrues, so physics carries production today. A drift watch re-checks the champion every run and flags coverage or median-error regressions here.
         </p>
       </CardContent>
     </Card>

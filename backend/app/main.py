@@ -37,6 +37,7 @@ from .schemas import (
     ChokepointCount,
     EtaAccuracyResponse,
     EtaAccuracyRow,
+    EtaDriftAlert,
     EtaPrediction,
     EtaResponse,
     CongestionResponse,
@@ -5919,8 +5920,43 @@ def analytics_eta_accuracy(target_type: str = "all"):
     rows.sort(key=lambda x: (model_rank.get(x.model, 99), lead_rank.get(x.lead_bucket, 99)))
 
     return EtaAccuracyResponse(
-        run_ts=run_ts, models=models, lead_order=_ETA_LEAD_ORDER, rows=rows
+        run_ts=run_ts, models=models, lead_order=_ETA_LEAD_ORDER, rows=rows,
+        drift=_eta_drift_alerts(),
     )
+
+
+def _eta_drift_alerts() -> list["EtaDriftAlert"]:
+    """Active drift alerts from the most recent run (True ETA Phase G).
+
+    Returns an empty list if the monitoring table does not exist yet (older DBs)
+    or the latest run was clean. Only the latest run's alerts are surfaced, so a
+    transient past degradation that has since recovered does not linger.
+    """
+    try:
+        drift_df = db.query(
+            "SELECT run_ts, model, kind, severity, metric, reference, detail "
+            "FROM eta_drift_alerts "
+            "WHERE run_ts = (SELECT max(run_ts) FROM eta_drift_alerts) "
+            "ORDER BY severity, kind",
+            db=db.analytics_db_path(),
+        )
+    except Exception:
+        return []
+    out = []
+    for _, r in drift_df.iterrows():
+        rt = r["run_ts"]
+        out.append(
+            EtaDriftAlert(
+                run_ts=rt.isoformat() if hasattr(rt, "isoformat") else str(rt),
+                model=str(r["model"]),
+                kind=str(r["kind"]),
+                severity=str(r["severity"]),
+                metric=float(r["metric"]),
+                reference=float(r["reference"]),
+                detail=str(r["detail"]),
+            )
+        )
+    return out
 
 
 @app.get("/api/analytics/european-inbound", response_model=EuropeanInboundResponse)
