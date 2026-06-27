@@ -665,6 +665,37 @@ export function usePortFlow(kind?: string, topN?: number) {
   })
 }
 
+export interface ArrivalTarget {
+  target_id: string
+  name: string
+  target_type: 'chokepoint' | 'port'
+  is_canal: boolean
+  arrivals: number
+  vessels: number
+  laden_share: number | null
+  top_segment: string | null
+  last_arrival_ts: string | null
+}
+
+export interface ArrivalsResponse {
+  as_of: string
+  window_days: number
+  target_type: string
+  total_arrivals: number
+  total_vessels: number
+  rows: ArrivalTarget[]
+}
+
+export function useArrivals(days = 14, targetType = 'all', topN = 20) {
+  const q = new URLSearchParams({ days: String(days), target_type: targetType, top_n: String(topN) })
+  return useQuery({
+    queryKey: ['arrivals', days, targetType, topN],
+    queryFn: () => getJSON<ArrivalsResponse>(`/api/analytics/arrivals?${q.toString()}`),
+    staleTime: ANALYTICS_STALE,
+    refetchInterval: REFETCH_MS,
+  })
+}
+
 export interface FlagRiskRow {
   flag: string
   flag_code: string | null

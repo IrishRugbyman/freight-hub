@@ -9,7 +9,7 @@ import {
   usePortArrivals, usePortFlow, usePortCongestion, useAnchorageOccupancy,
   useTradeLaneMatrix, useDestinationFlows, useCargoTransitions,
   useCargoStateChanges, useLaden, useDensity, useEuropeanInbound,
-  useLngInbound, useTransitRateTimeline, useEtaAccuracy,
+  useLngInbound, useTransitRateTimeline, useEtaAccuracy, useArrivals,
   type EuropeanInboundVessel, type LngVessel,
 } from '@/lib/api'
 import { fmt, EmptyState, ChartSkeleton, TOOLTIP_STYLE, LEGEND_STYLE, REGION_LABELS } from './-analyticsShared'
@@ -267,6 +267,108 @@ export function PortFlowCard() {
                     <div className="w-8 shrink-0 text-right text-muted-foreground">{p.count}</div>
                     <div className="w-14 shrink-0 text-right text-[10px] text-muted-foreground/60">
                       {p.tankers > 0 && `${p.tankers}T`}{p.tankers > 0 && p.bulkers > 0 && ' '}{p.bulkers > 0 && `${p.bulkers}B`}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// ActualArrivalsCard - ground-truth arrivals mined from AIS closest-approach,
+// the honest counterpart to the stated-destination distribution above.
+// ---------------------------------------------------------------------------
+function prettyTargetName(name: string): string {
+  return name
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+export function ActualArrivalsCard() {
+  const [targetType, setTargetType] = useState<'all' | 'port' | 'chokepoint'>('all')
+  const [days, setDays] = useState(14)
+  const { data, isLoading } = useArrivals(days, targetType, 15)
+  const rows = data?.rows ?? []
+  const maxArrivals = rows.length > 0 ? rows[0].arrivals : 0
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
+        <div>
+          <CardTitle className="text-sm font-medium">Actual Arrivals (Ground Truth)</CardTitle>
+          <div className="mt-0.5 text-[10px] text-muted-foreground/70">
+            Where vessels actually arrived, mined from AIS, not the self-reported destination
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <div className="flex gap-1">
+            {(['all', 'port', 'chokepoint'] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => setTargetType(t)}
+                className={`rounded px-2 py-0.5 text-[10px] font-medium capitalize transition-colors ${targetType === t ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'}`}
+              >
+                {t === 'all' ? 'All' : t === 'port' ? 'Ports' : 'Chokepoints'}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-1">
+            {([7, 14, 30] as const).map((d) => (
+              <button
+                key={d}
+                onClick={() => setDays(d)}
+                className={`rounded px-2 py-0.5 text-[10px] font-medium transition-colors ${days === d ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'}`}
+              >
+                {d}d
+              </button>
+            ))}
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {isLoading || !data ? (
+          <ChartSkeleton />
+        ) : rows.length === 0 ? (
+          <EmptyState message="No arrivals mined yet for this window." />
+        ) : (
+          <>
+            <div className="mb-2 text-[10px] text-muted-foreground">
+              {data.total_arrivals.toLocaleString()} arrivals from {data.total_vessels.toLocaleString()} distinct vessels over {data.window_days}d
+            </div>
+            <div className="space-y-1">
+              {rows.map((r) => {
+                const pct = maxArrivals > 0 ? (r.arrivals / maxArrivals) * 100 : 0
+                const ladenPct = r.laden_share != null ? Math.round(r.laden_share * 100) : null
+                return (
+                  <div key={r.target_id} className="flex items-center gap-2 text-xs">
+                    <div className="flex w-32 shrink-0 items-center gap-1 truncate">
+                      <span
+                        className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${r.target_type === 'chokepoint' ? 'bg-amber-400' : 'bg-sky-400'}`}
+                        title={r.target_type}
+                      />
+                      <span className="truncate font-medium">{prettyTargetName(r.name)}</span>
+                    </div>
+                    <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
+                      <div
+                        className={`h-full rounded-full ${r.target_type === 'chokepoint' ? 'bg-amber-400/60' : 'bg-sky-400/60'}`}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    <div className="w-10 shrink-0 text-right tabular-nums text-muted-foreground">{r.arrivals.toLocaleString()}</div>
+                    <div className="w-12 shrink-0 text-right text-[10px] tabular-nums text-muted-foreground/60" title="distinct vessels">
+                      {r.vessels.toLocaleString()}v
+                    </div>
+                    <div className="w-12 shrink-0 text-right text-[10px] tabular-nums" title="laden share">
+                      {ladenPct != null ? (
+                        <span className={ladenPct >= 70 ? 'text-emerald-400' : 'text-muted-foreground/60'}>{ladenPct}%L</span>
+                      ) : (
+                        <span className="text-muted-foreground/30">-</span>
+                      )}
                     </div>
                   </div>
                 )
@@ -1645,6 +1747,7 @@ export default function PortsCargoTab() {
       <EtaAccuracyCard />
       <PortArrivalForecastCard />
       <PortFlowCard />
+      <ActualArrivalsCard />
       <PortCongestionCard />
       <AnchorageOccupancyCard />
       <TradeLaneMatrixCard />

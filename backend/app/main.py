@@ -34,6 +34,8 @@ from .schemas import (
     AisDispersionRow,
     AisEvent,
     AnalyticsZone,
+    ArrivalsResponse,
+    ArrivalTarget,
     ChokepointCount,
     EtaAccuracyResponse,
     EtaAccuracyRow,
@@ -6057,6 +6059,95 @@ def _eta_drift_alerts() -> list["EtaDriftAlert"]:
             )
         )
     return out
+
+
+@app.get("/api/analytics/arrivals", response_model=ArrivalsResponse, tags=["analytics"])
+def analytics_arrivals(days: int = 14, target_type: str = "all", top_n: int = 20):
+    """Ground-truth arrival ranking: where vessels *actually* arrived, mined from AIS.
+
+    Distinct from `/api/analytics/ports`, which ranks the free-text *stated*
+    destination (garbage-in). This reads `eta_arrivals` (True ETA Phase A): per
+    resolved chokepoint/port target, one closest-approach arrival per voyage
+    episode, deduplicated. Returns the busiest targets over the window with their
+    distinct-vessel count, laden share, dominant segment and last-seen arrival,
+    plus window totals. `target_type` filters to 'chokepoint' | 'port' | 'all'.
+    """
+    days = max(1, min(90, days))
+    top_n = max(1, min(100, top_n))
+    if target_type not in ("all", "chokepoint", "port"):
+        target_type = "all"
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
+    _db = db.analytics_db_path()
+
+    type_clause = "" if target_type == "all" else "AND t.target_type = ?"
+    params: list = [cutoff]
+    if target_type != "all":
+        params.append(target_type)
+    params.append(top_n)
+
+    try:
+        df = db.query(
+            "SELECT a.target_id, t.name, t.target_type, t.is_canal, "
+            "       COUNT(*) AS arrivals, "
+            "       COUNT(DISTINCT a.mmsi) AS vessels, "
+            "       AVG(CASE WHEN a.laden THEN 1.0 WHEN a.laden IS NOT NULL THEN 0.0 END) AS laden_share, "
+            "       mode(a.segment) AS top_segment, "
+            "       MAX(a.arrival_ts) AS last_arrival_ts "
+            "FROM eta_arrivals a JOIN eta_targets t USING(target_id) "
+            f"WHERE a.arrival_ts >= ? {type_clause} "
+            "GROUP BY a.target_id, t.name, t.target_type, t.is_canal "
+            "ORDER BY arrivals DESC, vessels DESC "
+            "LIMIT ?",
+            params,
+            db=_db,
+        )
+    except Exception:
+        # eta_arrivals/eta_targets absent on an older analytics DB
+        df = pd.DataFrame()
+
+    now_iso = datetime.now(UTC).replace(tzinfo=None, microsecond=0).isoformat()
+    if df.empty:
+        return ArrivalsResponse(
+            as_of=now_iso, window_days=days, target_type=target_type,
+            total_arrivals=0, total_vessels=0, rows=[],
+        )
+
+    def _share(v):
+        return round(float(v), 3) if v is not None and not pd.isna(v) else None
+
+    rows = [
+        ArrivalTarget(
+            target_id=str(r["target_id"]),
+            name=str(r["name"]),
+            target_type=str(r["target_type"]),
+            is_canal=bool(r["is_canal"]),
+            arrivals=int(r["arrivals"]),
+            vessels=int(r["vessels"]),
+            laden_share=_share(r["laden_share"]),
+            top_segment=_str_or_none(r["top_segment"]),
+            last_arrival_ts=_iso(r["last_arrival_ts"]),
+        )
+        for _, r in df.iterrows()
+    ]
+
+    # Window totals respect the same target_type filter but are NOT capped by top_n.
+    tot_params: list = [cutoff]
+    if target_type != "all":
+        tot_params.append(target_type)
+    tot = db.query(
+        "SELECT COUNT(*) AS arrivals, COUNT(DISTINCT a.mmsi) AS vessels "
+        "FROM eta_arrivals a JOIN eta_targets t USING(target_id) "
+        f"WHERE a.arrival_ts >= ? {type_clause}",
+        tot_params,
+        db=_db,
+    )
+    total_arrivals = int(tot.iloc[0]["arrivals"]) if not tot.empty else 0
+    total_vessels = int(tot.iloc[0]["vessels"]) if not tot.empty else 0
+
+    return ArrivalsResponse(
+        as_of=now_iso, window_days=days, target_type=target_type,
+        total_arrivals=total_arrivals, total_vessels=total_vessels, rows=rows,
+    )
 
 
 @app.get("/api/analytics/european-inbound", response_model=EuropeanInboundResponse)

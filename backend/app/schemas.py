@@ -1377,3 +1377,28 @@ class EtaAccuracyResponse(BaseModel):
     rows: list[EtaAccuracyRow]
     drift: list[EtaDriftAlert] = []  # active drift alerts from the latest run
 
+
+class ArrivalTarget(BaseModel):
+    """Ground-truth arrival activity at one resolved target over the window."""
+
+    target_id: str                  # e.g. 'cp:suez', 'zone:rotterdam'
+    name: str
+    target_type: str                # 'chokepoint' | 'port'
+    is_canal: bool
+    arrivals: int                   # closest-approach arrivals in the window
+    vessels: int                    # distinct MMSI that arrived
+    laden_share: float | None       # share of arrivals with known laden=True (None if no laden signal)
+    top_segment: str | None         # most common vessel segment among arrivals
+    last_arrival_ts: str | None     # ISO timestamp of the most recent arrival
+
+
+class ArrivalsResponse(BaseModel):
+    """Ranking of where vessels actually arrived (mined from AIS), not where they say."""
+
+    as_of: str
+    window_days: int
+    target_type: str                # filter echoed back: 'all' | 'chokepoint' | 'port'
+    total_arrivals: int
+    total_vessels: int              # distinct vessels arriving anywhere in the window
+    rows: list[ArrivalTarget]
+

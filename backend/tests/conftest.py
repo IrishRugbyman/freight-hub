@@ -194,6 +194,15 @@ CREATE TABLE IF NOT EXISTS ais_events (
     lat DOUBLE, lon DOUBLE,
     region VARCHAR, kind VARCHAR, segment VARCHAR, details VARCHAR
 );
+CREATE TABLE IF NOT EXISTS eta_targets (
+    target_id TEXT PRIMARY KEY, target_type TEXT, name TEXT,
+    lat DOUBLE, lon DOUBLE, reach_nm DOUBLE, is_canal BOOLEAN
+);
+CREATE TABLE IF NOT EXISTS eta_arrivals (
+    mmsi BIGINT, target_id TEXT, arrival_ts TIMESTAMP,
+    min_dist_nm DOUBLE, segment TEXT, laden BOOLEAN, approach_start_ts TIMESTAMP,
+    PRIMARY KEY (mmsi, target_id, arrival_ts)
+);
 """
 
 _TRANSIT_SEED = [
@@ -235,6 +244,26 @@ _EVENTS_SEED = [
 ]
 
 
+_ETA_TARGETS_SEED = [
+    # target_id, target_type, name, lat, lon, reach_nm, is_canal
+    ("cp:suez", "chokepoint", "suez", 30.0, 32.5, 25.0, True),
+    ("cp:singapore_malacca", "chokepoint", "singapore_malacca", 1.3, 103.8, 30.0, False),
+    ("zone:rotterdam", "port", "rotterdam", 51.95, 4.1, 10.0, False),
+]
+
+_ETA_ARRIVALS_SEED = [
+    # mmsi, target_id, arrival_ts, min_dist_nm, segment, laden, approach_start_ts
+    (1001, "zone:rotterdam", _NOW - timedelta(days=1), 5.2, "VLCC", True, _NOW - timedelta(days=2)),
+    (1002, "zone:rotterdam", _NOW - timedelta(days=3), 4.8, "Suezmax", True, _NOW - timedelta(days=4)),
+    (1003, "zone:rotterdam", _NOW - timedelta(days=5), 6.1, "VLCC", False, _NOW - timedelta(days=6)),
+    (1001, "cp:suez", _NOW - timedelta(days=2), 12.0, "VLCC", True, _NOW - timedelta(days=3)),
+    (1004, "cp:suez", _NOW - timedelta(days=8), 14.0, "Aframax", True, _NOW - timedelta(days=9)),
+    # Stale arrival (outside a 7-day window, inside the 14-day default)
+    (1005, "cp:singapore_malacca", _NOW - timedelta(days=10), 9.0, "Capesize", None,
+     _NOW - timedelta(days=11)),
+]
+
+
 @pytest.fixture
 def analytics_client(tmp_path, monkeypatch) -> TestClient:
     """Client with both AIS DB and analytics DB seeded."""
@@ -256,6 +285,10 @@ def analytics_client(tmp_path, monkeypatch) -> TestClient:
     an_conn.executemany("INSERT INTO vessel_state VALUES (?,?,?,?,?)", _VESSEL_STATE_SEED)
     an_conn.executemany(
         "INSERT INTO ais_events VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", _EVENTS_SEED
+    )
+    an_conn.executemany("INSERT INTO eta_targets VALUES (?,?,?,?,?,?,?)", _ETA_TARGETS_SEED)
+    an_conn.executemany(
+        "INSERT INTO eta_arrivals VALUES (?,?,?,?,?,?,?)", _ETA_ARRIVALS_SEED
     )
     an_conn.close()
 

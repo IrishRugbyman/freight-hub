@@ -1,5 +1,35 @@
 # Freight Hub Changelog
 
+## 2026-06-27 - Ground-truth arrivals ranking (actual vs stated destination)
+
+Surfaced the `eta_arrivals` table (mined by True ETA Phase A, ~30k closest-approach
+arrivals over 14d) as a new public analytic. Until now it was only consumed
+internally as ETA training labels; nothing showed *where vessels actually arrived*.
+The existing "Live Destination Distribution" card ranks the AIS free-text
+*stated* destination (garbage-in, self-reported, often wrong). This new view ranks
+the same fleet by where they were *observed* arriving (closest-approach to the 72
+resolved chokepoint/port targets, one arrival per voyage episode, deduplicated) -
+the honest counterpart, and the distinction a sharp interviewer probes.
+
+**New `GET /api/analytics/arrivals?days=&target_type=&top_n=`** (`ArrivalsResponse`).
+Per target over the window: arrival count, distinct-vessel count, laden share
+(over arrivals with a known laden signal), dominant vessel segment (DuckDB
+`mode()`), and last-seen arrival timestamp; plus window totals (arrivals + distinct
+vessels) that respect the `target_type` filter but are *not* capped by `top_n`.
+`days` clamped [1,90], `top_n` [1,100], `target_type` in {all,chokepoint,port}
+(bad values fold to `all`). Gracefully returns empty (not 500) if `eta_arrivals`
+is absent on an older analytics DB.
+
+**Frontend**: new `ActualArrivalsCard` in the Ports & Cargo tab (now 14 cards),
+placed right after the stated-destination card for direct contrast. Target-type
+and 7/14/30-day toggles; ranked bars coloured by target type (sky=port,
+amber=chokepoint) with distinct-vessel count and laden-share badge per row.
+
+**Tests**: new `test_arrivals.py` (5 cases: empty-DB graceful path, ranking +
+totals + laden share + dominant segment, target_type filter, window cutoff drops
+old arrivals, param clamping). Seeded `eta_targets`/`eta_arrivals` into the
+analytics test fixture. Full suite 410 passing.
+
 ## 2026-06-27 - Fix: duplicate ports in the live destination-distribution lists
 
 Reported from the live Ports & Cargo tab: Rotterdam appeared as five separate
