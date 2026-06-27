@@ -34,6 +34,16 @@ of the dead open-episode query.
 `dwell_client` and `congestion_client` fixtures + assertions to the closed-episode
 model (open episodes were never produced in production). Full suite 416 passing.
 
+**Performance (same day):** the first cut merged the chains in a Python loop over
+the ~200k fragments in the window - `/api/analytics/port-congestion?days=14` took
+**118s**, so the live card never finished loading. Fixed two ways: (1) vectorised
+`merge_anchored_spans` as a gaps-and-islands pass (cummax/shift/cumsum) instead of
+a per-group loop; (2) moved the merge into DuckDB via a new `_merged_anchored_spans`
+window query so only ~15k merged spans cross into Python rather than 200k fragments.
+Endpoint now responds in **~0.7s** (a `current_from_spans` helper lets congestion
+reuse the spans it already computed for the baseline instead of merging twice).
+Verified the live page loads with Playwright (0 console errors).
+
 ## 2026-06-27 - Ground-truth arrivals ranking (actual vs stated destination)
 
 Surfaced the `eta_arrivals` table (mined by True ETA Phase A, ~30k closest-approach

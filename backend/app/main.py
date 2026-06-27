@@ -1601,30 +1601,26 @@ def analytics_anchorage_dwell(zone: str = "singapore_west", limit: int = 50):
     enriches with vessel_state + live_positions + registry. Long dwell vessels are
     likely ready to depart - a freight market timing signal.
     """
-    from analytics.detect import current_anchored
+    from analytics.detect import current_from_spans
 
     limit = max(5, min(200, limit))
     now = datetime.now(UTC).replace(tzinfo=None)
-    # 30-day lookback so a long anchoring's full chain is available to merge into
-    # a true dwell; current_anchored then keeps only vessels still present now.
+    # 30-day lookback so a long anchoring's full chain merges into a true dwell;
+    # current_from_spans then keeps only vessels still present now.
     since = now - timedelta(days=30)
 
-    ep_all = db.query(
-        "SELECT mmsi, zone, start_ts, end_ts, kind, segment "
-        "FROM anchored_episodes WHERE end_ts >= ?",
-        [since],
-        db=db.analytics_db_path(),
-    )
-    max_end = pd.to_datetime(ep_all["end_ts"]).max() if not ep_all.empty else None
-    current = current_anchored(ep_all, max_end) if max_end is not None else []
+    span_df = _merged_anchored_spans(since)
+    max_end = pd.to_datetime(span_df["end_ts"]).max() if not span_df.empty else None
+    spans = span_df.to_dict("records") if not span_df.empty else []
+    current = current_from_spans(spans, max_end) if max_end is not None else []
     here = [c for c in current if c["zone"] == zone]
     if not here:
         return AnchorageDwellResponse(as_of=_iso(now) or "", zone=zone, rows=[])
 
-    # kind/segment per mmsi from this zone's fragments (latest wins).
+    # kind/segment per mmsi from this zone's spans.
     meta: dict[int, dict] = {}
-    if not ep_all.empty:
-        zsub = ep_all[ep_all["zone"] == zone].sort_values("end_ts")
+    if not span_df.empty:
+        zsub = span_df[span_df["zone"] == zone]
         for _, r in zsub.iterrows():
             meta[int(r["mmsi"])] = {
                 "kind": _str_or_none(r.get("kind")),
@@ -3365,6 +3361,49 @@ def analytics_risk_events(min_risk: int = 25, days: int = 2, limit: int = 50):
     )
 
 
+def _merged_anchored_spans(since: datetime, kind: str = "") -> pd.DataFrame:
+    """Merged continuous anchoring spans since `since`, computed in DuckDB.
+
+    The analytics job stores a continuous anchoring as a chain of overlapping ~6h
+    closed fragments (no episode is ever left open). Counting raw fragments
+    inflates dwell/baseline ~6x, so we collapse them with a gaps-and-islands
+    window query (a new span begins when a fragment starts > 2h - the episode gap
+    - past the running max end of its (mmsi, zone) group). Doing the merge in SQL
+    returns ~15k spans instead of ~200k fragments, keeping the endpoint fast.
+
+    Returns columns: mmsi, zone, start_ts, end_ts, kind, segment.
+    """
+    kind_cond = " AND kind = ?" if kind else ""
+    params: list = [since] + ([kind] if kind else [])
+    return db.query(
+        "WITH frags AS ("
+        "  SELECT mmsi, zone, start_ts, end_ts, kind, segment "
+        "  FROM anchored_episodes "
+        f"  WHERE end_ts >= ?{kind_cond}"
+        "), ordered AS ("
+        "  SELECT *, max(end_ts) OVER ("
+        "      PARTITION BY mmsi, zone ORDER BY start_ts "
+        "      ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS prev_max_end "
+        "  FROM frags"
+        "), flagged AS ("
+        "  SELECT *, CASE WHEN prev_max_end IS NULL "
+        "                 OR start_ts > prev_max_end + INTERVAL 2 HOUR "
+        "            THEN 1 ELSE 0 END AS new_span "
+        "  FROM ordered"
+        "), spanned AS ("
+        "  SELECT *, sum(new_span) OVER ("
+        "      PARTITION BY mmsi, zone ORDER BY start_ts "
+        "      ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS span_id "
+        "  FROM flagged"
+        ") "
+        "SELECT mmsi, zone, min(start_ts) AS start_ts, max(end_ts) AS end_ts, "
+        "       any_value(kind) AS kind, any_value(segment) AS segment "
+        "FROM spanned GROUP BY mmsi, zone, span_id",
+        params,
+        db=db.analytics_db_path(),
+    )
+
+
 @app.get("/api/analytics/port-congestion", response_model=PortCongestionResponse)
 def analytics_port_congestion(kind: str = "", days: int = 14):
     """Port and anchorage congestion monitor.
@@ -3376,32 +3415,21 @@ def analytics_port_congestion(kind: str = "", days: int = 14):
     Zones with no historical baseline still appear if vessels are currently anchored:
     they get congestion_factor=1.0 (no comparison available).
     """
-    from analytics.detect import CURRENT_ANCHOR_WINDOW_H, current_anchored, merge_anchored_spans
+    from analytics.detect import CURRENT_ANCHOR_WINDOW_H, current_from_spans
 
     days = max(3, min(90, days))
     now_ts = datetime.now(UTC).replace(tzinfo=None)
     since = now_ts - timedelta(days=days)
 
-    kind_cond = " AND kind = ?" if kind else ""
-    kind_params = [kind] if kind else []
-
     # The analytics job never leaves an episode open (end_ts IS NULL): each run's
     # sliding window stores a continuous anchoring as a chain of overlapping ~6h
-    # CLOSED fragments. So we fetch every fragment in the window and reconstruct
-    # both the current presence and the baseline from MERGED spans - counting raw
-    # fragments would inflate dwell (and the baseline) ~6x. See
-    # detect.merge_anchored_spans / current_anchored.
-    ep_df = db.query(
-        f"SELECT mmsi, zone, start_ts, end_ts, kind "
-        f"FROM anchored_episodes "
-        f"WHERE end_ts >= ?{kind_cond}",
-        [since] + kind_params,
-        db=db.analytics_db_path(),
-    )
-
-    max_end = pd.to_datetime(ep_df["end_ts"]).max() if not ep_df.empty else None
-    spans = merge_anchored_spans(ep_df) if not ep_df.empty else []
-    current = current_anchored(ep_df, max_end) if max_end is not None else []
+    # CLOSED fragments. _merged_anchored_spans collapses them (in SQL) so both
+    # current presence and the baseline come from MERGED spans - counting raw
+    # fragments would inflate dwell and the baseline ~6x.
+    span_df = _merged_anchored_spans(since, kind)
+    max_end = pd.to_datetime(span_df["end_ts"]).max() if not span_df.empty else None
+    spans = span_df.to_dict("records") if not span_df.empty else []
+    current = current_from_spans(spans, max_end) if max_end is not None else []
 
     # Enrich currently-anchored vessels with region from live_positions (separate DB).
     region_map: dict[int, str | None] = {}
@@ -3416,8 +3444,8 @@ def analytics_port_congestion(kind: str = "", days: int = 14):
             region_map = {int(r["mmsi"]): _str_or_none(r.get("region")) for _, r in region_df.iterrows()}
 
     kind_map: dict[int, str | None] = {}
-    if not ep_df.empty:
-        for _, r in ep_df.dropna(subset=["mmsi"]).iterrows():
+    if not span_df.empty:
+        for _, r in span_df.dropna(subset=["mmsi"]).iterrows():
             kind_map.setdefault(int(r["mmsi"]), _str_or_none(r.get("kind")))
 
     # Build current state: zone -> {vessels, avg_dwell, region, kind}
@@ -3441,8 +3469,9 @@ def analytics_port_congestion(kind: str = "", days: int = 14):
     # current-vs-typical comparison rather than comparing the present to itself; a
     # zone whose only presence is right now has no baseline (factor falls back to 1).
     zone_baseline: dict[str, dict] = {}
-    span_df = pd.DataFrame(spans)
     if not span_df.empty and max_end is not None:
+        span_df["start_ts"] = pd.to_datetime(span_df["start_ts"])
+        span_df["end_ts"] = pd.to_datetime(span_df["end_ts"])
         baseline_end = pd.Timestamp(max_end) - pd.Timedelta(hours=CURRENT_ANCHOR_WINDOW_H)
         since_pd = pd.Timestamp(since)
         obs_hours = max((baseline_end - since_pd).total_seconds() / 3600, 1)

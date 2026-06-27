@@ -299,6 +299,11 @@ def merge_anchored_spans(episodes: pd.DataFrame, gap_h: float = _EPISODE_GAP_H) 
     sit within `gap_h` of each other into a single span with the true start/end.
 
     Returns one dict per merged span: {mmsi, zone, start_ts, end_ts} (Timestamps).
+
+    Vectorised gaps-and-islands: a new span starts wherever a fragment's start is
+    more than `gap_h` past the running max end of the prior fragments in its
+    (mmsi, zone) group. Runs in one pass over the table rather than a Python loop
+    per group - important because the window can hold ~200k fragments.
     """
     if episodes is None or episodes.empty:
         return []
@@ -307,27 +312,25 @@ def merge_anchored_spans(episodes: pd.DataFrame, gap_h: float = _EPISODE_GAP_H) 
         return []
     df["start_ts"] = pd.to_datetime(df["start_ts"])
     df["end_ts"] = pd.to_datetime(df["end_ts"])
+    df = df.sort_values(["mmsi", "zone", "start_ts"], kind="mergesort").reset_index(drop=True)
     gap = pd.Timedelta(hours=gap_h)
 
-    spans: list[dict] = []
-    for (mmsi, zone), grp in df.groupby(["mmsi", "zone"], sort=False):
-        grp = grp.sort_values("start_ts")
-        span_start = None
-        span_end = None
-        for s, e in zip(grp["start_ts"], grp["end_ts"]):
-            if span_start is None:
-                span_start, span_end = s, e
-            elif s <= span_end + gap:
-                if e > span_end:
-                    span_end = e
-            else:
-                spans.append({"mmsi": int(mmsi), "zone": str(zone),
-                              "start_ts": span_start, "end_ts": span_end})
-                span_start, span_end = s, e
-        if span_start is not None:
-            spans.append({"mmsi": int(mmsi), "zone": str(zone),
-                          "start_ts": span_start, "end_ts": span_end})
-    return spans
+    grouped_end = df.groupby(["mmsi", "zone"], sort=False)["end_ts"]
+    # Running max end of *prior* fragments in the group (exclusive of this row).
+    prev_max_end = grouped_end.cummax().groupby([df["mmsi"], df["zone"]]).shift(1)
+    new_span = prev_max_end.isna() | (df["start_ts"] > prev_max_end + gap)
+    df["span_id"] = new_span.groupby([df["mmsi"], df["zone"]]).cumsum()
+
+    agg = (
+        df.groupby(["mmsi", "zone", "span_id"], sort=False)
+        .agg(start_ts=("start_ts", "min"), end_ts=("end_ts", "max"))
+        .reset_index()
+    )
+    return [
+        {"mmsi": int(r.mmsi), "zone": str(r.zone),
+         "start_ts": r.start_ts, "end_ts": r.end_ts}
+        for r in agg.itertuples(index=False)
+    ]
 
 
 def current_anchored(
@@ -349,12 +352,25 @@ def current_anchored(
     if max_end_ts is None:
         return []
     spans = merge_anchored_spans(episodes, gap_h=gap_h)
-    if not spans:
-        return []
-    max_end = pd.Timestamp(max_end_ts)
-    cutoff = max_end - pd.Timedelta(hours=window_h)
+    return current_from_spans(spans, max_end_ts, window_h=window_h)
 
-    # Keep each vessel's single latest span (a vessel is at one anchorage now).
+
+def current_from_spans(
+    spans: list[dict],
+    max_end_ts,
+    window_h: float = CURRENT_ANCHOR_WINDOW_H,
+) -> list[dict]:
+    """Pick the currently-anchored vessels from already-merged spans.
+
+    Lets a caller that already merged spans (e.g. the congestion endpoint, which
+    also needs the spans for its baseline) avoid merging twice. Keeps each
+    vessel's single latest span and reports it present when it ends within
+    `window_h` of `max_end_ts`. Returns {mmsi, zone, dwell_hours, end_ts} dicts.
+    """
+    if not spans or max_end_ts is None:
+        return []
+    cutoff = pd.Timestamp(max_end_ts) - pd.Timedelta(hours=window_h)
+
     latest: dict[int, dict] = {}
     for sp in spans:
         cur = latest.get(sp["mmsi"])
