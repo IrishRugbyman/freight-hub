@@ -570,7 +570,12 @@ def vessels(
 
 @app.get("/api/vessels/{mmsi}/track", response_model=list[TrackPoint])
 def vessel_track(mmsi: int, hours: int = 24):
-    """Historical trail for a vessel from ais_snapshots. hours clamped to [1, 336]."""
+    """Historical trail for a vessel from ais_snapshots. hours clamped to [1, 336].
+
+    Points are thinned: only kept when the vessel has moved >= 200m from the
+    previous kept point, so anchored vessels don't produce scribble-circles.
+    The most recent point is always included.
+    """
     h = max(1, min(hours, 336))
     cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=h)
     df = db.query(
@@ -581,10 +586,20 @@ def vessel_track(mmsi: int, hours: int = 24):
     if df.empty:
         return []
     df = df.astype(object).where(df.notna(), None)
-    return [
-        TrackPoint(ts=_iso(r.snapshot_ts), lat=r.lat, lon=r.lon, sog=r.sog)
-        for r in df.itertuples()
-    ]
+    rows = list(df.itertuples())
+
+    # Distance-threshold thinning (~200m = 0.0018 deg). Keeps all points for
+    # vessels moving >= 1 kn (300m+ per 10-min snapshot) and strips anchor drift.
+    _MIN_DEG2 = 0.0018 ** 2
+    kept = [rows[0]]
+    for r in rows[1:]:
+        prev = kept[-1]
+        if (r.lat - prev.lat) ** 2 + (r.lon - prev.lon) ** 2 >= _MIN_DEG2:
+            kept.append(r)
+    if kept[-1] is not rows[-1]:
+        kept.append(rows[-1])  # always include the most recent fix
+
+    return [TrackPoint(ts=_iso(r.snapshot_ts), lat=r.lat, lon=r.lon, sog=r.sog) for r in kept]
 
 
 @app.get("/api/vessels/{mmsi}/state", response_model=VesselStateData | None)
