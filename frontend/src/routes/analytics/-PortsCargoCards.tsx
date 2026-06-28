@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import {
-  Bar, BarChart, CartesianGrid, Legend, Line, LineChart,
+  Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, ReferenceLine,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -1629,6 +1629,20 @@ function EtaAccuracyCard() {
     [data],
   )
 
+  // Calibration chart: P10-P90 interval coverage for physics_v1 per lead bucket.
+  // Target is 80%. Bars colored by how far they deviate from target.
+  const calibrationData = React.useMemo(() => {
+    if (!data) return []
+    const buckets = data.lead_order.filter(b => b !== 'all')
+    return buckets.map(bucket => {
+      const row = data.rows.find(
+        r => r.model === 'physics_v1' && r.lead_bucket === bucket && r.target_type === 'all'
+      )
+      const cov = row?.interval_coverage != null ? row.interval_coverage * 100 : null
+      return { bucket, coverage: cov }
+    }).filter(d => d.coverage != null)
+  }, [data])
+
   if (isLoading) {
     return (
       <Card>
@@ -1696,6 +1710,44 @@ function EtaAccuracyCard() {
             </BarChart>
           </ResponsiveContainer>
         </div>
+
+        {calibrationData.length > 0 && (
+          <div className="mt-4">
+            <p className="mb-1 text-xs font-medium text-muted-foreground">
+              Physics P10-P90 interval calibration
+              <span className="ml-1.5 font-normal text-muted-foreground/70">— target 80%; over-wide = wastes precision, under-narrow = surprises</span>
+            </p>
+            <div className="h-36">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={calibrationData} margin={{ top: 4, right: 8, left: -8, bottom: 4 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                  <XAxis dataKey="bucket" tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" />
+                  <YAxis
+                    tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))"
+                    domain={[0, 100]}
+                    tickFormatter={v => `${v}%`}
+                    width={36}
+                  />
+                  <Tooltip
+                    contentStyle={TOOLTIP_STYLE}
+                    formatter={(val) => [`${Number(val).toFixed(1)}%`, 'Actual coverage']}
+                  />
+                  <ReferenceLine y={80} stroke="#38bdf8" strokeDasharray="4 2" strokeWidth={1.5} label={{ value: '80% target', fontSize: 9, fill: '#38bdf8', position: 'insideTopRight' }} />
+                  <Bar dataKey="coverage" radius={[2, 2, 0, 0]}>
+                    {calibrationData.map((d, i) => {
+                      const v = d.coverage as number
+                      const fill = v < 70 ? '#ef4444' : v > 90 ? '#f59e0b' : '#22c55e'
+                      return <Cell key={i} fill={fill} opacity={0.75} />
+                    })}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <p className="mt-0.5 text-[10px] text-muted-foreground/50">
+              Green = well-calibrated (70-90%). Red = under-confident (intervals too narrow). Amber = over-conservative (intervals too wide).
+            </p>
+          </div>
+        )}
 
         <div className="mt-3 overflow-x-auto">
           <table className="w-full text-xs tabular-nums">
