@@ -2188,7 +2188,7 @@ def analytics_density(region: str = "singapore_malacca", days: int = 30):
     cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=d)
     df = db.query(
         "SELECT ts, kind, segment, laden_count, ballast_count, unknown_count "
-        "FROM fleet_density WHERE region = ? AND ts >= ? ORDER BY ts",
+        "FROM fleet_density WHERE region = ? AND ts >= ? AND segment != 'Small' ORDER BY ts",
         [region, cutoff],
         db=db.analytics_db_path(),
     )
