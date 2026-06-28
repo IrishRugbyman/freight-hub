@@ -205,6 +205,45 @@ def _fit_interval(conn: duckdb.DuckDBPyConnection) -> IntervalModel:
     return IntervalModel().fit(samples)
 
 
+def _candidate_pairs(
+    live: pd.DataFrame,
+    targets: pd.DataFrame,
+) -> list[tuple[int, float, float, float, int]]:
+    """First pass: for each live vessel, find target candidates within range.
+
+    Returns list of (vessel_idx, lat, lon, gc_nm, target_idx) tuples, with
+    at most ``_MAX_TARGETS_PER_VESSEL`` targets per vessel, sorted by gc_nm
+    ascending (closest first). Applies COG/heading bearing gate.
+    """
+    t_lat = targets["lat"].to_numpy(dtype=float)
+    t_lon = targets["lon"].to_numpy(dtype=float)
+    pairs = []
+    for vi, v in enumerate(live.itertuples()):
+        lat, lon = float(v.lat), float(v.lon)
+        gc = haversine_nm_vec(t_lat, t_lon, lat, lon)
+        cand_idx = np.where(gc <= _MAX_PRED_GC_NM)[0]
+        if cand_idx.size == 0:
+            continue
+        course = None
+        if pd.notna(getattr(v, "cog", None)):
+            course = float(v.cog)
+        elif pd.notna(getattr(v, "heading", None)):
+            course = float(v.heading)
+        scored = []
+        for i in cand_idx:
+            if course is not None:
+                bearing = initial_bearing(lat, lon, float(t_lat[i]), float(t_lon[i]))
+                if _angle_diff(bearing, course) > _AHEAD_ANGLE_DEG:
+                    continue
+            scored.append((float(gc[i]), int(i)))
+        if not scored:
+            continue
+        scored.sort(key=lambda x: x[0])
+        for gc_fix, ti in scored[:_MAX_TARGETS_PER_VESSEL]:
+            pairs.append((vi, lat, lon, gc_fix, ti))
+    return pairs
+
+
 def build_predictions(
     conn: duckdb.DuckDBPyConnection,
     ais_query,
@@ -214,6 +253,11 @@ def build_predictions(
 
     Returns a frame ready for `persist_predictions` (one row per scored
     (vessel, target) pair). Pure read of the AIS DB via the injected `ais_query`.
+
+    Route cache pre-warm: a first pass over all candidate (vessel, target)
+    pairs collects unique (from_cell, target_id) pairs and routes them all
+    before the main prediction loop, so the loop pays only in-memory dict
+    lookups (no searoute calls in the hot path).
     """
     now = now or datetime.now(UTC).replace(tzinfo=None, microsecond=0)
     targets = _load_targets(conn)
@@ -226,88 +270,87 @@ def build_predictions(
     trail_by_mmsi = _trailing_speed(ais_query, live["mmsi"].astype("int64").unique().tolist(), now)
     cache = RouteCache(conn)
 
-    t_lat = targets["lat"].to_numpy(dtype=float)
-    t_lon = targets["lon"].to_numpy(dtype=float)
+    # Build O(1) target lookup dict by target_id
+    target_by_id = {
+        str(r["target_id"]): r for _, r in targets.iterrows()
+    }
 
+    # Pass 1: collect candidates and pre-warm route cache for all unique pairs
+    pairs = _candidate_pairs(live, targets)
+    log.info("build_predictions: %d candidate (vessel, target) pairs for %d live vessels",
+             len(pairs), len(live))
+    # unique_cells: maps (clat, clon, tid) -> target dict (for cache.distance)
+    unique_cell_target: dict[tuple[float, float, str], dict] = {}
+    for _vi, lat, lon, _gc, ti in pairs:
+        t = targets.iloc[ti]
+        clat, clon = snap_cell(lat, lon)
+        key = (clat, clon, str(t["target_id"]))
+        if key not in unique_cell_target:
+            unique_cell_target[key] = {
+                "target_id": str(t["target_id"]),
+                "lat": float(t["lat"]),
+                "lon": float(t["lon"]),
+            }
+    log.info("build_predictions: pre-warming route cache for %d unique (cell, target) pairs",
+             len(unique_cell_target))
+    for (clat, clon, _tid), target_dict in unique_cell_target.items():
+        cache.distance(clat, clon, target_dict)
+    cache.flush()
+    log.info("build_predictions: route cache pre-warm done (%d hits, %d misses)",
+             cache.hits, cache.misses)
+
+    # Pass 2: build predictions using the warm in-memory cache (no searoute calls)
     rows: list[dict] = []
-    for v in live.itertuples():
-        lat, lon = float(v.lat), float(v.lon)
-        sog = float(v.sog)
-        # Course we are steering: COG preferred, heading as fallback. Without
-        # either we cannot tell "ahead" from "behind", so the bearing gate is
-        # skipped and we rely on the distance cap + nearest-K alone.
-        course = None
-        if pd.notna(getattr(v, "cog", None)):
-            course = float(v.cog)
-        elif pd.notna(getattr(v, "heading", None)):
-            course = float(v.heading)
+    for vi, lat, lon, gc_fix, ti in pairs:
+        v = live.iloc[vi]
+        sog = float(v["sog"])
+        seg = str(v["segment"]) if pd.notna(v["segment"]) else None
+        laden = laden_by_mmsi.get(int(v["mmsi"]))
+        trail = trail_by_mmsi.get(int(v["mmsi"]))
+        t = targets.iloc[ti]
+        target = {"target_id": t["target_id"], "lat": float(t["lat"]), "lon": float(t["lon"])}
 
-        gc = haversine_nm_vec(t_lat, t_lon, lat, lon)
-        cand_idx = np.where(gc <= _MAX_PRED_GC_NM)[0]
-        if cand_idx.size == 0:
+        clat, clon = snap_cell(lat, lon)
+        cell_route, method = cache.distance(lat, lon, target)
+        gc_cell = haversine_nm(clat, clon, target["lat"], target["lon"])
+        route_dist = max(cell_route - gc_cell + gc_fix, gc_fix)
+
+        obs = {
+            "sog": sog,
+            "sog_trail6h": trail,
+            "segment": seg,
+            "laden": laden,
+            "route_dist_nm": route_dist,
+            "gc_dist_nm": gc_fix,
+            "is_canal": bool(t["is_canal"]),
+            "target_id": t["target_id"],
+        }
+        p50, low, high, model = _predict(obs, interval)
+        if not np.isfinite(p50) or p50 > _MAX_PRED_ETA_H:
             continue
-
-        scored: list[tuple[float, int]] = []
-        for i in cand_idx:
-            tgt_lat, tgt_lon = float(t_lat[i]), float(t_lon[i])
-            if course is not None:
-                bearing = initial_bearing(lat, lon, tgt_lat, tgt_lon)
-                if _angle_diff(bearing, course) > _AHEAD_ANGLE_DEG:
-                    continue
-            scored.append((float(gc[i]), int(i)))
-        if not scored:
-            continue
-        scored.sort(key=lambda x: x[0])
-
-        seg = str(v.segment) if pd.notna(v.segment) else None
-        laden = laden_by_mmsi.get(int(v.mmsi))
-        trail = trail_by_mmsi.get(int(v.mmsi))
-
-        for gc_fix, i in scored[:_MAX_TARGETS_PER_VESSEL]:
-            t = targets.iloc[i]
-            target = {"target_id": t["target_id"], "lat": float(t["lat"]), "lon": float(t["lon"])}
-            cell_route, method = cache.distance(lat, lon, target)
-            clat, clon = snap_cell(lat, lon)
-            gc_cell = haversine_nm(clat, clon, target["lat"], target["lon"])
-            route_dist = max(cell_route - gc_cell + gc_fix, gc_fix)
-
-            obs = {
-                "sog": sog,
-                "sog_trail6h": trail,
+        rows.append(
+            {
+                "mmsi": int(v["mmsi"]),
+                "target_id": t["target_id"],
+                "as_of": now,
+                "eta_p50_h": round(p50, 2),
+                "eta_low_h": round(low, 2),
+                "eta_high_h": round(high, 2),
+                "eta_naive_h": round(gc_fix / sog, 2),
+                "method": model,
+                "eta_arrival_ts": now + timedelta(hours=p50),
+                "route_dist_nm": round(route_dist, 1),
+                "gc_dist_nm": round(gc_fix, 1),
+                "route_method": method,
+                "sog": round(sog, 1),
                 "segment": seg,
                 "laden": laden,
-                "route_dist_nm": route_dist,
-                "gc_dist_nm": gc_fix,
-                "is_canal": bool(t["is_canal"]),
-                "target_id": t["target_id"],
+                "target_type": t["target_type"],
+                "target_name": t["name"],
+                "target_lat": float(t["lat"]),
+                "target_lon": float(t["lon"]),
             }
-            p50, low, high, model = _predict(obs, interval)
-            if not np.isfinite(p50) or p50 > _MAX_PRED_ETA_H:
-                continue
-            rows.append(
-                {
-                    "mmsi": int(v.mmsi),
-                    "target_id": t["target_id"],
-                    "as_of": now,
-                    "eta_p50_h": round(p50, 2),
-                    "eta_low_h": round(low, 2),
-                    "eta_high_h": round(high, 2),
-                    "eta_naive_h": round(gc_fix / sog, 2),
-                    "method": model,
-                    "eta_arrival_ts": now + timedelta(hours=p50),
-                    "route_dist_nm": round(route_dist, 1),
-                    "gc_dist_nm": round(gc_fix, 1),
-                    "route_method": method,
-                    "sog": round(sog, 1),
-                    "segment": seg,
-                    "laden": laden,
-                    "target_type": t["target_type"],
-                    "target_name": t["name"],
-                    "target_lat": float(t["lat"]),
-                    "target_lon": float(t["lon"]),
-                }
-            )
-    cache.flush()
+        )
     return pd.DataFrame(rows, columns=_PERSIST_COLS)
 
 
