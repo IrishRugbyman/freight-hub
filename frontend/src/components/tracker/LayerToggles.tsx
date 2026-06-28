@@ -13,6 +13,7 @@ export function LayerToggles({
   return (
     <div className="flex flex-col gap-2">
       <Switch checked={layers.oceanOnly} onChange={set('oceanOnly')} label="Ocean vessels only" />
+      <Switch checked={layers.hideStale} onChange={set('hideStale')} label="Hide dark vessels" />
       <Switch checked={layers.clustering} onChange={set('clustering')} label="Cluster markers" />
       <Switch checked={layers.headingArrows} onChange={set('headingArrows')} label="Heading arrows" />
       <Switch checked={layers.counts} onChange={set('counts')} label="Counts panel" />

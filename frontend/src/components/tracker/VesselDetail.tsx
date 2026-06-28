@@ -204,6 +204,13 @@ export function VesselDetail({
               <Navigation size={10} className="text-muted-foreground" />
             )}
             <span className="text-xs text-muted-foreground">{navLabel(vessel.nav_status)}</span>
+            {vessel.stale && (
+              <span className="rounded bg-zinc-700/60 px-1.5 py-px text-[9px] font-medium text-zinc-400">
+                dark {vessel.age_minutes != null && vessel.age_minutes >= 60
+                  ? `${Math.round(vessel.age_minutes / 60)}h`
+                  : `${vessel.age_minutes}m`} ago
+              </span>
+            )}
           </div>
         </div>
         <button onClick={onClose} className="shrink-0 text-muted-foreground hover:text-foreground" aria-label="Close">

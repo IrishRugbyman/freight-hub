@@ -213,6 +213,10 @@ def _fresh_cutoff() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=db.STALE_HOURS)
 
 
+def _visible_cutoff() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=db.VISIBLE_HOURS)
+
+
 def _valid_imo(v) -> int | None:
     """Return int IMO if valid, else None. Handles pandas NA/NaN/None."""
     if v is None:
@@ -399,6 +403,7 @@ import threading as _threading
 # stale period. One warm copy per 30s eliminates the problem.
 _live_cache_lock = _threading.Lock()
 _live_cache: dict = {"df": None, "ts": 0.0, "path": ""}
+_live_visible_cache: dict = {"df": None, "ts": 0.0, "path": ""}
 _LIVE_CACHE_TTL = 30.0  # seconds
 
 # Self-healing coverage flag: a region has terrestrial AIS coverage iff the collector
@@ -435,6 +440,35 @@ def _live_all():
     elif _live_cache["df"] is not None and path_match:
         # DB was locked on same path - return stale cache rather than propagating 0s
         return _live_cache["df"]
+    return df
+
+
+def _live_visible():
+    """Full live_positions within the visible window (VISIBLE_HOURS, default 24h).
+
+    Used only by /api/vessels so the map can show grey last-known-position markers
+    for dark vessels. All analytics endpoints use _live_all() (3h fresh window) so
+    stale vessels never corrupt counts/flows/chokepoints.
+    """
+    import time
+
+    now = time.monotonic()
+    current_path = str(db.db_path())
+    with _live_cache_lock:
+        path_match = _live_visible_cache["path"] == current_path
+        if path_match and _live_visible_cache["df"] is not None and now - _live_visible_cache["ts"] < _LIVE_CACHE_TTL:
+            return _live_visible_cache["df"]
+    df = db.query(
+        "SELECT * FROM live_positions WHERE updated_ts > ?",
+        [_visible_cutoff()],
+    )
+    if not df.empty:
+        with _live_cache_lock:
+            _live_visible_cache["df"] = df
+            _live_visible_cache["ts"] = now
+            _live_visible_cache["path"] = current_path
+    elif _live_visible_cache["df"] is not None and path_match:
+        return _live_visible_cache["df"]
     return df
 
 
@@ -505,12 +539,19 @@ def vessels(
     foc: bool | None = None,
     shadow: bool | None = None,
 ):
-    """Fresh vessel positions, optionally filtered by kind / segment / region / flag.
+    """Live + last-known vessel positions, filtered by kind / segment / region / flag.
+
+    Returns vessels seen within VISIBLE_HOURS (default 24h). Vessels not seen within
+    STALE_HOURS (default 3h) are tagged stale=True and rendered as grey markers on the
+    map; they are excluded from all analytics endpoints which still use the 3h window.
 
     `flag` matches either the ISO2 code or the country name. `foc` / `shadow` filter
     to flags of convenience / high-shadow-activity flags (derived from the MMSI MID).
     """
-    df = _live_all()
+    now_dt = datetime.now(UTC).replace(tzinfo=None)
+    stale_threshold_min = db.STALE_HOURS * 60
+
+    df = _live_visible()
     if not df.empty:
         for col, val in (("kind", kind), ("segment", segment), ("region", region)):
             if val:
@@ -563,6 +604,10 @@ def vessels(
             flag_code=getattr(r, "flag_code", None),
             flag_foc=bool(getattr(r, "flag_foc", False)),
             flag_shadow=bool(getattr(r, "flag_shadow", False)),
+            stale=((now_dt - r.updated_ts).total_seconds() / 60) > stale_threshold_min
+                if r.updated_ts is not None else False,
+            age_minutes=round((now_dt - r.updated_ts).total_seconds() / 60)
+                if r.updated_ts is not None else None,
         )
         for r in df.itertuples()
     ]

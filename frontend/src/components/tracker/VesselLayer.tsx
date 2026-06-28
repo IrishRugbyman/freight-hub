@@ -28,6 +28,17 @@ function shipSvg(color: string, anchored: boolean): string {
 }
 
 function makeMarker(v: Vessel, headingArrows: boolean): L.Layer {
+  if (v.stale) {
+    // Grey dimmed circle for dark/stale vessels - no heading arrow, reduced opacity
+    return L.circleMarker([v.lat, v.lon], {
+      radius: 3,
+      color: '#6b7280',
+      weight: 1,
+      fillColor: '#9ca3af',
+      fillOpacity: 0.4,
+    })
+  }
+
   const color = colorFor(v.kind, v.segment)
   const anchored = (v.nav_status === 1 || v.nav_status === 5) || ((v.sog ?? 99) < 0.3)
   const course = headingArrows && !anchored ? (v.heading ?? v.cog) : null
@@ -157,6 +168,7 @@ export function VesselLayer({
       const now = Date.now()
       const updatedMs = updatedMsRef.current
       for (const v of vesselsRef.current) {
+        if (v.stale) continue  // no DR for dark vessels - position unknown
         const marker = markerMap.get(v.mmsi)
         if (!marker) continue
         const dtSec = (now - (updatedMs.get(v.mmsi) ?? now)) / 1000

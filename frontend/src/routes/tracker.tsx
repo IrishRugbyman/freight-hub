@@ -28,10 +28,12 @@ function TrackerPage() {
   const [highlightPipelineId, setHighlightPipelineId] = useState<string | null>(null)
 
   const { data: rawVessels = [], isLoading, isError, dataUpdatedAt, isPlaceholderData } = useVessels(filters)
-  const vessels = useMemo(
-    () => layers.oceanOnly ? rawVessels.filter((v) => v.segment !== 'Small') : rawVessels,
-    [rawVessels, layers.oceanOnly],
-  )
+  const vessels = useMemo(() => {
+    let vs = rawVessels
+    if (layers.oceanOnly) vs = vs.filter((v) => v.segment !== 'Small')
+    if (layers.hideStale) vs = vs.filter((v) => !v.stale)
+    return vs
+  }, [rawVessels, layers.oceanOnly, layers.hideStale])
   useVesselStream(filters, layers.deckgl)
   const { data: meta } = useMeta()
   const { data: trailPoints } = useVesselTrack(selected?.mmsi ?? null, trailHours)

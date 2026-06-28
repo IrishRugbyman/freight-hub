@@ -118,6 +118,8 @@ export interface Vessel {
   flag_code: string | null
   flag_foc: boolean
   flag_shadow: boolean
+  stale: boolean
+  age_minutes: number | null
 }
 
 export interface ChokepointCount {

@@ -27,6 +27,8 @@ class Vessel(BaseModel):
     flag_code: str | None = None     # ISO2
     flag_foc: bool = False           # flag of convenience
     flag_shadow: bool = False        # high shadow-fleet activity flag
+    stale: bool = False              # dark >STALE_HOURS but within VISIBLE_HOURS
+    age_minutes: int | None = None   # minutes since last AIS fix
 
 
 class TrackPoint(BaseModel):

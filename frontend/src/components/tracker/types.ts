@@ -11,6 +11,7 @@ export interface LayerState {
   heatmap: boolean
   riskOverlay: boolean
   oceanOnly: boolean
+  hideStale: boolean
 }
 
 export const DEFAULT_LAYERS: LayerState = {
@@ -24,6 +25,7 @@ export const DEFAULT_LAYERS: LayerState = {
   heatmap: false,
   riskOverlay: false,
   oceanOnly: true,
+  hideStale: false,
 }
 
 export type Filters = VesselFilters

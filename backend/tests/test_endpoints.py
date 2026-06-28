@@ -14,12 +14,18 @@ def test_health(client):
     assert body["last_update"] is not None
 
 
-def test_vessels_excludes_stale(client):
+def test_vessels_includes_stale_tagged(client):
     r = client.get("/api/vessels")
     assert r.status_code == 200
     rows = r.json()
-    assert len(rows) == 4
-    assert "STALE CAPE" not in {v["name"] for v in rows}
+    # 4 fresh + 1 stale (within 24h visible window) = 5 total
+    assert len(rows) == 5
+    stale_row = next(v for v in rows if v["name"] == "STALE CAPE")
+    assert stale_row["stale"] is True
+    assert stale_row["age_minutes"] is not None and stale_row["age_minutes"] > 60
+    # All fresh vessels are tagged stale=False
+    fresh = [v for v in rows if v["name"] != "STALE CAPE"]
+    assert all(not v["stale"] for v in fresh)
 
 
 def test_vessels_have_rich_fields(client):
@@ -53,7 +59,8 @@ def test_filter_kind(client):
 
 def test_filter_segment(client):
     rows = client.get("/api/vessels", params={"segment": "Capesize"}).json()
-    assert len(rows) == 2  # both fresh capes; stale one excluded
+    assert len(rows) == 3  # 2 fresh + 1 stale cape (within 24h visible window)
+    assert sum(1 for v in rows if not v["stale"]) == 2
 
 
 def test_filter_region(client):

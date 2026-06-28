@@ -27,8 +27,9 @@ _DEFAULT_REGISTRY_DB = Path(__file__).resolve().parents[1] / "data" / "vessel_re
 
 _PG_DSN = os.environ.get("DATABASE_URL", "postgresql:///market_data")
 
-# Vessels not refreshed within this many hours are considered gone.
+# Vessels not seen within STALE_HOURS are "dark" (shown grey). Beyond VISIBLE_HOURS they drop.
 STALE_HOURS = float(os.environ.get("FREIGHT_STALE_HOURS", "3"))
+VISIBLE_HOURS = float(os.environ.get("FREIGHT_VISIBLE_HOURS", "24"))
 
 
 def db_path() -> Path:
