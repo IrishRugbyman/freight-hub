@@ -1,5 +1,21 @@
 # Freight Hub Changelog
 
+## 2026-06-28 (session 6c) - Final Small-segment sweep: ais_events + ais_snapshots analytics
+
+**Fix: Small filter applied to remaining ais_events queries:**
+sts-risk, shadow-fleet STS detection, event-rate-timeline, and syndication feeds
+(`_fetch_events_raw` backing RSS/Atom/JSON) all now filter `segment != 'Small'`.
+ARA river barges were inflating STS event counts and appearing in the intelligence feeds.
+
+**Fix: Small filter applied to remaining ais_snapshots analytics queries:**
+destination-changes (barge dest changes appeared as route intelligence), cargo-transitions
+(barge draught variation detected as cargo load/discharge), event-rate-timeline
+(reroutes from river barges counted in volatility signal).
+
+**Fix: STS proximity detector excludes Small vessels:**
+River barges in ARA congregate in dense clusters and were generating spurious STS pairs
+in the proximity grid scan. Now only ocean-going vessels are considered.
+
 ## 2026-06-28 (session 6b) - Complete Small-segment sweep; NaN sanitization; endpoint health
 
 **Fix: ocean_only filter propagated to 5 more endpoints:**
