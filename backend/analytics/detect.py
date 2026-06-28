@@ -402,40 +402,79 @@ def fleet_density_rows(df: pd.DataFrame, ts: pd.Timestamp, vessel_states: dict) 
     if df.empty or "region" not in df.columns:
         return []
 
-    rows = []
-    grouped = df.groupby(["region", "kind", "segment"], sort=False)
-    for (region, kind, segment), grp in grouped:
-        laden_count = ballast_count = unknown_count = 0
-        for _, row in grp.iterrows():
-            mmsi = int(row["mmsi"])
-            state = vessel_states.get(mmsi, {})
-            max_seen = state.get("max_draught_seen")
-            draught = row.get("draught") if "draught" in grp.columns else None
-            if pd.isna(draught) if draught is not None else True:
-                draught = None
-            # If snapshot has no draught but we have a prior classified state, reuse it.
-            if draught is None and state.get("laden") in ("laden", "ballast"):
-                status = state["laden"]
-            else:
-                status = laden_status(draught, max_seen, str(segment) if segment else None)
-            if status == "laden":
-                laden_count += 1
-            elif status == "ballast":
-                ballast_count += 1
-            else:
-                unknown_count += 1
-        rows.append(
-            {
-                "ts": ts,
-                "region": region,
-                "kind": kind,
-                "segment": segment,
-                "laden_count": laden_count,
-                "ballast_count": ballast_count,
-                "unknown_count": unknown_count,
-            }
-        )
-    return rows
+    work = df[["mmsi", "region", "kind", "segment"] + (["draught"] if "draught" in df.columns else [])].copy()
+    mmsi_arr = work["mmsi"].astype("int64").to_numpy()
+    seg_arr = work["segment"].astype(str).to_numpy()
+
+    # Vectorized vessel_states lookup.
+    max_seen_f = np.array(
+        [float(vessel_states.get(int(m), {}).get("max_draught_seen") or 0) for m in mmsi_arr],
+        dtype=float,
+    )
+    state_laden_arr = np.array(
+        [vessel_states.get(int(m), {}).get("laden") or "" for m in mmsi_arr],
+        dtype=object,
+    )
+    design_f = np.array(
+        [float(DESIGN_DRAUGHT.get(str(s), 0) or 0) for s in seg_arr],
+        dtype=float,
+    )
+
+    draught_f: np.ndarray = (
+        work["draught"].to_numpy(dtype=float)
+        if "draught" in work.columns
+        else np.full(len(work), np.nan)
+    )
+    # Treat non-positive as missing.
+    draught_f = np.where(np.isfinite(draught_f) & (draught_f > 0), draught_f, np.nan)
+
+    # Effective max draught: use design when history is shallow or max_seen missing.
+    use_design = (max_seen_f <= 0) | ((design_f > 0) & (max_seen_f < 0.7 * design_f))
+    eff_max_f = np.where(use_design, design_f, max_seen_f)
+
+    # Classify status fully in numpy (no Python loop).
+    has_draught = np.isfinite(draught_f)
+    valid_ref = eff_max_f > 0
+    ratio = np.where(
+        has_draught & valid_ref,
+        draught_f / np.maximum(eff_max_f, 1e-9),
+        np.nan,
+    )
+    # For rows with draught: laden>=0.8, ballast<=0.65, else unknown.
+    classified_by_draught = np.where(
+        ratio >= 0.8, "laden", np.where(ratio <= 0.65, "ballast", "unknown")
+    )
+    # For rows without draught: fall back to prior state if classified.
+    prior_valid = np.isin(state_laden_arr, ["laden", "ballast"])
+    status_arr = np.where(
+        has_draught,
+        classified_by_draught,
+        np.where(prior_valid, state_laden_arr, "unknown"),
+    )
+    work["_status"] = status_arr
+    # Encode status as integer for fast groupby sum.
+    work["_laden"] = (work["_status"] == "laden").astype(int)
+    work["_ballast"] = (work["_status"] == "ballast").astype(int)
+    work["_unknown"] = (work["_status"] == "unknown").astype(int)
+
+    agg = (
+        work.groupby(["region", "kind", "segment"], sort=False)[["_laden", "_ballast", "_unknown"]]
+        .sum()
+        .reset_index()
+    )
+
+    return [
+        {
+            "ts": ts,
+            "region": str(row["region"]),
+            "kind": str(row["kind"]),
+            "segment": str(row["segment"]),
+            "laden_count": int(row["_laden"]),
+            "ballast_count": int(row["_ballast"]),
+            "unknown_count": int(row["_unknown"]),
+        }
+        for _, row in agg.iterrows()
+    ]
 
 
 # --- Phase 3 helpers ---------------------------------------------------------
