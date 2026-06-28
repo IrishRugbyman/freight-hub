@@ -2759,12 +2759,14 @@ def events(
     type: str | None = None,
     days: int = 7,
     limit: int = 200,
+    ocean_only: bool = True,
 ):
     """Intelligence event feed: AIS gaps, loitering, STS candidates.
 
     ?type=gap|loiter|sts  - filter by event type (omit for all)
     ?days=7               - lookback window (clamped 1..30)
     ?limit=200            - max events returned (clamped 1..500)
+    ?ocean_only=true      - exclude Small segment (inland barges, default true)
     """
     days = max(1, min(30, days))
     limit = max(1, min(500, limit))
@@ -2778,6 +2780,8 @@ def events(
     if type:
         where_clauses.append("type = ?")
         params.append(type)
+    if ocean_only:
+        where_clauses.append("segment != 'Small'")
 
     events_sql = (
         "SELECT event_id, type, mmsi, mmsi2, start_ts, end_ts, lat, lon, "
