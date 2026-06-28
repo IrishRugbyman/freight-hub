@@ -6626,7 +6626,7 @@ def analytics_eta_upcoming(horizon_h: int = 96, target_id: str | None = None, ta
             "           AS remaining_p50_h "
             "FROM eta_predictions p "
             "WHERE p.eta_p50_h IS NOT NULL "
-            "  AND epoch(p.as_of) + p.eta_p50_h * 3600 > epoch(now()) "
+            "  AND (epoch(p.as_of) + p.eta_p50_h * 3600 - epoch(now())) / 3600.0 >= 0.25 "
             "  AND epoch(p.as_of) + p.eta_p50_h * 3600 - epoch(now()) <= ? * 3600",
             [float(horizon_h)],
             db=db.analytics_db_path(),
@@ -6677,11 +6677,11 @@ def analytics_eta_upcoming(horizon_h: int = 96, target_id: str | None = None, ta
 
     # Join live AIS for vessel metadata + current position
     try:
-        stale_cutoff = now_dt - timedelta(hours=FREIGHT_STALE_HOURS)
+        stale_cutoff = now_dt - timedelta(hours=db.STALE_HOURS)
         live_df = db.query(
-            "SELECT mmsi, name, segment, laden, lat, lon, sog "
+            "SELECT mmsi, name, kind, segment, draught, lat, lon, sog "
             "FROM live_positions "
-            "WHERE timestamp >= ?",
+            "WHERE updated_ts >= ?",
             [stale_cutoff],
             db=db.db_path(),
         )
@@ -6689,8 +6689,9 @@ def analytics_eta_upcoming(horizon_h: int = 96, target_id: str | None = None, ta
         for _, r in live_df.iterrows():
             live_meta[int(r["mmsi"])] = {
                 "name": r.get("name"),
+                "kind": r.get("kind"),
                 "segment": r.get("segment"),
-                "laden": r.get("laden"),
+                "draught": r.get("draught"),
                 "lat": r.get("lat"),
                 "lon": r.get("lon"),
                 "sog": r.get("sog"),
@@ -6725,11 +6726,25 @@ def analytics_eta_upcoming(horizon_h: int = 96, target_id: str | None = None, ta
             p10_rem = None
             p90_rem = None
 
+        # Derive laden from draught + segment-specific threshold (bool | None)
+        seg_s = str(ais.get("segment") or "")
+        d_raw = ais.get("draught")
+        d_f = float(d_raw) if d_raw is not None and str(d_raw) not in ("", "nan") else None
+        from analytics.zones import DESIGN_DRAUGHT as _DD2
+        design = float(_DD2.get(seg_s, 0) or 0)
+        if d_f is not None and d_f > 0:
+            if design > 0:
+                laden_b: bool | None = True if d_f >= 0.80 * design else (False if d_f <= 0.65 * design else None)
+            else:
+                laden_b = True if d_f > 5 else False
+        else:
+            laden_b = None
+
         rows.append(UpcomingVessel(
             mmsi=mmsi,
             name=ais.get("name") or None,
-            segment=ais.get("segment") or None,
-            laden=ais.get("laden"),
+            segment=seg_s or None,
+            laden=laden_b,
             target_id=tid,
             target_name=str(meta.get("name", tid.split(":")[-1])),
             target_type=str(meta.get("target_type", "port")),
