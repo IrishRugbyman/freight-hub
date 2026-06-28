@@ -6719,15 +6719,17 @@ def analytics_eta_upcoming(horizon_h: int = 96, target_id: str | None = None, ta
             except (TypeError, ValueError):
                 return None
 
-        # Compute remaining hours for P10/P90 by offsetting P50 prediction width
+        # Compute remaining hours for P10/P90 by offsetting P50 prediction width.
+        # P10/P90 remaining = remaining_p50 +/- the original quantile width.
+        # Clamp P10 to 0 (remaining can't be negative) but keep P90 unclamped
+        # so callers can see the full uncertainty range.
         rem = _fn(r["remaining_p50_h"])
         p50_orig = _fn(r["eta_p50_h"])
         p10_orig = _fn(r["eta_p10_h"])
         p90_orig = _fn(r["eta_p90_h"])
-        # P10/P90 remaining = remaining_p50 - (p50 - p10) and remaining_p50 + (p90 - p50)
         if rem is not None and p50_orig is not None:
-            p10_rem = (_fn(r["eta_p10_h"]) and rem - (p50_orig - p10_orig)) if p10_orig is not None else None
-            p90_rem = (_fn(r["eta_p90_h"]) and rem + (p90_orig - p50_orig)) if p90_orig is not None else None
+            p10_rem = max(0.0, rem - (p50_orig - p10_orig)) if p10_orig is not None else None
+            p90_rem = rem + (p90_orig - p50_orig) if p90_orig is not None else None
         else:
             p10_rem = None
             p90_rem = None
