@@ -2328,3 +2328,24 @@ export function useEtaByTarget() {
     refetchInterval: 10 * 60_000,
   })
 }
+
+export interface EtaTrendPoint {
+  run_ts: string
+  naive_mae: number | null
+  route_mae: number | null
+  physics_mae: number | null
+  n: number
+}
+
+export interface EtaTrendResponse {
+  points: EtaTrendPoint[]
+}
+
+export function useEtaTrend() {
+  return useQuery({
+    queryKey: ['eta-trend'],
+    queryFn: () => getJSON<EtaTrendResponse>('/api/analytics/eta-trend'),
+    staleTime: 10 * 60_000,
+    refetchInterval: 10 * 60_000,
+  })
+}

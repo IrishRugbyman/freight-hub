@@ -10,7 +10,7 @@ import {
   useTradeLaneMatrix, useDestinationFlows, useCargoTransitions,
   useCargoStateChanges, useLaden, useDensity, useEuropeanInbound,
   useLngInbound, useTransitRateTimeline, useEtaAccuracy, useArrivals,
-  useEtaByTarget,
+  useEtaByTarget, useEtaTrend,
   type EuropeanInboundVessel, type LngVessel, type EtaByTargetRow,
 } from '@/lib/api'
 import { fmt, EmptyState, ChartSkeleton, TOOLTIP_STYLE, LEGEND_STYLE, REGION_LABELS } from './-analyticsShared'
@@ -1608,6 +1608,24 @@ const ETA_MODEL_META: Record<string, { label: string; hex: string }> = {
 
 function EtaAccuracyCard() {
   const { data, isLoading } = useEtaAccuracy('all')
+  const { data: trendData } = useEtaTrend()
+
+  // Sample count trend from the run history (shows data flywheel growing toward ML gate)
+  const trendPoints = React.useMemo(() => {
+    if (!trendData?.points?.length) return []
+    // Deduplicate by date (keep last point per day for a cleaner chart)
+    const byDate = new Map<string, typeof trendData.points[0]>()
+    for (const p of trendData.points) {
+      const day = p.run_ts.slice(0, 10)
+      byDate.set(day, p)
+    }
+    return Array.from(byDate.values()).map(p => ({
+      date: p.run_ts.slice(0, 10),
+      naive: p.naive_mae != null ? parseFloat(p.naive_mae.toFixed(2)) : null,
+      physics: p.physics_mae != null ? parseFloat(p.physics_mae.toFixed(2)) : null,
+      n: p.n,
+    }))
+  }, [trendData])
 
   const chartData = React.useMemo(() => {
     if (!data) return []
@@ -1781,6 +1799,32 @@ function EtaAccuracyCard() {
             </tbody>
           </table>
         </div>
+        {trendPoints.length >= 3 && (
+          <div className="mt-4">
+            <p className="mb-1 text-xs font-medium text-muted-foreground">
+              Accuracy trend over time
+              <span className="ml-1.5 font-normal text-muted-foreground/70">
+                — overall MAE per build run (data flywheel toward ML unlock)
+              </span>
+            </p>
+            <div className="h-32">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={trendPoints} margin={{ top: 4, right: 8, left: -8, bottom: 4 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                  <XAxis dataKey="date" tick={{ fontSize: 9 }} stroke="hsl(var(--muted-foreground))" />
+                  <YAxis tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" tickFormatter={v => `${v}h`} width={34} />
+                  <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v: unknown) => [`${Number(v).toFixed(2)}h`, '']} />
+                  <Line type="monotone" dataKey="naive" stroke="#475569" strokeWidth={1.5} dot={false} name="Naive" />
+                  <Line type="monotone" dataKey="physics" stroke="#38bdf8" strokeWidth={1.5} dot={false} name="Physics" />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+            <p className="mt-0.5 text-[10px] text-muted-foreground/50">
+              Each point is one hourly analytics build. Slate = naive baseline, blue = physics v1.
+              Stable or declining MAE confirms the model is not degrading as the dataset grows.
+            </p>
+          </div>
+        )}
         <p className="mt-2 text-[10px] text-muted-foreground/50">
           History starts at the collection date and cannot be backfilled; the learned (ML) model is gated until enough clean history accrues, so physics carries production today. A drift watch re-checks the champion every run and flags coverage or median-error regressions here.
         </p>

@@ -43,6 +43,8 @@ from .schemas import (
     EtaByTargetResponse,
     EtaByTargetRow,
     EtaDriftAlert,
+    EtaTrendPoint,
+    EtaTrendResponse,
     EtaPrediction,
     EtaResponse,
     CongestionResponse,
@@ -6410,6 +6412,61 @@ def _eta_drift_alerts() -> list["EtaDriftAlert"]:
             )
         )
     return out
+
+
+@app.get("/api/analytics/eta-trend", response_model=EtaTrendResponse, tags=["analytics"])
+def analytics_eta_trend():
+    """Accuracy trend: overall MAE for each model per run (choronological).
+
+    Shows how the physics model's accuracy evolves as the sample set grows.
+    Uses the ``all`` lead-bucket + ``all`` target-type aggregate row from
+    ``eta_model_metrics``, so each run contributes one data point per model.
+    Useful for visualizing the data flywheel building toward the ML unlock.
+    """
+    try:
+        df = db.query(
+            "SELECT run_ts, model, n, med_abs_err_h "
+            "FROM eta_model_metrics "
+            "WHERE lead_bucket = 'all' AND target_type = 'all' "
+            "ORDER BY run_ts",
+            db=db.analytics_db_path(),
+        )
+    except Exception:
+        return EtaTrendResponse(points=[])
+    if df.empty:
+        return EtaTrendResponse(points=[])
+
+    # Pivot: one row per run_ts with one column per model
+    grouped = df.groupby("run_ts")
+    points: list[EtaTrendPoint] = []
+    for run_ts_val, g in grouped:
+        by_model = g.set_index("model")
+        def _mae(model_name: str) -> float | None:
+            if model_name not in by_model.index:
+                return None
+            v = by_model.at[model_name, "med_abs_err_h"]
+            try:
+                return float(v) if v == v else None  # NaN -> None
+            except (TypeError, ValueError):
+                return None
+
+        n_val = 0
+        if "physics_v1" in by_model.index:
+            n_val = int(by_model.at["physics_v1", "n"] or 0)
+        elif "naive" in by_model.index:
+            n_val = int(by_model.at["naive", "n"] or 0)
+
+        rt_str = run_ts_val.isoformat() if hasattr(run_ts_val, "isoformat") else str(run_ts_val)
+        points.append(
+            EtaTrendPoint(
+                run_ts=rt_str,
+                naive_mae=_mae("naive"),
+                route_mae=_mae("naive+route"),
+                physics_mae=_mae("physics_v1"),
+                n=n_val,
+            )
+        )
+    return EtaTrendResponse(points=points)
 
 
 @app.get("/api/analytics/eta-by-target", response_model=EtaByTargetResponse, tags=["analytics"])

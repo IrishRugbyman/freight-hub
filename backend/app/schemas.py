@@ -1439,6 +1439,20 @@ class EtaByTargetResponse(BaseModel):
     rows: list[EtaByTargetRow]      # physics_v1 rows, sorted best -> worst by med_abs_err_h
 
 
+class EtaTrendPoint(BaseModel):
+    """One run's overall aggregate accuracy for a model."""
+
+    run_ts: str
+    naive_mae: float | None
+    route_mae: float | None
+    physics_mae: float | None
+    n: int                          # sample count for the physics row (grows over time)
+
+
+class EtaTrendResponse(BaseModel):
+    points: list[EtaTrendPoint]     # chronological, one per distinct run
+
+
 class ArrivalTarget(BaseModel):
     """Ground-truth arrival activity at one resolved target over the window."""
 
