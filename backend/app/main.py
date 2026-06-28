@@ -1370,25 +1370,34 @@ def analytics_sts_offenders(days: int = 30, limit: int = 50):
 
 
 @app.get("/api/analytics/reroutes", response_model=RerouteRiskResponse)
-def analytics_reroutes(days: int = 7, min_risk: int = 0, segment: str | None = None):
+def analytics_reroutes(
+    days: int = 7, min_risk: int = 0, segment: str | None = None, ocean_only: bool = True
+):
     """Recent destination-change events enriched with vessel risk scores.
 
     Sorted by risk_score descending (reroutes by high-risk vessels first).
     Use min_risk=25 to filter to intelligence-relevant changes.
+    ocean_only=true (default) excludes Small segment to filter inland waterway barges.
     """
     import json as _json
 
     days = max(1, min(90, days))
     cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
 
-    seg_clause = " AND segment = ?" if segment else ""
-    seg_params = [segment] if segment else []
+    clauses = []
+    params: list = [cutoff]
+    if segment:
+        clauses.append("segment = ?")
+        params.append(segment)
+    if ocean_only:
+        clauses.append("segment != 'Small'")
+    where_extra = (" AND " + " AND ".join(clauses)) if clauses else ""
 
     events_df = db.query(
         "SELECT event_id, mmsi, start_ts, region, kind, segment, details "
-        f"FROM ais_events WHERE type = 'reroute' AND start_ts >= ?{seg_clause} "
+        f"FROM ais_events WHERE type = 'reroute' AND start_ts >= ?{where_extra} "
         "ORDER BY start_ts DESC",
-        [cutoff, *seg_params],
+        params,
         db=db.analytics_db_path(),
     )
     if events_df.empty:
@@ -3275,9 +3284,9 @@ def analytics_market_summary():
     now_ts = datetime.now(UTC).replace(tzinfo=None)
     since_24h = now_ts - timedelta(hours=24)
 
-    # Event counts from analytics DB
+    # Event counts from analytics DB (reroutes exclude Small to filter inland barges)
     ev_df = db.query(
-        "SELECT type, COUNT(*) AS cnt FROM ais_events WHERE start_ts >= ? GROUP BY type",
+        "SELECT type, COUNT(*) AS cnt FROM ais_events WHERE start_ts >= ? AND segment != 'Small' GROUP BY type",
         [since_24h],
         db=db.analytics_db_path(),
     )
