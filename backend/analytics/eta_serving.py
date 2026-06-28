@@ -154,7 +154,8 @@ def _load_live(ais_query, now: datetime) -> pd.DataFrame:
         return pd.DataFrame()
     live = live.copy()
     live["sog"] = pd.to_numeric(live["sog"], errors="coerce")
-    return live[live["sog"] >= _MIN_SOG_KN]
+    ocean = live[live["sog"] >= _MIN_SOG_KN]
+    return ocean[ocean["segment"] != "Small"] if "segment" in ocean.columns else ocean
 
 
 def _trailing_speed(ais_query, mmsis: list[int], now: datetime) -> dict[int, float]:

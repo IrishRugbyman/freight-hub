@@ -6682,6 +6682,23 @@ def analytics_eta_upcoming(horizon_h: int = 96, target_id: str | None = None, ta
         valid_tids = {tid for tid, m in target_meta.items() if m.get("target_type") == target_type}
         pred_df = pred_df[pred_df["target_id"].isin(valid_tids)]
 
+    # Join live AIS early to filter out Small segment before building rows
+    try:
+        stale_cutoff = now_dt - timedelta(hours=db.STALE_HOURS)
+        _live_pre = db.query(
+            "SELECT mmsi, segment FROM live_positions WHERE updated_ts >= ?",
+            [stale_cutoff],
+            db=db.db_path(),
+        )
+        if not _live_pre.empty:
+            _small_mmsis = set(
+                _live_pre[_live_pre["segment"] == "Small"]["mmsi"].dropna().astype(int).tolist()
+            )
+            if _small_mmsis:
+                pred_df = pred_df[~pred_df["mmsi"].astype(int).isin(_small_mmsis)]
+    except Exception:
+        pass
+
     if pred_df.empty:
         return UpcomingArrivalsResponse(
             as_of=now_dt.isoformat(timespec="seconds"),
