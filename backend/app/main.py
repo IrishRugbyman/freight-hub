@@ -37,6 +37,8 @@ from .schemas import (
     AnalyticsZone,
     ArrivalsResponse,
     ArrivalTarget,
+    UpcomingArrivalsResponse,
+    UpcomingVessel,
     ChokepointCount,
     EtaAccuracyResponse,
     EtaAccuracyRow,
@@ -6543,6 +6545,156 @@ def analytics_eta_by_target():
 
     rows.sort(key=lambda x: x.med_abs_err_h if x.med_abs_err_h is not None else float("inf"))
     return EtaByTargetResponse(run_ts=run_ts_str, rows=rows)
+
+
+@app.get("/api/analytics/eta-upcoming", response_model=UpcomingArrivalsResponse, tags=["analytics"])
+def analytics_eta_upcoming(horizon_h: int = 96, target_id: str | None = None, target_type: str = "all"):
+    """Predicted inbound vessels arriving within ``horizon_h`` hours.
+
+    Reads live ``eta_predictions`` (updated hourly) and joins with ``eta_targets``
+    for names, plus the live AIS feed for current position / SOG. Only includes
+    vessels whose physics_v1 P50 ETA falls within the horizon.
+
+    ``target_id`` filters to a single target (e.g. 'cp:suez'). ``target_type``
+    filters by type ('chokepoint' | 'port' | 'all').
+    """
+    try:
+        from datetime import timezone
+        now_dt = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        pred_df = db.query(
+            "SELECT p.mmsi, p.target_id, p.as_of, p.route_dist_nm, "
+            "       p.eta_low_h AS eta_p10_h, p.eta_p50_h, p.eta_high_h AS eta_p90_h, "
+            "       (epoch(p.as_of) + p.eta_p50_h * 3600 - epoch(now()))::DOUBLE / 3600 "
+            "           AS remaining_p50_h "
+            "FROM eta_predictions p "
+            "WHERE p.eta_p50_h IS NOT NULL "
+            "  AND epoch(p.as_of) + p.eta_p50_h * 3600 > epoch(now()) "
+            "  AND epoch(p.as_of) + p.eta_p50_h * 3600 - epoch(now()) <= ? * 3600",
+            [float(horizon_h)],
+            db=db.analytics_db_path(),
+        )
+    except Exception:
+        return UpcomingArrivalsResponse(
+            as_of=datetime.now().isoformat(timespec="seconds"),
+            horizon_h=horizon_h,
+            target_id=target_id,
+            total=0,
+            rows=[],
+        )
+
+    if pred_df.empty:
+        return UpcomingArrivalsResponse(
+            as_of=datetime.now().isoformat(timespec="seconds"),
+            horizon_h=horizon_h,
+            target_id=target_id,
+            total=0,
+            rows=[],
+        )
+
+    # Join with target metadata
+    try:
+        targets_df = db.query(
+            "SELECT target_id, name, target_type FROM eta_targets",
+            db=db.analytics_db_path(),
+        )
+        target_meta = {r["target_id"]: r for _, r in targets_df.iterrows()}
+    except Exception:
+        target_meta = {}
+
+    # Apply target_id / target_type filters
+    if target_id:
+        pred_df = pred_df[pred_df["target_id"] == target_id]
+    if target_type != "all":
+        valid_tids = {tid for tid, m in target_meta.items() if m.get("target_type") == target_type}
+        pred_df = pred_df[pred_df["target_id"].isin(valid_tids)]
+
+    if pred_df.empty:
+        return UpcomingArrivalsResponse(
+            as_of=now_dt.isoformat(timespec="seconds"),
+            horizon_h=horizon_h,
+            target_id=target_id,
+            total=0,
+            rows=[],
+        )
+
+    # Join live AIS for vessel metadata + current position
+    try:
+        stale_cutoff = now_dt - timedelta(hours=FREIGHT_STALE_HOURS)
+        live_df = db.query(
+            "SELECT mmsi, name, segment, laden, lat, lon, sog "
+            "FROM live_positions "
+            "WHERE timestamp >= ?",
+            [stale_cutoff],
+            db=db.db_path(),
+        )
+        live_meta: dict[int, dict] = {}
+        for _, r in live_df.iterrows():
+            live_meta[int(r["mmsi"])] = {
+                "name": r.get("name"),
+                "segment": r.get("segment"),
+                "laden": r.get("laden"),
+                "lat": r.get("lat"),
+                "lon": r.get("lon"),
+                "sog": r.get("sog"),
+            }
+    except Exception:
+        live_meta = {}
+
+    rows: list[UpcomingVessel] = []
+    for _, r in pred_df.iterrows():
+        mmsi = int(r["mmsi"])
+        tid = str(r["target_id"])
+        meta = target_meta.get(tid, {})
+        ais = live_meta.get(mmsi, {})
+
+        def _fn(x) -> float | None:
+            try:
+                v = float(x)
+                return None if v != v else v
+            except (TypeError, ValueError):
+                return None
+
+        # Compute remaining hours for P10/P90 by offsetting P50 prediction width
+        rem = _fn(r["remaining_p50_h"])
+        p50_orig = _fn(r["eta_p50_h"])
+        p10_orig = _fn(r["eta_p10_h"])
+        p90_orig = _fn(r["eta_p90_h"])
+        # P10/P90 remaining = remaining_p50 - (p50 - p10) and remaining_p50 + (p90 - p50)
+        if rem is not None and p50_orig is not None:
+            p10_rem = (_fn(r["eta_p10_h"]) and rem - (p50_orig - p10_orig)) if p10_orig is not None else None
+            p90_rem = (_fn(r["eta_p90_h"]) and rem + (p90_orig - p50_orig)) if p90_orig is not None else None
+        else:
+            p10_rem = None
+            p90_rem = None
+
+        rows.append(UpcomingVessel(
+            mmsi=mmsi,
+            name=ais.get("name") or None,
+            segment=ais.get("segment") or None,
+            laden=ais.get("laden"),
+            target_id=tid,
+            target_name=str(meta.get("name", tid.split(":")[-1])),
+            target_type=str(meta.get("target_type", "port")),
+            remaining_h=rem if rem is not None else 0.0,
+            eta_p10_h=p10_rem,
+            eta_p90_h=p90_rem,
+            route_dist_nm=_fn(r["route_dist_nm"]),
+            sog=_fn(ais.get("sog")),
+            lat=_fn(ais.get("lat")),
+            lon=_fn(ais.get("lon")),
+        ))
+
+    # Sort by remaining hours ascending (soonest first)
+    rows.sort(key=lambda v: v.remaining_h)
+
+    return UpcomingArrivalsResponse(
+        as_of=now_dt.isoformat(timespec="seconds"),
+        horizon_h=horizon_h,
+        target_id=target_id,
+        total=len(rows),
+        rows=rows,
+    )
 
 
 @app.get("/api/analytics/arrivals", response_model=ArrivalsResponse, tags=["analytics"])

@@ -1453,6 +1453,35 @@ class EtaTrendResponse(BaseModel):
     points: list[EtaTrendPoint]     # chronological, one per distinct run
 
 
+class UpcomingVessel(BaseModel):
+    """One vessel's predicted arrival at a specific target."""
+
+    mmsi: int
+    name: str | None
+    segment: str | None
+    laden: bool | None
+    target_id: str
+    target_name: str
+    target_type: str              # 'chokepoint' | 'port'
+    remaining_h: float            # hours remaining until P50 arrival (from now)
+    eta_p10_h: float | None       # hours remaining until P10 (optimistic)
+    eta_p90_h: float | None       # hours remaining until P90 (pessimistic)
+    route_dist_nm: float | None
+    sog: float | None
+    lat: float | None
+    lon: float | None
+
+
+class UpcomingArrivalsResponse(BaseModel):
+    """Predicted inbound vessels at each target within a look-ahead window."""
+
+    as_of: str
+    horizon_h: int
+    target_id: str | None         # None = all targets
+    total: int
+    rows: list[UpcomingVessel]
+
+
 class ArrivalTarget(BaseModel):
     """Ground-truth arrival activity at one resolved target over the window."""
 
