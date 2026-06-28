@@ -908,6 +908,7 @@ def analytics_ports(kind: str | None = None, top_n: int = 20):
         f"  COUNT(CASE WHEN kind='bulk' THEN 1 END) AS bulkers "
         f"FROM live_positions "
         f"WHERE updated_ts > ? {kind_clause} "
+        f"  AND segment != 'Small' "
         f"  AND destination IS NOT NULL AND TRIM(destination) != '' "
         f"GROUP BY dest",
         params,
@@ -916,6 +917,7 @@ def analytics_ports(kind: str | None = None, top_n: int = 20):
     total_df = db.query(
         f"SELECT COUNT(*) AS n FROM live_positions "
         f"WHERE updated_ts > ? {kind_clause} "
+        f"  AND segment != 'Small' "
         f"  AND destination IS NOT NULL AND TRIM(destination) != ''",
         params,
     )
@@ -1019,7 +1021,7 @@ def analytics_speed():
     df = db.query(
         "SELECT kind, segment, nav_status, sog "
         "FROM live_positions "
-        "WHERE updated_ts > ? AND kind IS NOT NULL AND segment IS NOT NULL",
+        "WHERE updated_ts > ? AND kind IS NOT NULL AND segment IS NOT NULL AND segment != 'Small'",
         [cutoff],
     )
     if df.empty:
@@ -1866,7 +1868,7 @@ def analytics_congestion(zone: str = "singapore_west", days: int = 30):
     d = max(1, min(days, 365))
     cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=d)
     df = db.query(
-        "SELECT start_ts, end_ts FROM anchored_episodes WHERE zone = ? AND start_ts >= ?",
+        "SELECT start_ts, end_ts FROM anchored_episodes WHERE zone = ? AND start_ts >= ? AND segment != 'Small'",
         [zone, cutoff],
         db=db.analytics_db_path(),
     )
@@ -3717,7 +3719,7 @@ def _merged_anchored_spans(since: datetime, kind: str = "") -> pd.DataFrame:
         "WITH frags AS ("
         "  SELECT mmsi, zone, start_ts, end_ts, kind, segment "
         "  FROM anchored_episodes "
-        f"  WHERE end_ts >= ?{kind_cond}"
+        f"  WHERE end_ts >= ?{kind_cond} AND segment != 'Small'"
         "), ordered AS ("
         "  SELECT *, max(end_ts) OVER ("
         "      PARTITION BY mmsi, zone ORDER BY start_ts "

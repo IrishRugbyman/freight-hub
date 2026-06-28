@@ -516,9 +516,9 @@ def test_analytics_speed_avg_sog(client):
 def test_analytics_speed_total_vessels(client):
     r = client.get("/api/analytics/speed")
     d = r.json()
-    # 4 fresh vessels (stale excluded): CAPE A, CAPE B, VLCC A, COASTER
-    # COASTER has region=None but kind=bulk -> included (kind IS NOT NULL)
-    assert d["total_vessels"] == 4
+    # 3 ocean-going fresh vessels (stale excluded, Small filtered): CAPE A, CAPE B, VLCC A
+    # COASTER (segment=Small) is excluded by ocean_only filter
+    assert d["total_vessels"] == 3
 
 
 # ---- /api/analytics/region-util ----
