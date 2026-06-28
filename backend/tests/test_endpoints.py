@@ -4319,19 +4319,26 @@ def test_crude_on_water_structure(crude_client):
 
 
 def test_crude_on_water_counts(crude_client):
+    # crude_only=True (default): Small segment excluded (inland/coastal products, not crude).
     r = crude_client.get("/api/analytics/crude-on-water")
     d = r.json()
-    assert d["total_laden_tankers"] == 3, "expected 3 laden tankers"
-    assert d["total_ballast_tankers"] == 1, "expected 1 ballast tanker"
-    # Bulk carrier must not be counted
+    assert d["total_laden_tankers"] == 2, "VLCC + Aframax laden; Small excluded by crude_only"
+    assert d["total_ballast_tankers"] == 1, "Suezmax ballast"
     assert d["total_laden_tankers"] + d["total_ballast_tankers"] <= 4
+
+
+def test_crude_on_water_counts_all_segments(crude_client):
+    # crude_only=False: include Small, should see all 3 laden tankers.
+    r = crude_client.get("/api/analytics/crude-on-water?crude_only=false")
+    d = r.json()
+    assert d["total_laden_tankers"] == 3, "VLCC + Aframax + Small when crude_only=false"
 
 
 def test_crude_on_water_mb_positive(crude_client):
     r = crude_client.get("/api/analytics/crude-on-water")
     d = r.json()
     assert d["estimated_mb_on_water"] > 0
-    # VLCC 2.0 MB + Aframax 0.75 MB + Small 0.30 MB = ~3.05 MB
+    # VLCC 2.0 MB + Aframax 0.75 MB (Small excluded by crude_only default)
     assert d["estimated_mb_on_water"] > 2.0
 
 

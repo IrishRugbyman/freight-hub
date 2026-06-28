@@ -5719,11 +5719,17 @@ def _segment_mb(segment: str | None) -> float:
     return round(dwt * _LOAD_FACTOR * _BBL_PER_TONNE / 1_000_000, 3)
 
 
+_CRUDE_SEGMENTS: frozenset[str] = frozenset({"ULCC", "VLCC", "Suezmax", "Aframax", "Panamax"})
+
+
 @app.get("/api/analytics/crude-on-water", response_model=CrudeOnWaterResponse)
-def analytics_crude_on_water():
-    """
-    Live laden tanker count and estimated million barrels on water.
-    Breaks down by segment and destination import region.
+def analytics_crude_on_water(crude_only: bool = True):
+    """Live laden tanker count and estimated million barrels on water.
+
+    crude_only (default True): restrict to crude-carrying vessel classes
+    (ULCC, VLCC, Suezmax, Aframax, Panamax). Excludes 'Small' segment which
+    includes inland waterway barges (predominantly ARA river traffic) and
+    coastal product tankers that do not carry crude oil.
     """
     now_dt = datetime.now(UTC).replace(tzinfo=None)
 
@@ -5744,6 +5750,8 @@ def analytics_crude_on_water():
     live_df = _live_all()
     if not live_df.empty:
         live_df = live_df[live_df["kind"] == "tanker"]
+        if crude_only and not live_df.empty:
+            live_df = live_df[live_df["segment"].isin(_CRUDE_SEGMENTS)]
     if live_df.empty:
         return CrudeOnWaterResponse(
             as_of=now_dt.isoformat(),
