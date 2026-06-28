@@ -10,6 +10,7 @@ export interface LayerState {
   deckgl: boolean
   heatmap: boolean
   riskOverlay: boolean
+  oceanOnly: boolean
 }
 
 export const DEFAULT_LAYERS: LayerState = {
@@ -22,6 +23,7 @@ export const DEFAULT_LAYERS: LayerState = {
   deckgl: false,
   heatmap: false,
   riskOverlay: true,
+  oceanOnly: true,
 }
 
 export type Filters = VesselFilters

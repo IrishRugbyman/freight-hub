@@ -27,7 +27,8 @@ function TrackerPage() {
   const [focusTarget, setFocusTarget] = useState<{ lat: number; lon: number } | null>(null)
   const [highlightPipelineId, setHighlightPipelineId] = useState<string | null>(null)
 
-  const { data: vessels = [], isLoading, isError, dataUpdatedAt, isPlaceholderData } = useVessels(filters)
+  const { data: rawVessels = [], isLoading, isError, dataUpdatedAt, isPlaceholderData } = useVessels(filters)
+  const vessels = layers.oceanOnly ? rawVessels.filter((v) => v.segment !== 'Small') : rawVessels
   useVesselStream(filters, layers.deckgl)
   const { data: meta } = useMeta()
   const { data: trailPoints } = useVesselTrack(selected?.mmsi ?? null, trailHours)
