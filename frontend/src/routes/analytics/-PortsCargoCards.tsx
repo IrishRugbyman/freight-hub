@@ -1607,7 +1607,8 @@ const ETA_MODEL_META: Record<string, { label: string; hex: string }> = {
 }
 
 function EtaAccuracyCard() {
-  const { data, isLoading } = useEtaAccuracy('all')
+  const [targetType, setTargetType] = React.useState<'all' | 'port' | 'chokepoint'>('all')
+  const { data, isLoading } = useEtaAccuracy(targetType)
   const { data: trendData } = useEtaTrend()
 
   // Sample count trend from the run history (shows data flywheel growing toward ML gate)
@@ -1655,7 +1656,7 @@ function EtaAccuracyCard() {
     const buckets = data.lead_order.filter(b => b !== 'all')
     return buckets.map(bucket => {
       const row = data.rows.find(
-        r => r.model === 'physics_v1' && r.lead_bucket === bucket && r.target_type === 'all'
+        r => r.model === 'physics_v1' && r.lead_bucket === bucket && r.target_type === targetType
       )
       const cov = row?.interval_coverage != null ? row.interval_coverage * 100 : null
       return { bucket, coverage: cov }
@@ -1693,11 +1694,28 @@ function EtaAccuracyCard() {
               error per model by actual lead time. Lower is better; physics is the shipping champion.
             </p>
           </div>
-          {data.run_ts && (
-            <span className="shrink-0 text-[10px] text-muted-foreground/50">
-              scored {new Date(data.run_ts).toLocaleDateString()}
-            </span>
-          )}
+          <div className="flex shrink-0 flex-col items-end gap-1.5">
+            {data.run_ts && (
+              <span className="text-[10px] text-muted-foreground/50">
+                scored {new Date(data.run_ts).toLocaleDateString()}
+              </span>
+            )}
+            <div className="flex gap-1">
+              {(['all', 'port', 'chokepoint'] as const).map(t => (
+                <button
+                  key={t}
+                  onClick={() => setTargetType(t)}
+                  className={`rounded px-1.5 py-0.5 text-[10px] transition-colors ${
+                    targetType === t
+                      ? 'bg-primary/20 text-primary'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {t === 'all' ? 'All' : t === 'port' ? 'Ports' : 'Chokepoints'}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </CardHeader>
       <CardContent>
