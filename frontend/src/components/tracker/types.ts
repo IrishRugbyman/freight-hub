@@ -15,7 +15,7 @@ export interface LayerState {
 
 export const DEFAULT_LAYERS: LayerState = {
   clustering: true,
-  headingArrows: false,
+  headingArrows: true,
   counts: true,
   chokepoints: false,
   eventPins: false,
