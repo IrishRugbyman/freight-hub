@@ -5566,12 +5566,13 @@ def _haversine_nm(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 @app.get("/api/analytics/port-arrivals", response_model=PortArrivalResponse)
-def analytics_port_arrivals(horizon_h: int = 48, kind: str = "tanker"):
+def analytics_port_arrivals(horizon_h: int = 48, kind: str = "tanker", ocean_only: bool = True):
     """48h port arrival forecast for major tanker/bulk terminals.
 
     For each underway vessel with a parseable destination, computes ETA from
     current position + SOG + great-circle distance to the matched port.
     Returns per-port arrival counts and vessel lists.
+    ocean_only=true (default) excludes Small segment to filter inland waterway barges.
     """
     horizon_h = max(12, min(120, horizon_h))
     now_dt = datetime.now(UTC).replace(tzinfo=None)
@@ -5586,6 +5587,8 @@ def analytics_port_arrivals(horizon_h: int = 48, kind: str = "tanker"):
         ].copy()
         if kind:
             fleet_df = fleet_df[fleet_df["kind"] == kind]
+        if ocean_only and not fleet_df.empty:
+            fleet_df = fleet_df[fleet_df["segment"] != "Small"]
         needed = ["mmsi", "name", "lat", "lon", "sog", "destination", "segment", "kind", "imo"]
         fleet_df = fleet_df[[c for c in needed if c in fleet_df.columns]]
 
