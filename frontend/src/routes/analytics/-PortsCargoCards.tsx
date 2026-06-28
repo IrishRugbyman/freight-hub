@@ -10,7 +10,8 @@ import {
   useTradeLaneMatrix, useDestinationFlows, useCargoTransitions,
   useCargoStateChanges, useLaden, useDensity, useEuropeanInbound,
   useLngInbound, useTransitRateTimeline, useEtaAccuracy, useArrivals,
-  type EuropeanInboundVessel, type LngVessel,
+  useEtaByTarget,
+  type EuropeanInboundVessel, type LngVessel, type EtaByTargetRow,
 } from '@/lib/api'
 import { fmt, EmptyState, ChartSkeleton, TOOLTIP_STYLE, LEGEND_STYLE, REGION_LABELS } from './-analyticsShared'
 import { EtaChip } from '@/components/EtaChip'
@@ -1789,6 +1790,185 @@ function EtaAccuracyCard() {
 }
 
 // ---------------------------------------------------------------------------
+// ETA per-target accuracy breakdown
+// ---------------------------------------------------------------------------
+const TYPE_COLOR: Record<string, string> = {
+  chokepoint: '#38bdf8',
+  port: '#a78bfa',
+}
+
+function EtaByTargetCard() {
+  const { data, isLoading } = useEtaByTarget()
+  const [showAll, setShowAll] = React.useState(false)
+  const [targetFilter, setTargetFilter] = React.useState<'all' | 'port' | 'chokepoint'>('all')
+
+  const rows = React.useMemo<EtaByTargetRow[]>(() => {
+    if (!data?.rows?.length) return []
+    const filtered = targetFilter === 'all' ? data.rows : data.rows.filter(r => r.target_type === targetFilter)
+    return filtered
+  }, [data, targetFilter])
+
+  const displayRows = showAll ? rows : rows.slice(0, 12)
+
+  const chartData = React.useMemo(() => {
+    const top = rows.slice(0, 15)
+    return top.map(r => ({
+      name: r.name.length > 14 ? r.name.slice(0, 13) + '…' : r.name,
+      physics: r.med_abs_err_h != null ? parseFloat(r.med_abs_err_h.toFixed(2)) : null,
+      naive: r.naive_med_abs_err_h != null ? parseFloat(r.naive_med_abs_err_h.toFixed(2)) : null,
+      type: r.target_type,
+    }))
+  }, [rows])
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm font-semibold">
+          Physics ETA accuracy by target
+          <span className="ml-2 text-xs font-normal text-muted-foreground">
+            physics_v1 vs naive baseline, median absolute error (hours), sorted best to worst
+          </span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <ChartSkeleton className="h-48" />
+        ) : !data?.rows?.length ? (
+          <EmptyState message="Per-target accuracy data not yet available - populates after the next analytics build." />
+        ) : (
+          <>
+            <div className="mb-3 flex gap-2">
+              {(['all', 'port', 'chokepoint'] as const).map(f => (
+                <button
+                  key={f}
+                  onClick={() => setTargetFilter(f)}
+                  className={`rounded px-2 py-0.5 text-xs ${
+                    targetFilter === f
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                  }`}
+                >
+                  {f === 'all' ? 'All' : f === 'port' ? 'Ports' : 'Chokepoints'}
+                </button>
+              ))}
+              <span className="ml-auto text-xs text-muted-foreground/60">{rows.length} targets</span>
+            </div>
+
+            {chartData.length > 0 && (
+              <div className="mb-4 h-48">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={chartData} margin={{ top: 4, right: 8, left: -10, bottom: 40 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                    <XAxis
+                      dataKey="name"
+                      tick={{ fontSize: 9 }}
+                      stroke="hsl(var(--muted-foreground))"
+                      angle={-40}
+                      textAnchor="end"
+                      interval={0}
+                    />
+                    <YAxis
+                      tick={{ fontSize: 10 }}
+                      stroke="hsl(var(--muted-foreground))"
+                      tickFormatter={v => `${v}h`}
+                      width={36}
+                    />
+                    <Tooltip
+                      contentStyle={TOOLTIP_STYLE}
+                      formatter={(val: unknown, name: unknown) => [
+                        `${Number(val).toFixed(1)}h`,
+                        name === 'physics' ? 'Physics MAE' : 'Naive MAE',
+                      ]}
+                    />
+                    <Legend
+                      wrapperStyle={LEGEND_STYLE}
+                      formatter={(v: string) => v === 'physics' ? 'Physics v1' : 'Naive baseline'}
+                    />
+                    <Bar dataKey="naive" fill="#475569" opacity={0.45} radius={[1, 1, 0, 0]} name="naive" />
+                    <Bar dataKey="physics" radius={[2, 2, 0, 0]} name="physics">
+                      {chartData.map((d, i) => (
+                        <Cell
+                          key={i}
+                          fill={TYPE_COLOR[d.type] ?? '#64748b'}
+                          opacity={0.8}
+                        />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border text-muted-foreground">
+                    <th className="py-1 pr-3 text-left font-medium">Target</th>
+                    <th className="py-1 pr-3 text-left font-medium">Type</th>
+                    <th className="py-1 pr-3 text-right font-medium">n</th>
+                    <th className="py-1 pr-3 text-right font-medium">Physics MAE</th>
+                    <th className="py-1 pr-3 text-right font-medium">Naive MAE</th>
+                    <th className="py-1 pr-3 text-right font-medium">Improvement</th>
+                    <th className="py-1 pr-3 text-right font-medium">Bias</th>
+                    <th className="py-1 text-right font-medium">P90</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {displayRows.map((r, i) => {
+                    const improvement =
+                      r.naive_med_abs_err_h != null && r.med_abs_err_h != null
+                        ? ((r.naive_med_abs_err_h - r.med_abs_err_h) / r.naive_med_abs_err_h) * 100
+                        : null
+                    const impColor =
+                      improvement == null ? '' : improvement > 10 ? 'text-emerald-400' : improvement < 0 ? 'text-red-400' : 'text-muted-foreground'
+                    return (
+                      <tr key={i} className="border-b border-border/40 hover:bg-muted/30">
+                        <td className="py-1 pr-3 font-medium" style={{ color: TYPE_COLOR[r.target_type] }}>
+                          {r.name}
+                        </td>
+                        <td className="py-1 pr-3 text-muted-foreground capitalize">{r.target_type}</td>
+                        <td className="py-1 pr-3 text-right tabular-nums">{r.n.toLocaleString()}</td>
+                        <td className="py-1 pr-3 text-right tabular-nums">
+                          {r.med_abs_err_h != null ? `${r.med_abs_err_h.toFixed(1)}h` : '-'}
+                        </td>
+                        <td className="py-1 pr-3 text-right tabular-nums text-muted-foreground">
+                          {r.naive_med_abs_err_h != null ? `${r.naive_med_abs_err_h.toFixed(1)}h` : '-'}
+                        </td>
+                        <td className={`py-1 pr-3 text-right tabular-nums font-medium ${impColor}`}>
+                          {improvement != null ? `${improvement > 0 ? '+' : ''}${improvement.toFixed(0)}%` : '-'}
+                        </td>
+                        <td className={`py-1 pr-3 text-right tabular-nums ${r.bias_h != null && r.bias_h > 0 ? 'text-amber-400' : r.bias_h != null && r.bias_h < -0.5 ? 'text-sky-400' : ''}`}>
+                          {r.bias_h != null ? `${r.bias_h > 0 ? '+' : ''}${r.bias_h.toFixed(1)}h` : '-'}
+                        </td>
+                        <td className="py-1 text-right tabular-nums text-muted-foreground">
+                          {r.p90_abs_err_h != null ? `${r.p90_abs_err_h.toFixed(1)}h` : '-'}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+            {rows.length > 12 && (
+              <button
+                onClick={() => setShowAll(v => !v)}
+                className="mt-2 text-xs text-muted-foreground hover:text-foreground"
+              >
+                {showAll ? 'Show fewer' : `Show all ${rows.length} targets`}
+              </button>
+            )}
+            <p className="mt-2 text-[10px] text-muted-foreground/50">
+              Sorted by physics MAE (ascending). Blue = chokepoint, purple = port.
+              Improvement = (naive MAE - physics MAE) / naive MAE. Negative means physics underperforms naive at that target.
+            </p>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Default export: Ports & Cargo tab component
 // ---------------------------------------------------------------------------
 export default function PortsCargoTab() {
@@ -1797,6 +1977,7 @@ export default function PortsCargoTab() {
       <LngIntelligenceCard />
       <EuropeanInboundCard />
       <EtaAccuracyCard />
+      <EtaByTargetCard />
       <PortArrivalForecastCard />
       <PortFlowCard />
       <ActualArrivalsCard />

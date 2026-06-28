@@ -2300,3 +2300,31 @@ export function useEtaAccuracy(targetType = 'all') {
     refetchInterval: 10 * 60_000,
   })
 }
+
+export interface EtaByTargetRow {
+  target_id: string
+  name: string
+  target_type: string
+  is_canal: boolean
+  n: number
+  med_abs_err_h: number | null
+  bias_h: number | null
+  p90_abs_err_h: number | null
+  mape: number | null
+  interval_coverage: number | null
+  naive_med_abs_err_h: number | null
+}
+
+export interface EtaByTargetResponse {
+  run_ts: string | null
+  rows: EtaByTargetRow[]
+}
+
+export function useEtaByTarget() {
+  return useQuery({
+    queryKey: ['eta-by-target'],
+    queryFn: () => getJSON<EtaByTargetResponse>('/api/analytics/eta-by-target'),
+    staleTime: 10 * 60_000,
+    refetchInterval: 10 * 60_000,
+  })
+}
