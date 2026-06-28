@@ -419,7 +419,7 @@ export function FleetAgeCard() {
 // TransitRiskCard
 // ---------------------------------------------------------------------------
 export function TransitRiskCard() {
-  const [chokepoint, setChokepoint] = useState('hormuz')
+  const [chokepoint, setChokepoint] = useState('dover_channel')
   const [days, setDays] = useState(30)
   const { data, isLoading } = useTransitRisk(chokepoint, days, 0)
   const rows = data?.rows ?? []
