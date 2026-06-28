@@ -1116,7 +1116,7 @@ def analytics_region_util():
     df = db.query(
         "SELECT region, nav_status, sog "
         "FROM live_positions "
-        "WHERE updated_ts > ? AND region IS NOT NULL",
+        "WHERE updated_ts > ? AND region IS NOT NULL AND segment != 'Small'",
         [cutoff],
     )
     if df.empty:
