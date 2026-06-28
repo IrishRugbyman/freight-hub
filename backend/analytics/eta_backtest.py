@@ -261,6 +261,8 @@ def _metric_rows(scored: pd.DataFrame, model: str, run_ts: datetime) -> list[dic
 
     for ttype in ["chokepoint", "port"]:
         sub = scored[scored["target_type"] == ttype]
+        if not sub.empty:
+            out.append(agg(sub, "all", ttype))  # overall row per type
         for lead in _LEAD_LABELS:
             g = sub[sub["lead_bucket"] == lead]
             if not g.empty:
