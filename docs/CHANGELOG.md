@@ -1,5 +1,34 @@
 # Freight Hub Changelog
 
+## 2026-06-28 (session 3) - Build time: 17 min; upcoming arrivals card; serving pre-warm
+
+**Total analytics build time: 17 minutes** (down from 2h+ with the killed build 499181).
+Root cause of previous slow builds: the legacy `build_predictions` loop called
+`cache.distance()` per (vessel, target) pair without pre-warming the route cache,
+causing thousands of synchronous searoute calls in the hot path.
+
+**Fix: NA boolean in `vectorized_physics_p50`:** The `laden` column from DuckDB has
+`pd.BooleanDtype` with NA values. `to_numpy()` returned pandas NA objects, breaking
+`laden == True` comparisons in numpy. Fixed with `to_numpy(dtype=object, na_value=None)`.
+
+**Perf: pre-warm route cache in `build_predictions`:** A new `_candidate_pairs()` first
+pass collects all unique (from_cell, target_id) pairs for every live-vessel candidate.
+All unique pairs are routed in one batch (no interleaving with the prediction loop), so
+the hot path pays only in-memory dict lookups. `cache.flush()` is called once at the end.
+
+**Feature: `/api/analytics/eta-upcoming` endpoint:** Returns predicted inbound vessels
+arriving within a configurable horizon (default 96h), computed with remaining hours
+relative to now via epoch arithmetic. Supports `target_id` and `target_type` filters.
+Sorts by remaining ETA ascending.
+
+**Feature: Upcoming chokepoint arrivals card (Chokepoints tab):** Shows the predicted
+vessel queue for each chokepoint (or a specific selected chokepoint) within 24/48/72h.
+Displays vessel name, segment, remaining ETA with uncertainty band, and route distance.
+In the "all CPs" view, groups by chokepoint sorted by next arrival. Uses physics P50 ETA.
+
+**Perf: replace executemany with bulk insert in `persist_predictions` and `write_metrics_by_target`:**
+Minor cleanup for consistency with the `persist_samples` bulk pattern.
+
 ## 2026-06-28 (session 2) - ETA performance and scoreboard improvements
 
 **Fix: missing per-type rollup in metric rows:** `_metric_rows()` in `eta_backtest.py`
