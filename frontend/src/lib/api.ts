@@ -630,6 +630,7 @@ export interface VesselStateData {
   last_draught: number | null
   max_draught_seen: number | null
   updated_ts: string | null
+  days_at_anchor: number | null
 }
 
 export interface PortDestItem {

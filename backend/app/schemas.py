@@ -271,6 +271,7 @@ class VesselStateData(BaseModel):
     last_draught: float | None = None
     max_draught_seen: float | None = None
     updated_ts: str | None = None
+    days_at_anchor: float | None = None  # contiguous anchor streak ending now
 
 
 class PortDestItem(BaseModel):

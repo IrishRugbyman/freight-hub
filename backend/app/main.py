@@ -604,26 +604,63 @@ def vessel_track(mmsi: int, hours: int = 24):
 
 @app.get("/api/vessels/{mmsi}/state", response_model=VesselStateData | None)
 def vessel_state_endpoint(mmsi: int):
-    """Laden/ballast state for a vessel inferred from accumulated draught history."""
+    """Laden/ballast state for a vessel inferred from accumulated draught history.
+
+    Also computes days_at_anchor: length of the contiguous at-anchor streak
+    (nav_status 1 or 5) ending at the most recent snapshot, or None if underway.
+    """
     df = db.query(
         "SELECT laden, last_draught, max_draught_seen, updated_ts "
         "FROM vessel_state WHERE mmsi = ?",
         [mmsi],
         db=db.analytics_db_path(),
     )
-    if df.empty:
-        return None
-    r = df.iloc[0]
 
-    def _fv(v):
-        return None if (v is None or (isinstance(v, float) and pd.isna(v))) else float(v)
+    laden_val = last_draught_val = max_draught_val = updated_ts_val = None
+    if not df.empty:
+        r = df.iloc[0]
+        def _fv(v):
+            return None if (v is None or (isinstance(v, float) and pd.isna(v))) else float(v)
+        laden_val = str(r["laden"]) if r["laden"] else None
+        last_draught_val = _fv(r["last_draught"])
+        max_draught_val = _fv(r["max_draught_seen"])
+        updated_ts_val = _iso(r["updated_ts"])
+
+    # Days at anchor: walk back through snapshots looking for a contiguous streak
+    # of nav_status IN (1=anchor, 5=moored). Look back up to 60 days.
+    days_at_anchor: float | None = None
+    snap_df = db.query(
+        "SELECT snapshot_ts, nav_status FROM ais_snapshots "
+        "WHERE mmsi = ? AND snapshot_ts >= ? "
+        "ORDER BY snapshot_ts DESC",
+        [mmsi, datetime.now(UTC).replace(tzinfo=None) - timedelta(days=60)],
+    )
+    if not snap_df.empty:
+        rows = snap_df.itertuples()
+        streak_start = None
+        for row in snap_df.itertuples():
+            ns = row.nav_status
+            is_null = ns is None or pd.isna(ns)
+            if not is_null and int(ns) in (1, 5):
+                streak_start = row.snapshot_ts
+            elif is_null and streak_start is not None:
+                streak_start = row.snapshot_ts  # bridge through reporting gaps
+            else:
+                break
+        if streak_start is not None:
+            now_ts = datetime.now(UTC).replace(tzinfo=None)
+            days_at_anchor = round((now_ts - streak_start).total_seconds() / 86400, 1)
+
+    if df.empty and days_at_anchor is None:
+        return None
 
     return VesselStateData(
         mmsi=mmsi,
-        laden=str(r["laden"]) if r["laden"] else None,
-        last_draught=_fv(r["last_draught"]),
-        max_draught_seen=_fv(r["max_draught_seen"]),
-        updated_ts=_iso(r["updated_ts"]),
+        laden=laden_val,
+        last_draught=last_draught_val,
+        max_draught_seen=max_draught_val,
+        updated_ts=updated_ts_val,
+        days_at_anchor=days_at_anchor,
     )
 
 

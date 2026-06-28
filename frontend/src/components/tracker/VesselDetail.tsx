@@ -236,6 +236,13 @@ export function VesselDetail({
               {vesselState.laden}
             </span>
           )}
+          {vesselState?.days_at_anchor != null && vesselState.days_at_anchor > 0 && (
+            <span className="ml-auto rounded px-1.5 py-px text-[9px] font-medium bg-amber-500/15 text-amber-400">
+              {vesselState.days_at_anchor < 1
+                ? `${Math.round(vesselState.days_at_anchor * 24)}h at anchor`
+                : `${vesselState.days_at_anchor}d at anchor`}
+            </span>
+          )}
         </div>
         <Row label="Speed" value={vessel.sog != null ? `${vessel.sog.toFixed(1)} kn` : null} />
         <Row label="Course" value={vessel.cog != null ? `${Math.round(vessel.cog)}°` : null} />
