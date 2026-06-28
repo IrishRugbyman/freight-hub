@@ -1,6 +1,6 @@
 """Fleet Explorer query layer.
 
-Joins vessel_registry (Phase 5) with live_positions on IMO number.
+Joins the PG vessels master with live_positions on IMO number.
 All filters use parameterized SQL - no string interpolation of user input.
 """
 
