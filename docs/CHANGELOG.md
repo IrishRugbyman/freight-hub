@@ -1,5 +1,28 @@
 # Freight Hub Changelog
 
+## 2026-06-28 (session 4) - Analytics data quality fixes; 06:00 build verified (16m26s)
+
+**06:00 UTC build completed in 16m26s** (1,037,263 samples, 3432 unique route pairs, 3287
+live predictions as_of 06:15:21 UTC). Route cache had only 12 misses - warm from prior run.
+
+**Fix: region momentum excludes inland waterway (Small) vessels by default:** Added
+`ocean_only=true` parameter (default true) to `/api/analytics/region-momentum`. Without
+this filter, ARA's ~6300 inland barge count (vs ~1967 ocean-going) dominated the chart
+with delta of -3846, masking meaningful ocean fleet shifts. With the filter, ARA delta
+is a readable +182. Toggle added to the card header.
+
+**Fix: crude-on-water excludes Small tanker segment:** Added `crude_only=true` parameter
+(default true) to `/api/analytics/crude-on-water`. Small tankers (primarily ARA river
+barges) were inflating the estimate by 223 mb at 45k DWT/vessel. With crude_only,
+restricted to ULCC/VLCC/Suezmax/Aframax/Panamax (vessels that actually carry crude).
+
+**Perf: vectorize `fleet_density_rows`:** Eliminated the double Python loop
+(groupby + iterrows per vessel) in detect.py. Full numpy vectorized computation of
+max_seen/design draught lookup, effective max resolution, and laden-ratio classification.
+Reduces Python overhead per build for high-density regions like ARA (~8000 vessels/hour).
+
+**Docs: mark Phase F complete** (True ETA vessel-detail popup seam was closed in session 3).
+
 ## 2026-06-28 (session 3) - Build time: 17 min; upcoming arrivals card; serving pre-warm
 
 **Total analytics build time: 17 minutes** (down from 2h+ with the killed build 499181).
