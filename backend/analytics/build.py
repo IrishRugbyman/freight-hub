@@ -538,7 +538,9 @@ def _run_inner(conn: duckdb.DuckDBPyConnection, reset: bool) -> None:
     try:
         from .eta_samples import run_in_conn as _eta_samples_run
 
+        _t0 = time.perf_counter()
         _eta_samples_run(conn, _ais_query)
+        log.info("7c eta_samples: %.1fs", time.perf_counter() - _t0)
     except Exception as exc:
         log.warning("ETA sample build failed, skipping: %s", exc, exc_info=True)
 
@@ -551,7 +553,9 @@ def _run_inner(conn: duckdb.DuckDBPyConnection, reset: bool) -> None:
     try:
         from .eta_serving import run_in_conn as _eta_serving_run
 
+        _t0 = time.perf_counter()
         _eta_serving_run(conn, _ais_query)
+        log.info("7d eta_serving: %.1fs", time.perf_counter() - _t0)
     except Exception as exc:
         log.warning("ETA serving scorer failed, skipping: %s", exc, exc_info=True)
 
@@ -564,7 +568,9 @@ def _run_inner(conn: duckdb.DuckDBPyConnection, reset: bool) -> None:
     try:
         from .eta_drift import run_in_conn as _eta_drift_run
 
+        _t0 = time.perf_counter()
         _eta_drift_run(conn)
+        log.info("7e eta_drift: %.1fs", time.perf_counter() - _t0)
     except Exception as exc:
         log.warning("ETA drift watch failed, skipping: %s", exc, exc_info=True)
 
