@@ -462,6 +462,11 @@ export function TransitsCard() {
   const [chokepoint, setChokepoint] = useState('suez')
   const [days, setDays] = useState(30)
   const { data, isLoading } = useTransits(chokepoint, days)
+  const { data: cpMeta } = useChokepoints()
+
+  const noCovSet = new Set(
+    (cpMeta ?? []).filter(c => !c.has_coverage).map(c => c.region)
+  )
 
   const chartData: Record<string, string | number>[] = []
   if (data?.series) {
@@ -483,7 +488,9 @@ export function TransitsCard() {
           <CardTitle>Chokepoint Transits</CardTitle>
           <div className="flex gap-2">
             <select className="rounded border border-border bg-secondary px-2 py-1 text-xs" value={chokepoint} onChange={(e) => setChokepoint(e.target.value)}>
-              {CHOKEPOINTS.map((cp) => <option key={cp} value={cp}>{fmt(cp)}</option>)}
+              {CHOKEPOINTS.map((cp) => (
+                <option key={cp} value={cp}>{fmt(cp)}{noCovSet.has(cp) ? ' (no AIS)' : ''}</option>
+              ))}
             </select>
             <select className="rounded border border-border bg-secondary px-2 py-1 text-xs" value={days} onChange={(e) => setDays(Number(e.target.value))}>
               {[7, 14, 30, 90].map((d) => <option key={d} value={d}>{d} days</option>)}
@@ -493,7 +500,9 @@ export function TransitsCard() {
         <p className="text-xs text-muted-foreground">Daily transits. Data from 2026-06.</p>
       </CardHeader>
       <CardContent>
-        {isLoading || !data ? <ChartSkeleton /> : chartData.length === 0 ? (
+        {isLoading || !data ? <ChartSkeleton /> : noCovSet.has(chokepoint) ? (
+          <EmptyState message={`No terrestrial AIS receivers at ${fmt(chokepoint)} - free aisstream.io feed only covers coastal zones`} />
+        ) : chartData.length === 0 ? (
           <EmptyState message="No transit events yet. Data accumulates as history grows." />
         ) : (
           <ResponsiveContainer width="100%" height={240}>

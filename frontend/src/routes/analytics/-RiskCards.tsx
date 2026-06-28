@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   useVesselRiskScores, useOwnerIntelligence, useOwnerRisk,
   useFlagRisk, useFleetAge, useTransitRisk, useAnchorageDwell, useStsRisk,
-  useFlagMismatches,
+  useFlagMismatches, useChokepoints,
 } from '@/lib/api'
 import { fmt, EmptyState, ChartSkeleton, TOOLTIP_STYLE, LEGEND_STYLE } from './-analyticsShared'
 
@@ -422,9 +422,15 @@ export function TransitRiskCard() {
   const [chokepoint, setChokepoint] = useState('dover_channel')
   const [days, setDays] = useState(30)
   const { data, isLoading } = useTransitRisk(chokepoint, days, 0)
+  const { data: cpMeta } = useChokepoints()
   const rows = data?.rows ?? []
   const showing = rows.slice(0, 15)
   const goToTracker = useGoToTracker()
+
+  // Build a set of regions with no terrestrial AIS coverage for the dropdown
+  const noCovSet = new Set(
+    (cpMeta ?? []).filter(c => !c.has_coverage).map(c => c.region)
+  )
 
   return (
     <Card>
@@ -433,7 +439,11 @@ export function TransitRiskCard() {
           Chokepoint Transits
           <select value={chokepoint} onChange={(e) => setChokepoint(e.target.value)}
             className="rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] focus:outline-none">
-            {RISK_CHOKEPOINTS.map((cp) => <option key={cp} value={cp}>{fmt(cp)}</option>)}
+            {RISK_CHOKEPOINTS.map((cp) => (
+              <option key={cp} value={cp}>
+                {fmt(cp)}{noCovSet.has(cp) ? ' (no AIS)' : ''}
+              </option>
+            ))}
           </select>
           <div className="flex gap-1">
             {[7, 14, 30].map((d) => (
@@ -448,7 +458,10 @@ export function TransitRiskCard() {
       </CardHeader>
       <CardContent>
         {isLoading && <div className="h-48 animate-pulse rounded bg-muted/40" />}
-        {!isLoading && rows.length === 0 && <EmptyState message={`No ${fmt(chokepoint)} transits in last ${days} days`} />}
+        {!isLoading && noCovSet.has(chokepoint) && (
+          <EmptyState message={`No terrestrial AIS receivers at ${fmt(chokepoint)} - free aisstream.io feed only covers coastal zones`} />
+        )}
+        {!isLoading && !noCovSet.has(chokepoint) && rows.length === 0 && <EmptyState message={`No ${fmt(chokepoint)} transits in last ${days} days`} />}
         {!isLoading && rows.length > 0 && (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
