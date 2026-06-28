@@ -29,6 +29,27 @@ In the "all CPs" view, groups by chokepoint sorted by next arrival. Uses physics
 **Perf: replace executemany with bulk insert in `persist_predictions` and `write_metrics_by_target`:**
 Minor cleanup for consistency with the `persist_samples` bulk pattern.
 
+**Fix: vessel detail ETA uses absolute arrival timestamp:** The panel was showing
+`eta_p50_h` (hours from the prediction `as_of`), which drifts stale between builds.
+Now computes `remaining_h = (eta_arrival_ts - now) / 3600` so the ETA display stays
+correct regardless of prediction age. Predictions whose arrival has already passed are
+hidden from the panel.
+
+**Fix: `analytics_laden` endpoint uses `fleet_density` instead of broken cross-DB join:**
+The previous query tried to join `vessel_state` (analytics DB) with `live_positions` (AIS
+DB) inside a single DuckDB connection - this silently returned no rows. `fleet_density`
+already stores laden/ballast/unknown counts per (region, kind, segment) per hour;
+the endpoint now queries the latest hour from that table, giving correct per-segment data.
+
+**Fix: shadow fleet enrichment falls back to `ais_events` for kind/segment:** Dark/spoofing
+vessels are often not in `live_positions`, so kind/segment was always null. The event
+record always stores these fields at detection time; 50 of 73 shadow fleet vessels now
+show their vessel class.
+
+**Test: 3 new tests for `/api/analytics/eta-upcoming`:** Horizon filter (48h returns
+only hormuz not rotterdam), target_type filter (chokepoints only), sort order ascending.
+(441 tests passing total.)
+
 ## 2026-06-28 (session 2) - ETA performance and scoreboard improvements
 
 **Fix: missing per-type rollup in metric rows:** `_metric_rows()` in `eta_backtest.py`
