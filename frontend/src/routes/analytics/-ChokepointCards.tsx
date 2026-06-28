@@ -7,7 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   useChokepointStatus, useChokepointAnomaly, useChokepointHeatmap,
   useTransitRateTimeline, useTransits, useCongestion, useChokepoints,
-  type ChokepointStatusRow,
+  useUpcomingArrivals,
+  type ChokepointStatusRow, type UpcomingVessel,
 } from '@/lib/api'
 import { fmt, EmptyState, ChartSkeleton, TOOLTIP_STYLE, LEGEND_STYLE } from './-analyticsShared'
 
@@ -566,6 +567,182 @@ export function CongestionCard() {
 }
 
 // ---------------------------------------------------------------------------
+// UpcomingArrivalsCard - predicted inbound vessels at chokepoints within horizon
+// ---------------------------------------------------------------------------
+const SEGMENT_DOT: Record<string, string> = {
+  'VLCC': '#ef4444',
+  'Suezmax': '#f97316',
+  'Aframax': '#eab308',
+  'Panamax Tanker': '#22c55e',
+  'Capesize': '#3b82f6',
+  'Panamax Dry': '#8b5cf6',
+  'Supramax': '#06b6d4',
+  'Handysize': '#64748b',
+}
+
+function fmtRemaining(h: number): string {
+  if (h < 1) return `${Math.round(h * 60)}m`
+  if (h < 24) return `${h.toFixed(1)}h`
+  return `${(h / 24).toFixed(1)}d`
+}
+
+function VesselRow({ v }: { v: UpcomingVessel }) {
+  const dot = SEGMENT_DOT[v.segment ?? ''] ?? '#64748b'
+  const uncertaintyH = v.eta_p90_h != null && v.eta_p10_h != null
+    ? v.eta_p90_h - v.eta_p10_h
+    : null
+  return (
+    <tr className="border-b border-border/30 hover:bg-muted/20 transition-colors">
+      <td className="py-1.5 pr-3 text-xs font-medium text-foreground">
+        <div className="flex items-center gap-1.5">
+          <span
+            className="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
+            style={{ background: dot }}
+          />
+          <span className="max-w-[120px] truncate">{v.name ?? String(v.mmsi)}</span>
+        </div>
+      </td>
+      <td className="py-1.5 pr-3 text-xs text-muted-foreground">{v.segment ?? '-'}</td>
+      <td className="py-1.5 pr-3 text-right text-xs tabular-nums">
+        <span className="font-semibold text-foreground">{fmtRemaining(v.remaining_h)}</span>
+        {uncertaintyH != null && (
+          <span className="ml-1 text-[10px] text-muted-foreground/60">
+            ±{fmtRemaining(uncertaintyH / 2)}
+          </span>
+        )}
+      </td>
+      <td className="py-1.5 text-right text-[10px] text-muted-foreground tabular-nums">
+        {v.route_dist_nm != null ? `${Math.round(v.route_dist_nm)} nm` : '-'}
+      </td>
+    </tr>
+  )
+}
+
+function UpcomingArrivalsCard() {
+  const [horizonH, setHorizonH] = React.useState(48)
+  const [targetId, setTargetId] = React.useState<string | undefined>(undefined)
+  const { data, isLoading } = useUpcomingArrivals(horizonH, targetId, 'chokepoint')
+
+  const CP_OPTIONS: Array<{ id: string | undefined; label: string }> = [
+    { id: undefined, label: 'All CPs' },
+    { id: 'cp:suez', label: 'Suez' },
+    { id: 'cp:hormuz', label: 'Hormuz' },
+    { id: 'cp:singapore_malacca', label: 'Sing/Mal' },
+    { id: 'cp:bab_el_mandeb', label: 'Bab el-M' },
+    { id: 'cp:bosphorus_dardanelles', label: 'Bosphorus' },
+    { id: 'cp:dover_channel', label: 'Dover' },
+    { id: 'cp:gibraltar', label: 'Gibraltar' },
+    { id: 'cp:panama', label: 'Panama' },
+    { id: 'cp:cape_good_hope', label: 'Cape' },
+  ]
+
+  const rows = data?.rows ?? []
+
+  // When showing all chokepoints, group by target with sub-headers
+  const grouped = React.useMemo(() => {
+    if (targetId) return null
+    const map = new Map<string, UpcomingVessel[]>()
+    for (const v of rows) {
+      const k = v.target_id
+      if (!map.has(k)) map.set(k, [])
+      map.get(k)!.push(v)
+    }
+    return Array.from(map.entries())
+      .map(([tid, vs]) => ({ tid, name: vs[0].target_name, vessels: vs }))
+      .sort((a, b) => a.vessels[0].remaining_h - b.vessels[0].remaining_h)
+  }, [rows, targetId])
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-start justify-between gap-2 pb-2">
+        <div>
+          <CardTitle className="text-sm font-semibold">Upcoming chokepoint arrivals</CardTitle>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">
+            Predicted inbound vessels (physics P50 ETA) - {data?.total ?? 0} within {horizonH}h
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-1.5">
+          <div className="flex gap-1">
+            {[24, 48, 72].map(h => (
+              <button
+                key={h}
+                onClick={() => setHorizonH(h)}
+                className={`rounded px-1.5 py-0.5 text-[10px] transition-colors ${
+                  horizonH === h
+                    ? 'bg-primary/20 text-primary'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {h}h
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-wrap justify-end gap-0.5">
+            {CP_OPTIONS.map(opt => (
+              <button
+                key={opt.id ?? 'all'}
+                onClick={() => setTargetId(opt.id)}
+                className={`rounded px-1.5 py-0.5 text-[10px] transition-colors ${
+                  targetId === opt.id
+                    ? 'bg-primary/20 text-primary'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <ChartSkeleton />
+        ) : rows.length === 0 ? (
+          <EmptyState message="No predictions within horizon - build runs hourly" />
+        ) : targetId ? (
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-border/50">
+                <th className="pb-1 text-left text-[10px] font-medium text-muted-foreground">Vessel</th>
+                <th className="pb-1 text-left text-[10px] font-medium text-muted-foreground">Type</th>
+                <th className="pb-1 text-right text-[10px] font-medium text-muted-foreground">ETA</th>
+                <th className="pb-1 text-right text-[10px] font-medium text-muted-foreground">Dist</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.slice(0, 20).map(v => <VesselRow key={`${v.mmsi}-${v.target_id}`} v={v} />)}
+            </tbody>
+          </table>
+        ) : (
+          <div className="space-y-4">
+            {(grouped ?? []).map(g => (
+              <div key={g.tid}>
+                <div className="mb-1 flex items-center gap-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    {g.name}
+                  </span>
+                  <span className="rounded bg-muted/40 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                    {g.vessels.length}
+                  </span>
+                  <span className="text-[10px] text-muted-foreground/60">
+                    next {fmtRemaining(g.vessels[0].remaining_h)}
+                  </span>
+                </div>
+                <table className="w-full">
+                  <tbody>
+                    {g.vessels.slice(0, 5).map(v => <VesselRow key={v.mmsi} v={v} />)}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Default export: Chokepoints tab component
 // ---------------------------------------------------------------------------
 export default function ChokepointsTab() {
@@ -573,6 +750,7 @@ export default function ChokepointsTab() {
     <div className="space-y-6">
       <ChokepointStatusCard />
       <ChokepointAnomalyCard />
+      <UpcomingArrivalsCard />
       <ChokepointHeatmapCard />
       <TransitRateTimelineCard />
       <div className="grid gap-4 lg:grid-cols-2">

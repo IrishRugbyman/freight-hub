@@ -2349,3 +2349,39 @@ export function useEtaTrend() {
     refetchInterval: 10 * 60_000,
   })
 }
+
+export interface UpcomingVessel {
+  mmsi: number
+  name: string | null
+  segment: string | null
+  laden: boolean | null
+  target_id: string
+  target_name: string
+  target_type: string
+  remaining_h: number
+  eta_p10_h: number | null
+  eta_p90_h: number | null
+  route_dist_nm: number | null
+  sog: number | null
+  lat: number | null
+  lon: number | null
+}
+
+export interface UpcomingArrivalsResponse {
+  as_of: string
+  horizon_h: number
+  target_id: string | null
+  total: number
+  rows: UpcomingVessel[]
+}
+
+export function useUpcomingArrivals(horizonH = 96, targetId?: string, targetType = 'all') {
+  const params = new URLSearchParams({ horizon_h: String(horizonH), target_type: targetType })
+  if (targetId) params.set('target_id', targetId)
+  return useQuery({
+    queryKey: ['eta-upcoming', horizonH, targetId ?? 'all', targetType],
+    queryFn: () => getJSON<UpcomingArrivalsResponse>(`/api/analytics/eta-upcoming?${params}`),
+    staleTime: 5 * 60_000,
+    refetchInterval: 5 * 60_000,
+  })
+}
