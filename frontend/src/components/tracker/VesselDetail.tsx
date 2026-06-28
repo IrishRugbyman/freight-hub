@@ -186,9 +186,9 @@ export function VesselDetail({
   const etaPreds = etaData?.predictions ?? []
 
   return (
-    <div className="w-64">
-      {/* Header */}
-      <div className="flex items-start gap-2 px-3 pt-3 pb-2">
+    <div className="flex w-64 flex-col" style={{ maxHeight: 'calc(100svh - 7rem)' }}>
+      {/* Header - always visible */}
+      <div className="flex items-start gap-2 px-3 pt-3 pb-2 shrink-0">
         <span
           className="mt-0.5 h-3 w-3 shrink-0 rounded-sm"
           style={{ background: color }}
@@ -211,6 +211,8 @@ export function VesselDetail({
         </button>
       </div>
 
+      {/* Scrollable body */}
+      <div className="min-h-0 overflow-y-auto">
       {/* Type + segment */}
       <div className="flex gap-2 px-3 pb-2">
         <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
@@ -450,8 +452,10 @@ export function VesselDetail({
         </Section>
       )}
 
-      {/* External links */}
-      <div className="flex gap-2 border-t border-border/60 px-3 py-2">
+      </div>{/* end scrollable body */}
+
+      {/* External links - pinned footer */}
+      <div className="flex gap-2 border-t border-border/60 px-3 py-2 shrink-0">
         <a
           href={`https://www.marinetraffic.com/en/ais/details/ships/mmsi:${vessel.mmsi}`}
           target="_blank"
@@ -470,8 +474,8 @@ export function VesselDetail({
         </a>
       </div>
 
-      {/* Trail window toggle */}
-      <div className="flex items-center gap-2 border-t border-border/60 px-3 py-2">
+      {/* Trail window toggle - pinned footer */}
+      <div className="flex items-center gap-2 border-t border-border/60 px-3 py-2 shrink-0">
         <span className="text-[11px] font-semibold text-muted-foreground">Trail</span>
         <div className="flex gap-1 ml-auto">
           {([24, 168] as const).map((h) => (
