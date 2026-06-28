@@ -183,7 +183,7 @@ export function VesselDetail({
   const { data: voyages } = useVoyages(vessel.mmsi, 14)
   const { data: behavioralRisk } = useVesselBehavioralRisk(vessel.mmsi)
   const { data: etaData } = useVesselEta(vessel.mmsi)
-  const trueEta = etaData?.predictions?.[0] ?? null  // soonest resolvable target
+  const etaPreds = etaData?.predictions ?? []
 
   return (
     <div className="w-64">
@@ -253,21 +253,29 @@ export function VesselDetail({
         <div className="text-[11px] font-semibold text-muted-foreground mb-1">Voyage</div>
         <Row label="Destination" value={vessel.destination} />
         <Row label="ETA (reported)" value={vessel.eta} />
-        {trueEta?.eta_p50_h != null && (
-          <div className="flex items-baseline justify-between gap-3 py-0.5">
-            <span className="text-xs text-muted-foreground">
-              True ETA <span className="text-muted-foreground/60">to {trueEta.target_name ?? trueEta.target_id}</span>
-            </span>
-            <EtaChip
-              vessel={{
-                eta_true_h: trueEta.eta_p50_h,
-                eta_low_h: trueEta.eta_low_h,
-                eta_high_h: trueEta.eta_high_h,
-                eta_naive_h: trueEta.eta_naive_h,
-                eta_method: trueEta.method,
-              }}
-              fallbackH={trueEta.eta_naive_h}
-            />
+        {etaPreds.length > 0 && (
+          <div className="mt-0.5 space-y-0.5">
+            {etaPreds.map((pred, i) => pred.eta_p50_h != null && (
+              <div key={pred.target_id} className="flex items-baseline justify-between gap-2 py-0.5">
+                <span className="text-xs text-muted-foreground truncate min-w-0">
+                  {i === 0 ? 'True ETA' : ''}{' '}
+                  <span className="text-muted-foreground/60 text-[10px]">
+                    to {pred.target_name ?? pred.target_id}
+                  </span>
+                </span>
+                <EtaChip
+                  vessel={{
+                    eta_true_h: pred.eta_p50_h,
+                    eta_low_h: pred.eta_low_h,
+                    eta_high_h: pred.eta_high_h,
+                    eta_naive_h: pred.eta_naive_h,
+                    eta_method: pred.method,
+                  }}
+                  fallbackH={pred.eta_naive_h}
+                  showBand={i === 0}
+                />
+              </div>
+            ))}
           </div>
         )}
         <Row label="Draught" value={vessel.draught != null ? `${vessel.draught.toFixed(1)} m` : null} />
