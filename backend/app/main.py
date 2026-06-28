@@ -1840,7 +1840,7 @@ def analytics_transit_risk(chokepoint: str = "hormuz", days: int = 30, min_risk:
 
         rows.append(TransitRiskEvent(
             mmsi=mmsi_val,
-            name=info.get("name"),
+            name=_str_or_none(info.get("name")),
             imo=imo_val,
             chokepoint=str(ev["chokepoint"]),
             entered_ts=_iso(ev["entered_ts"]) or "",
@@ -2686,7 +2686,7 @@ def analytics_shadow_fleet(days: int = 7, limit: int = 50):
         rows.append(ShadowFleetRow(
             mmsi=mmsi_val,
             imo=imo_val,
-            name=info.get("name"),
+            name=_str_or_none(info.get("name")),
             kind=mmsi_kind.get(mmsi_val) or ev_kind,
             segment=mmsi_segment.get(mmsi_val) or ev_seg,
             region=mmsi_region.get(mmsi_val),
@@ -6738,7 +6738,7 @@ def analytics_eta_upcoming(horizon_h: int = 96, target_id: str | None = None, ta
             p90_rem = None
 
         # Derive laden from draught + segment-specific threshold (bool | None)
-        seg_s = str(ais.get("segment") or "")
+        seg_s = _str_or_none(ais.get("segment")) or ""
         d_raw = ais.get("draught")
         d_f = float(d_raw) if d_raw is not None and str(d_raw) not in ("", "nan") else None
         from analytics.zones import DESIGN_DRAUGHT as _DD2
