@@ -3943,7 +3943,11 @@ def analytics_sts_proximity(max_dist_m: float = 2000, max_sog: float = 3.0):
         sog_num = pd.to_numeric(df["sog"], errors="coerce")
         ns_num = pd.to_numeric(df.get("nav_status", pd.Series()), errors="coerce")
         ns_ok = ns_num.isna() | ~ns_num.isin([1, 5])
-        df = df[(sog_num.notna()) & (sog_num <= sog_cap) & ns_ok & df["lat"].notna() & df["lon"].notna()].copy()
+        df = df[
+            (sog_num.notna()) & (sog_num <= sog_cap) & ns_ok
+            & df["lat"].notna() & df["lon"].notna()
+            & (df["segment"] != "Small")
+        ].copy()
         needed = ["mmsi", "name", "imo", "lat", "lon", "sog", "kind", "segment", "region", "nav_status"]
         df = df[[c for c in needed if c in df.columns]]
     now = datetime.now(UTC)
