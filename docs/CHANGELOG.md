@@ -1,5 +1,33 @@
 # Freight Hub Changelog
 
+## 2026-06-28 (session 6) - Systematic ocean-only propagation; AIS coverage disclosure; region selector fixes
+
+**Fix: ocean_only (Small segment) filter propagated across all remaining analytics endpoints:**
+Applied `segment != 'Small'` to region-util (ARA 8310 -> 432 ocean vessels), ports
+(Rotterdam 376 -> 117), analytics-speed, congestion, anchorage-dwell (via
+`_merged_anchored_spans`), laden, fleet-trend, fleet-at-time, density endpoints.
+Root cause: the ~6300 ARA inland waterway barges (Small segment) contaminated all
+fleet-level metrics when ocean_only was not enforced. Now 16 occurrences of the filter
+applied consistently. Tests updated where COASTER (Small) fixture changed expected counts.
+
+**Fix: eta-upcoming P10 clamp bug:** The expression `_fn(p10_orig) and rem - (p50 - p10)`
+short-circuited to `0.0` whenever `p10_orig == 0.0` (a Python truthiness trap), returning
+incorrect zero instead of the computed remainder. Fixed with explicit `max(0.0, ...)` expression.
+
+**Fix: AIS coverage disclosure in chokepoint dropdowns:** TransitRiskCard and TransitsCard
+now annotate Hormuz and Bab el-Mandeb with "(no AIS)" in their selectors and show a clear
+"No terrestrial AIS receivers" message instead of a blank card. The existing `has_coverage`
+flag on `/api/chokepoints` is now wired into these dropdowns.
+
+**Fix: FleetAtTimeCard region selector used wrong region names:** Options like "hormuz",
+"malacca", "dover", "taiwan_strait" didn't match any `ais_snapshots.region` values and
+would always return 0 results. Replaced with the 13 actual live-covered regions (ara,
+singapore_malacca, dover_channel, bosphorus_dardanelles, etc.).
+
+**Fix: DensityCard region list and default:** Removed uncovered regions (hormuz, bab_el_mandeb)
+from DENSITY_REGIONS and added covered ones (ara, japan_korea, us_gulf, cape_good_hope, saldanha_richards_bay).
+Changed default from hormuz (no data) to singapore_malacca.
+
 ## 2026-06-28 (session 5) - Ocean-only filters, Small-segment event noise, ETA upcoming metadata
 
 **Fix: TransitRiskCard default changed from hormuz to dover_channel:** Hormuz has zero
