@@ -265,17 +265,19 @@ export function FleetAtTimeCard() {
             onChange={e => setRegion(e.target.value)}
           >
             <option value="">All regions</option>
-            <option value="hormuz">Strait of Hormuz</option>
-            <option value="malacca">Malacca</option>
-            <option value="suez">Suez</option>
-            <option value="bab_el_mandeb">Bab el-Mandeb</option>
-            <option value="singapore">Singapore</option>
-            <option value="taiwan_strait">Taiwan Strait</option>
-            <option value="danish_straits">Danish Straits</option>
-            <option value="dover">Dover</option>
             <option value="ara">ARA</option>
-            <option value="med">Mediterranean</option>
-            <option value="black_sea">Black Sea</option>
+            <option value="singapore_malacca">Singapore / Malacca</option>
+            <option value="suez">Suez</option>
+            <option value="dover_channel">Dover Channel</option>
+            <option value="bosphorus_dardanelles">Bosphorus</option>
+            <option value="gibraltar">Gibraltar</option>
+            <option value="cape_good_hope">Cape of Good Hope</option>
+            <option value="us_gulf">US Gulf</option>
+            <option value="us_east_coast">US East Coast</option>
+            <option value="primorsk_baltic">Baltic</option>
+            <option value="japan_korea">Japan / Korea</option>
+            <option value="saldanha_richards_bay">S. Africa</option>
+            <option value="panama">Panama</option>
           </select>
           <button
             className="rounded bg-primary px-3 py-1 text-xs font-medium text-primary-foreground"

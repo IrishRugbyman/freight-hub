@@ -28,7 +28,7 @@ function useGoToTracker() {
 // ---------------------------------------------------------------------------
 // Local constants (Ports & Cargo tab only)
 // ---------------------------------------------------------------------------
-const DENSITY_REGIONS = ['hormuz', 'singapore_malacca', 'suez', 'panama', 'dover_channel']
+const DENSITY_REGIONS = ['singapore_malacca', 'suez', 'dover_channel', 'panama', 'ara', 'japan_korea', 'us_gulf', 'cape_good_hope']
 
 const REGION_SHORT: Record<string, string> = {
   'Far East': 'Far East',
@@ -968,7 +968,7 @@ export function LadenCard() {
 // DensityCard
 // ---------------------------------------------------------------------------
 export function DensityCard() {
-  const [region, setRegion] = useState('hormuz')
+  const [region, setRegion] = useState('singapore_malacca')
   const [days, setDays] = useState(30)
   const { data, isLoading } = useDensity(region, days)
 
