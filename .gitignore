@@ -15,3 +15,6 @@ frontend/src/routeTree.gen.ts
 backend/data/
 .playwright-mcp/
 research/
+
+# scratch / design assets
+redesign-*.png
