@@ -975,7 +975,7 @@ def analytics_high_risk_positions(min_risk: int = 60):
     live_df = db.query(
         f"SELECT mmsi, imo, lat, lon, name, segment, kind "
         f"FROM live_positions "
-        f"WHERE updated_ts > ? AND imo IN ({placeholders})",
+        f"WHERE updated_ts > ? AND imo IN ({placeholders}) AND segment != 'Small'",
         [cutoff, *ifo_list],
     )
 
@@ -4027,12 +4027,14 @@ def analytics_anomaly_watchlist(
     # Step 1: event counts (30d for scoring, 7d for recency signals)
     adb = db.analytics_db_path()
     ev_30d = db.query(
-        "SELECT mmsi, type, COUNT(*) AS cnt FROM ais_events WHERE start_ts >= ? GROUP BY mmsi, type",
+        "SELECT mmsi, type, COUNT(*) AS cnt FROM ais_events "
+        "WHERE start_ts >= ? AND segment != 'Small' GROUP BY mmsi, type",
         [cutoff_30d],
         db=adb,
     )
     ev_7d = db.query(
-        "SELECT mmsi, type, COUNT(*) AS cnt FROM ais_events WHERE start_ts >= ? GROUP BY mmsi, type",
+        "SELECT mmsi, type, COUNT(*) AS cnt FROM ais_events "
+        "WHERE start_ts >= ? AND segment != 'Small' GROUP BY mmsi, type",
         [cutoff_7d],
         db=adb,
     )
@@ -4040,13 +4042,15 @@ def analytics_anomaly_watchlist(
     # sts can be either party
     sts_30d_df = db.query(
         "SELECT mmsi2 AS mmsi, COUNT(*) AS cnt FROM ais_events "
-        "WHERE type = 'sts' AND mmsi2 IS NOT NULL AND start_ts >= ? GROUP BY mmsi2",
+        "WHERE type = 'sts' AND mmsi2 IS NOT NULL AND start_ts >= ? "
+        "AND segment != 'Small' GROUP BY mmsi2",
         [cutoff_30d],
         db=adb,
     )
     sts_7d_df = db.query(
         "SELECT mmsi2 AS mmsi, COUNT(*) AS cnt FROM ais_events "
-        "WHERE type = 'sts' AND mmsi2 IS NOT NULL AND start_ts >= ? GROUP BY mmsi2",
+        "WHERE type = 'sts' AND mmsi2 IS NOT NULL AND start_ts >= ? "
+        "AND segment != 'Small' GROUP BY mmsi2",
         [cutoff_7d],
         db=adb,
     )
@@ -6837,7 +6841,7 @@ def analytics_arrivals(days: int = 14, target_type: str = "all", top_n: int = 20
             "       mode(a.segment) AS top_segment, "
             "       MAX(a.arrival_ts) AS last_arrival_ts "
             "FROM eta_arrivals a JOIN eta_targets t USING(target_id) "
-            f"WHERE a.arrival_ts >= ? {type_clause} "
+            f"WHERE a.arrival_ts >= ? AND a.segment != 'Small' {type_clause} "
             "GROUP BY a.target_id, t.name, t.target_type, t.is_canal "
             "ORDER BY arrivals DESC, vessels DESC "
             "LIMIT ?",
