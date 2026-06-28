@@ -4472,13 +4472,15 @@ def test_fleet_trend_with_data(analytics_client):
     assert "series" in d
     assert "as_of" in d
     assert d["days"] == 30
-    # Seed has 2 fleet_density rows for hormuz/VLCC: laden=2+2=4, ballast=1+0=1, unknown=0+1=1
+    # Seed has 2 fleet_density rows at different hours on the same day.
+    # Now uses daily AVERAGE across hourly snapshots (not sum):
+    # laden: ROUND((2+2)/2)=2, ballast: ROUND((1+0)/2)=1, unknown: ROUND((0+1)/2)=1
     assert len(d["series"]) == 1  # both seed rows are on the same day
     day = d["series"][0]
-    assert day["laden"] == 4
+    assert day["laden"] == 2
     assert day["ballast"] == 1
     assert day["unknown"] == 1
-    assert day["total"] == 6
+    assert day["total"] == 4
 
 
 def test_fleet_trend_region_filter(analytics_client):

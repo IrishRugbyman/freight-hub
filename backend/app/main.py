@@ -2496,13 +2496,23 @@ def analytics_fleet_trend(days: int = 30, region: str = ""):
     if region:
         params.append(region)
 
+    # Average hourly snapshot counts per day (not sum, which would inflate by 24x).
+    # Inner query: total fleet size at each hourly snapshot.
+    # Outer query: average across all snapshots in the day.
     df = db.query(
         f"SELECT CAST(ts AS DATE) AS day, "
-        f"       SUM(laden_count) AS laden, "
-        f"       SUM(ballast_count) AS ballast, "
-        f"       SUM(unknown_count) AS unknown "
-        f"FROM fleet_density "
-        f"WHERE ts >= ? {region_clause}"
+        f"       ROUND(AVG(hourly_laden)) AS laden, "
+        f"       ROUND(AVG(hourly_ballast)) AS ballast, "
+        f"       ROUND(AVG(hourly_unknown)) AS unknown "
+        f"FROM ("
+        f"  SELECT ts, "
+        f"    SUM(laden_count) AS hourly_laden, "
+        f"    SUM(ballast_count) AS hourly_ballast, "
+        f"    SUM(unknown_count) AS hourly_unknown "
+        f"  FROM fleet_density "
+        f"  WHERE ts >= ? {region_clause}"
+        f"  GROUP BY ts"
+        f") "
         f"GROUP BY day ORDER BY day",
         params,
         db=db.analytics_db_path(),
