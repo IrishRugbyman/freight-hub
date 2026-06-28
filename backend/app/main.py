@@ -28,7 +28,7 @@ from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
-from . import db, equasis, feed as _feed, fleet as _fleet, runner_eta as _runner_eta
+from . import db, feed as _feed, fleet as _fleet, runner_eta as _runner_eta
 from .runner_dispersion import run_dispersion_default
 from .runner_routes import run_routes_default
 from .schemas import (
@@ -1490,61 +1490,48 @@ def analytics_reroutes(
 
 @app.get("/api/vessels/{imo}/equasis")
 def vessel_equasis(imo: int):
-    """Equasis registry data for a vessel by IMO number.
+    """Equasis registry data for a vessel by IMO, served from vessel_registry.duckdb.
 
-    Reads vessel_registry.duckdb first (populated by the crawl job). Falls back to
-    a live Equasis scrape when the registry has no entry or the previous fetch failed.
-    The API never writes to the registry; the crawler is the sole writer.
+    Read-only: the crawler (registry/crawl.py via freight-registry.service) is the
+    sole writer. No live Equasis requests are made here - those consume the monthly
+    consultation quota and must only happen in the scheduled crawler.
     """
     from fastapi import HTTPException
 
-    # Try registry first
     reg_df = db.query(
         "SELECT * FROM vessel_registry WHERE imo = ? AND fetch_ok = true",
         [imo],
         db=db.registry_db_path(),
     )
-    if not reg_df.empty:
-        row = reg_df.iloc[0]
-        # Build response dict matching the equasis scraper output shape.
-        # gross_tonnage / dwt / year_built stored as INT in the registry; return as str
-        # so the frontend EquasisData interface (string fields) needs no changes.
-        result: dict = {"imo": imo}
-        for col in reg_df.columns:
-            if col in ("imo", "fetched_ts", "fetch_ok"):
-                continue
-            val = row[col]
-            if val is None:
-                continue
-            import pandas as _pd
-            if _pd.isna(val):
-                continue
-            if col in ("gross_tonnage", "dwt", "year_built"):
-                result[col] = str(int(val))
-            elif col == "risk_indicators":
-                import json as _json_mod
-                try:
-                    result[col] = _json_mod.loads(val) if isinstance(val, str) else val
-                except (ValueError, TypeError):
-                    result[col] = []
-            elif col == "risk_score":
-                result[col] = int(val)
-            elif col == "ofac_sanctioned":
-                result[col] = bool(val)
-            else:
-                result[col] = val
-        return result
+    if reg_df.empty:
+        raise HTTPException(status_code=404, detail="Not in registry yet")
 
-    # Fall back to live scrape (result cached in-process 12h)
-    try:
-        data = equasis.get_ship_info(imo)
-    except equasis.EquasisAccountLocked:
-        # Account temporarily locked (quota). Don't 500; signal unavailable so the
-        # frontend hides the registry panel rather than erroring.
-        raise HTTPException(status_code=503, detail="Equasis temporarily unavailable") from None
-    if data is None:
-        raise HTTPException(status_code=503, detail="Equasis unavailable")
-    return data
+    row = reg_df.iloc[0]
+    result: dict = {"imo": imo}
+    for col in reg_df.columns:
+        if col in ("imo", "fetched_ts", "fetch_ok"):
+            continue
+        val = row[col]
+        if val is None:
+            continue
+        import pandas as _pd
+        if _pd.isna(val):
+            continue
+        if col in ("gross_tonnage", "dwt", "year_built"):
+            result[col] = str(int(val))
+        elif col == "risk_indicators":
+            import json as _json_mod
+            try:
+                result[col] = _json_mod.loads(val) if isinstance(val, str) else val
+            except (ValueError, TypeError):
+                result[col] = []
+        elif col == "risk_score":
+            result[col] = int(val)
+        elif col == "ofac_sanctioned":
+            result[col] = bool(val)
+        else:
+            result[col] = val
+    return result
 
 
 @app.get("/api/chokepoints", response_model=list[ChokepointCount])

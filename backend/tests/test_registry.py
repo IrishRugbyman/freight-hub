@@ -97,8 +97,8 @@ def test_upsert_idempotent(tmp_path):
         "gross_tonnage": "50000", "dwt": "90000", "year_built": "2005",
         "owner": "TEST OWNER",
     }
-    _upsert(conn, 1234567, data, now)
-    _upsert(conn, 1234567, data, now)  # second call must not error
+    _upsert(conn, 1234567, None, data, now)
+    _upsert(conn, 1234567, None, data, now)  # second call must not error
 
     count = conn.execute("SELECT COUNT(*) FROM vessel_registry WHERE imo = 1234567").fetchone()[0]
     assert count == 1
@@ -111,7 +111,7 @@ def test_int_cast_stored_correctly(tmp_path):
     conn = duckdb.connect(str(tmp_path / "reg.duckdb"))
     conn.execute(_SCHEMA)
     now = datetime.now(UTC).replace(tzinfo=None)
-    _upsert(conn, 9999999, {"gross_tonnage": "171542", "dwt": "174239", "year_built": "2006"}, now)
+    _upsert(conn, 9999999, None, {"gross_tonnage": "171542", "dwt": "174239", "year_built": "2006"}, now)
     row = conn.execute(
         "SELECT gross_tonnage, dwt, year_built FROM vessel_registry WHERE imo = 9999999"
     ).fetchone()
@@ -206,25 +206,16 @@ def test_equasis_registry_hit(tmp_path, monkeypatch):
     assert body["paris_mou"] == "White"
 
 
-def test_equasis_registry_miss_fallback(tmp_path, monkeypatch):
-    """On registry miss, fall back to live scrape."""
+def test_equasis_registry_miss_returns_404(tmp_path, monkeypatch):
+    """On registry miss, return 404 - no live scrape."""
     client = _make_registry_client(tmp_path, monkeypatch, [])  # empty registry
 
-    called = []
-    def fake_scrape(imo):
-        called.append(imo)
-        return {"imo": imo, "ship_name": "FAKE VESSEL"}
-
-    monkeypatch.setattr("app.equasis.get_ship_info", fake_scrape)
-
     r = client.get("/api/vessels/1234567/equasis")
-    assert r.status_code == 200
-    assert r.json()["ship_name"] == "FAKE VESSEL"
-    assert 1234567 in called
+    assert r.status_code == 404
 
 
-def test_equasis_fetch_ok_false_falls_back(tmp_path, monkeypatch):
-    """A row with fetch_ok=false is treated as a miss - live scrape is invoked."""
+def test_equasis_fetch_ok_false_returns_404(tmp_path, monkeypatch):
+    """A row with fetch_ok=false is treated as a miss - returns 404, no live scrape."""
     row = (
         9999999, None, None, None, None,
         None, None, None, None, None,
@@ -234,25 +225,16 @@ def test_equasis_fetch_ok_false_falls_back(tmp_path, monkeypatch):
     )
     client = _make_registry_client(tmp_path, monkeypatch, [row])
 
-    called = []
-    def fake_scrape(imo):
-        called.append(imo)
-        return {"imo": imo, "ship_name": "RECOVERED"}
-
-    monkeypatch.setattr("app.equasis.get_ship_info", fake_scrape)
-
     r = client.get("/api/vessels/9999999/equasis")
-    assert r.status_code == 200
-    assert 9999999 in called
+    assert r.status_code == 404
 
 
-def test_equasis_unavailable_503(tmp_path, monkeypatch):
-    """503 when both registry and live scrape fail."""
+def test_equasis_unknown_imo_returns_404(tmp_path, monkeypatch):
+    """Unknown IMO returns 404, not 503 - the endpoint never calls Equasis live."""
     client = _make_registry_client(tmp_path, monkeypatch, [])
-    monkeypatch.setattr("app.equasis.get_ship_info", lambda imo: None)
 
     r = client.get("/api/vessels/9999998/equasis")
-    assert r.status_code == 503
+    assert r.status_code == 404
 
 
 # ---------------------------------------------------------------------------
@@ -279,18 +261,12 @@ def test_is_locked_false_on_ship_page():
     assert _looks_like_ship_page(ship_html) is True
 
 
-def test_equasis_endpoint_locked_returns_503(tmp_path, monkeypatch):
-    """A locked account raises EquasisAccountLocked; the endpoint must 503, not 500."""
-    from app.equasis import EquasisAccountLocked
-
+def test_equasis_endpoint_no_live_scrape(tmp_path, monkeypatch):
+    """Endpoint never calls Equasis live; a missing vessel returns 404 regardless."""
     client = _make_registry_client(tmp_path, monkeypatch, [])
 
-    def locked(imo):
-        raise EquasisAccountLocked()
-
-    monkeypatch.setattr("app.equasis.get_ship_info", locked)
     r = client.get("/api/vessels/9555555/equasis")
-    assert r.status_code == 503
+    assert r.status_code == 404
 
 
 def test_crawl_aborts_on_lock(tmp_path, monkeypatch):
