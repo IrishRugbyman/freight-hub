@@ -53,6 +53,7 @@ _REFRESH_STALE_DAYS = 30
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS vessel_registry (
     imo BIGINT PRIMARY KEY,
+    mmsi BIGINT,
     ship_name VARCHAR, flag VARCHAR, flag_code VARCHAR, call_sign VARCHAR,
     gross_tonnage INTEGER, dwt INTEGER,
     ship_type VARCHAR, year_built INTEGER, ship_status VARCHAR,
@@ -69,6 +70,7 @@ _MIGRATIONS = [
     "ALTER TABLE vessel_registry ADD COLUMN IF NOT EXISTS risk_score INTEGER",
     "ALTER TABLE vessel_registry ADD COLUMN IF NOT EXISTS risk_indicators VARCHAR",
     "ALTER TABLE vessel_registry ADD COLUMN IF NOT EXISTS ofac_sanctioned BOOLEAN",
+    "ALTER TABLE vessel_registry ADD COLUMN IF NOT EXISTS mmsi BIGINT",
 ]
 
 
@@ -135,7 +137,7 @@ def run(
     # Discover candidate IMOs from the live fleet (read-only, with lock-retry via db.query)
     # IMO numbers are 7 digits: 1000000-9999999
     live_df = _db_query(
-        "SELECT DISTINCT CAST(imo AS BIGINT) AS imo "
+        "SELECT CAST(mmsi AS BIGINT) AS mmsi, CAST(imo AS BIGINT) AS imo "
         "FROM live_positions WHERE imo >= 1000000 AND imo <= 9999999",
         db=ais_path,
         retries=200,  # AIS collector holds lock <1s every ~90s; 200 retries = 60s budget
@@ -145,7 +147,10 @@ def run(
         logger.info("No IMOs found in live_positions (DB locked or no data)")
         return
 
-    live_imos: set[int] = set(live_df["imo"].astype(int).tolist())
+    imo_to_mmsi: dict[int, int] = dict(
+        zip(live_df["imo"].astype(int), live_df["mmsi"].astype(int))
+    )
+    live_imos: set[int] = set(imo_to_mmsi.keys())
     logger.info("Found %d distinct IMOs in live fleet", len(live_imos))
 
     # Open (or create) the registry DB - we are the sole writer
@@ -181,18 +186,10 @@ def run(
         single_ship_owners = set()
 
     # Load 90-day AIS event counts per IMO from the analytics DB (graceful fallback)
-    # Events are keyed by MMSI; we join via the MMSI->IMO map from live_positions.
+    # Events are keyed by MMSI; reuse the imo_to_mmsi map already built above.
     event_counts_by_imo: dict[int, dict[str, int]] = {}
     try:
-        mmsi_imo_df = _db_query(
-            "SELECT CAST(mmsi AS BIGINT) AS mmsi, CAST(imo AS BIGINT) AS imo "
-            "FROM live_positions WHERE imo >= 1000000 AND imo <= 9999999",
-            db=ais_path,
-        )
-        mmsi_to_imo: dict[int, int] = (
-            dict(zip(mmsi_imo_df["mmsi"].astype(int), mmsi_imo_df["imo"].astype(int)))
-            if not mmsi_imo_df.empty else {}
-        )
+        mmsi_to_imo: dict[int, int] = {v: k for k, v in imo_to_mmsi.items()}
         cutoff_90 = now - timedelta(days=90)
         events_df = _db_query(
             "SELECT mmsi, type, COUNT(*) AS n FROM ais_events "
@@ -263,7 +260,8 @@ def run(
                 single_ship_owner=bool(data.get("owner") and data["owner"] in single_ship_owners),
                 ofac_sanctioned=is_sanctioned,
             )
-            _upsert(reg_conn, imo, data, now, score, json.dumps(indicators), is_sanctioned)
+            mmsi = imo_to_mmsi.get(imo)
+            _upsert(reg_conn, imo, mmsi, data, now, score, json.dumps(indicators), is_sanctioned)
             if imo in existing_imos:
                 n_refreshed += 1
             else:
@@ -288,6 +286,7 @@ def run(
 def _upsert(
     conn: duckdb.DuckDBPyConnection,
     imo: int,
+    mmsi: int | None,
     data: dict,
     now: datetime,
     risk_score_val: int | None = None,
@@ -297,15 +296,16 @@ def _upsert(
     conn.execute(
         """
         INSERT OR REPLACE INTO vessel_registry (
-            imo, ship_name, flag, flag_code, call_sign,
+            imo, mmsi, ship_name, flag, flag_code, call_sign,
             gross_tonnage, dwt, ship_type, year_built, ship_status,
             owner, ism_manager, ship_manager, class_society, pi_club,
             detention_rate_pct, paris_mou, tokyo_mou, uscg_targeting,
             fetched_ts, fetch_ok, risk_score, risk_indicators, ofac_sanctioned
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             imo,
+            mmsi,
             data.get("ship_name"),
             data.get("flag"),
             data.get("flag_code"),
