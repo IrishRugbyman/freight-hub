@@ -2448,6 +2448,7 @@ def analytics_fleet_at_time(ts: str = "", region: str = ""):
         f"SELECT snapshot_ts, mmsi, kind, segment, sog, nav_status, draught, destination "
         f"FROM ais_snapshots "
         f"WHERE ABS(EPOCH(snapshot_ts) - EPOCH(?)) <= 1800 "
+        f"AND segment != 'Small' "
         f"{region_clause}"
         f"ORDER BY ABS(EPOCH(snapshot_ts) - EPOCH(?)) LIMIT 10000",
         params,
@@ -2536,7 +2537,7 @@ def analytics_fleet_trend(days: int = 30, region: str = ""):
         f"    SUM(ballast_count) AS hourly_ballast, "
         f"    SUM(unknown_count) AS hourly_unknown "
         f"  FROM fleet_density "
-        f"  WHERE ts >= ? {region_clause}"
+        f"  WHERE ts >= ? {region_clause}AND segment != 'Small' "
         f"  GROUP BY ts"
         f") "
         f"GROUP BY day ORDER BY day",
@@ -2722,7 +2723,7 @@ def analytics_laden(kind: str = "tanker"):
     df = db.query(
         "SELECT segment, kind, laden_count, ballast_count, unknown_count "
         "FROM fleet_density "
-        "WHERE ts = (SELECT max(ts) FROM fleet_density) AND kind = ?",
+        "WHERE ts = (SELECT max(ts) FROM fleet_density) AND kind = ? AND segment != 'Small'",
         [kind],
         db=db.analytics_db_path(),
     )
