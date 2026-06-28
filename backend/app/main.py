@@ -2462,10 +2462,25 @@ def analytics_fleet_at_time(ts: str = "", region: str = ""):
     actual_ts = pd.to_datetime(df["snapshot_ts"]).mode().iloc[0].to_pydatetime()
     df = df[pd.to_datetime(df["snapshot_ts"]) == actual_ts]
 
+    from analytics.zones import DESIGN_DRAUGHT as _DD
+
+    def _laden_ballast(grp_df: pd.DataFrame, seg: str) -> tuple[int, int]:
+        """Segment-specific draught threshold: laden >= 80%, ballast <= 65% of design."""
+        if "draught" not in grp_df:
+            return 0, 0
+        d = grp_df["draught"].to_numpy(dtype=float)
+        design = float(_DD.get(str(seg), 0) or 0)
+        if design <= 0:
+            laden = int((d > 5).sum())
+            ballast = int((d <= 5).sum())
+        else:
+            laden = int((d >= 0.80 * design).sum())
+            ballast = int((d <= 0.65 * design).sum())
+        return laden, ballast
+
     rows: list[FleetHistorySegmentRow] = []
     for (kind_val, seg_val), grp in df.groupby(["kind", "segment"]):
-        laden = int((grp["draught"] > 5).sum()) if "draught" in grp else 0
-        ballast = int((grp["draught"] <= 5).sum()) if "draught" in grp else 0
+        laden, ballast = _laden_ballast(grp, str(seg_val))
         underway = int((grp["sog"].fillna(0) > 2).sum())
         avg_sog = round(float(grp["sog"].dropna().mean()), 1) if len(grp["sog"].dropna()) > 0 else None
         rows.append(
