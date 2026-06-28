@@ -1,5 +1,7 @@
 # python
-backend/.venv/
+# no trailing slash: .venv is a symlink to the data-volume venv, not a real dir,
+# and a trailing-slash pattern would not match a symlink.
+backend/.venv
 **/__pycache__/
 *.pyc
 backend/*.egg-info/

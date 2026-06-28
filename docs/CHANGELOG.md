@@ -1,5 +1,27 @@
 # Freight Hub Changelog
 
+## 2026-06-28 (session 7) - Freeze the ETA baseline reference; stop the hourly git-tree churn
+
+**Fix: the hourly analytics job no longer mutates git-tracked baseline CSVs.**
+`eta_samples.score_baselines` was calling `export_baseline` on every run, so the
+hourly `build.py` rewrote `backend/analytics/baselines/{naive,naive+route,physics_v1}_baseline.csv`
+each cycle. The working tree was therefore never clean (three permanently-modified
+files), and a "baseline" that moves every hour is not a baseline. The metrics already
+persist to `eta_model_metrics`, which is what the live scoreboard (`/api/analytics/eta-accuracy`)
+reads, so the CSVs were redundant churn.
+
+- `score_baselines(..., export_csv=False)` now gates the CSV write; the hourly path
+  (via `run_in_conn`) leaves the reference snapshots frozen and only writes DB metrics.
+- The deliberate standalone path (`python -m analytics.eta_samples` -> `run()`) passes
+  `export_csv=True` to intentionally refresh the committed reference snapshot.
+- Test: `test_score_baselines_csv_export_gated` asserts metrics always persist to the
+  DB and the CSVs are rewritten iff `export_csv=True`. Total tests: 465 -> 466.
+
+**Fix: `.gitignore` now ignores the `backend/.venv` symlink.** The pattern had a
+trailing slash (`backend/.venv/`), which matches only a real directory; the venv is a
+symlink to the data-volume venv, so it leaked into `git status` as untracked. Dropped
+the slash so the symlink is ignored. Working tree is now clean.
+
 ## 2026-06-28 (session 6d) - Comprehensive Small-segment sweep completion + test coverage
 
 **Fix: Small filter applied to all remaining endpoints with live/analytics data:**

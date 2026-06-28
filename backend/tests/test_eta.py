@@ -657,3 +657,44 @@ def test_score_vectorized_by_target_written_to_db(ais_db, analytics_conn):
         "SELECT count(*) FROM eta_metrics_by_target WHERE model = 'naive'"
     ).fetchone()[0]
     assert n == len(per_tgt) > 0
+
+
+def test_score_baselines_csv_export_gated(monkeypatch):
+    """Committed baseline CSVs are a frozen reference, not hourly-moving output.
+
+    The hourly analytics job calls ``score_baselines(export_csv=False)`` and must
+    persist metrics to ``eta_model_metrics`` (the live scoreboard) without rewriting
+    the git-tracked ``baselines/*.csv`` files. Only a deliberate standalone run
+    (``export_csv=True``) refreshes that reference snapshot.
+    """
+    import pandas as pd
+
+    # Non-empty sentinel; the scoring pipeline is stubbed so its content is irrelevant.
+    samples = pd.DataFrame({"x": [1, 2, 3]})
+    monkeypatch.setattr(bt, "voyage_split", lambda s, test_frac, seed: (s, s))
+
+    class _DummyInterval:
+        fitted = True
+
+        def fit(self, _):
+            return self
+
+    monkeypatch.setattr(es, "IntervalModel", _DummyInterval)
+
+    metrics = pd.DataFrame({"model": ["naive"], "n": [1]})
+    monkeypatch.setattr(bt, "score_vectorized", lambda *a, **k: (metrics, [{"t": 1}]))
+
+    written, exported = [], []
+    monkeypatch.setattr(bt, "write_metrics", lambda conn, m: written.append("agg"))
+    monkeypatch.setattr(bt, "write_metrics_by_target", lambda conn, m: written.append("tgt"))
+    monkeypatch.setattr(bt, "export_baseline", lambda m, name: exported.append(name))
+
+    # Hourly path: metrics persisted, no CSV churn.
+    es.score_baselines(None, samples, export_csv=False)
+    assert written, "metrics must always be persisted to the DB"
+    assert exported == [], "hourly job must not rewrite committed baseline CSVs"
+
+    # Deliberate standalone path: refreshes all three frozen reference snapshots.
+    exported.clear()
+    es.score_baselines(None, samples, export_csv=True)
+    assert exported == ["naive", "naive+route", "physics_v1"]

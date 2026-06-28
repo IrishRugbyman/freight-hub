@@ -276,14 +276,24 @@ _TEST_FRAC = 0.5
 _SPLIT_SEED = 0
 
 
-def score_baselines(conn: duckdb.DuckDBPyConnection, samples: pd.DataFrame) -> pd.DataFrame:
+def score_baselines(
+    conn: duckdb.DuckDBPyConnection,
+    samples: pd.DataFrame,
+    export_csv: bool = False,
+) -> pd.DataFrame:
     """Score naive, naive+route and physics_v1 on one held-out test split.
 
     The physics interval is fit on the train half and evaluated on the test half;
     the two kinematic baselines have nothing to fit but are scored on the same test
     half so every model's metrics share an identical sample set. Persists all three
-    metric sets and exports their committed baseline CSVs. Returns the combined
-    table.
+    metric sets to ``eta_model_metrics`` (the live scoreboard reads from there).
+    Returns the combined table.
+
+    ``export_csv`` controls whether the committed ``baselines/*.csv`` reference
+    artifacts are rewritten. The hourly analytics job leaves them frozen
+    (``export_csv=False``) so the batch process never mutates git-tracked files;
+    only a deliberate standalone run (``python -m analytics.eta_samples``) refreshes
+    the reference snapshot. A baseline that moved every hour would not be a baseline.
     """
     if samples.empty:
         return pd.DataFrame()
@@ -307,7 +317,8 @@ def score_baselines(conn: duckdb.DuckDBPyConnection, samples: pd.DataFrame) -> p
     for metrics, name in ((naive, "naive"), (route, "naive+route"), (physics, "physics_v1")):
         if not metrics.empty:
             bt.write_metrics(conn, metrics)
-            bt.export_baseline(metrics, name)
+            if export_csv:
+                bt.export_baseline(metrics, name)
 
     for tgt_metrics in (by_tgt_naive, by_tgt_physics):
         if tgt_metrics:
@@ -340,27 +351,35 @@ def _log_long_haul_improvement(conn: duckdb.DuckDBPyConnection, samples: pd.Data
         )
 
 
-def run_in_conn(conn: duckdb.DuckDBPyConnection, ais_query) -> pd.DataFrame:
+def run_in_conn(
+    conn: duckdb.DuckDBPyConnection, ais_query, export_csv: bool = False
+) -> pd.DataFrame:
     """Build + enrich + persist eta_samples and re-score baselines in one conn.
 
     Called by build.py against the scratch DB (shares the atomic swap) right after
-    the Phase-A label mining, so samples reflect the freshly mined arrivals.
+    the Phase-A label mining, so samples reflect the freshly mined arrivals. The
+    hourly build leaves ``export_csv=False`` so it never rewrites the committed
+    ``baselines/*.csv`` reference snapshots; the standalone entry passes ``True``.
     """
     conn.execute(ETA_SAMPLES_SCHEMA)
     samples = bt.build_samples(conn, ais_query)
     log.info("built %d approach samples", len(samples))
     samples = enrich_routes(conn, samples)
     persist_samples(conn, samples)
-    metrics = score_baselines(conn, samples)
+    metrics = score_baselines(conn, samples, export_csv=export_csv)
     _log_long_haul_improvement(conn, samples)
     return metrics
 
 
 def run() -> pd.DataFrame:
-    """Standalone entry: backfill eta_samples + baselines into the live DB."""
+    """Standalone entry: backfill eta_samples + baselines into the live DB.
+
+    This is the deliberate path that refreshes the committed baseline CSV
+    reference snapshots (``export_csv=True``), unlike the hourly batch job.
+    """
     conn = duckdb.connect(str(ANALYTICS_DB))
     try:
-        metrics = run_in_conn(conn, _default_ais_query)
+        metrics = run_in_conn(conn, _default_ais_query, export_csv=True)
     finally:
         conn.close()
     _print_compare(metrics)
