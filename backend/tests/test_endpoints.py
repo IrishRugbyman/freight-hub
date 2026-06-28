@@ -5047,3 +5047,24 @@ def test_flag_mismatches(tmp_path, monkeypatch):
     assert r["imo"] == 1000001
     assert r["mmsi_flag_code"] == "LR"
     assert r["registry_flag_code"] == "PAN"
+
+
+def test_eta_trend_endpoint_empty_when_no_metrics(analytics_client):
+    r = analytics_client.get("/api/analytics/eta-trend")
+    assert r.status_code == 200
+    d = r.json()
+    assert "points" in d
+    assert isinstance(d["points"], list)
+    # No eta_model_metrics in the seed -> empty list, not a 500
+    assert d["points"] == []
+
+
+def test_eta_by_target_endpoint_empty_when_no_metrics(analytics_client):
+    r = analytics_client.get("/api/analytics/eta-by-target")
+    assert r.status_code == 200
+    d = r.json()
+    assert "run_ts" in d
+    assert "rows" in d
+    assert isinstance(d["rows"], list)
+    # No eta_metrics_by_target in the seed -> empty list, not a 500
+    assert d["rows"] == []
