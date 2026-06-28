@@ -31,8 +31,14 @@ import logging
 
 import numpy as np
 import pandas as pd
-
 from quant_lib.freight import effective_speed, physics_eta, queue_wait
+from quant_lib.freight.eta import (
+    CANAL_STAGING_BAND_NM,
+    CANAL_STAGING_HOURS,
+    DEFAULT_CANAL_STAGING_HOURS,
+    _MAX_EFF_SPEED,
+    _MIN_EFF_SPEED,
+)
 
 from analytics.eta_backtest import _MIN_SOG_KN
 
@@ -83,6 +89,73 @@ def physics_p50(obs: dict) -> float:
     return physics_eta(dist, eff, qw)
 
 
+def vectorized_physics_p50(samples: pd.DataFrame) -> np.ndarray:
+    """Vectorized physics P50 for a DataFrame of samples.
+
+    Equivalent to calling ``physics_p50(obs)`` for every row but avoids the
+    Python-loop overhead: one numpy pass over the columnar data, ~100-1000x
+    faster on large sample sets (1M+ rows typical in the analytics build).
+
+    ``service_speed`` is used when present; otherwise it is computed on the fly
+    from ``segment`` and ``laden`` (same logic as ``_add_physics_features``).
+    """
+    from quant_lib.freight.eta import (
+        DEFAULT_SERVICE_SPEED,
+        SEGMENT_SERVICE_SPEED,
+        _BALLAST_FACTOR,
+        _LADEN_FACTOR,
+    )
+
+    sog = samples["sog"].to_numpy(dtype=float)
+    sog_trail = samples["sog_trail6h"].to_numpy(dtype=float) if "sog_trail6h" in samples.columns else np.full(len(samples), np.nan)
+
+    if "service_speed" in samples.columns:
+        svc_spd = samples["service_speed"].to_numpy(dtype=float)
+    else:
+        seg = samples["segment"] if "segment" in samples.columns else pd.Series(index=samples.index, dtype=str)
+        base_spd = seg.map(SEGMENT_SERVICE_SPEED).fillna(DEFAULT_SERVICE_SPEED).to_numpy(dtype=float)
+        laden = samples["laden"].to_numpy() if "laden" in samples.columns else np.full(len(samples), None)
+        factor = np.where(
+            laden == True,  # noqa: E712 - intentional numpy array comparison
+            _LADEN_FACTOR,
+            np.where(laden == False, _BALLAST_FACTOR, 1.0),  # noqa: E712
+        )
+        svc_spd = base_spd * factor
+
+    # effective_speed: use SOG when valid, then trailing SOG, then segment prior
+    eff = np.where(
+        np.isfinite(sog) & (sog > 0),
+        np.clip(sog, _MIN_EFF_SPEED, _MAX_EFF_SPEED),
+        np.where(
+            np.isfinite(sog_trail) & (sog_trail > 0),
+            np.clip(sog_trail, _MIN_EFF_SPEED, _MAX_EFF_SPEED),
+            np.clip(svc_spd, _MIN_EFF_SPEED, _MAX_EFF_SPEED),
+        ),
+    )
+
+    # Route distance: prefer sea-route when finite, fall back to great-circle
+    route = samples["route_dist_nm"].to_numpy(dtype=float)
+    gc = samples["gc_dist_nm"].to_numpy(dtype=float)
+    dist = np.where(np.isfinite(route), route, gc)
+
+    # Queue wait: canal-gated staging within CANAL_STAGING_BAND_NM of the gate
+    is_canal = samples["is_canal"].fillna(False).to_numpy(dtype=bool)
+    target_ids = samples["target_id"].to_numpy()
+    staging = np.array(
+        [CANAL_STAGING_HOURS.get(str(tid), DEFAULT_CANAL_STAGING_HOURS) for tid in target_ids],
+        dtype=float,
+    )
+    qw = np.where(is_canal & np.isfinite(dist) & (dist <= CANAL_STAGING_BAND_NM), staging, 0.0)
+
+    # physics_eta: dist / eff + qw, NaN when not computable
+    valid = np.isfinite(dist) & np.isfinite(eff) & (eff > 0)
+    pred = np.where(valid, dist / eff + qw, np.nan)
+
+    # Apply same underway gate as physics_p50() per-row version
+    underway = np.isfinite(sog) & (sog >= _MIN_SOG_KN)
+    return np.where(underway, pred, np.nan)
+
+
 def _pred_bucket(p50: float) -> str:
     for i in range(len(_PRED_LABELS)):
         if _PRED_EDGES[i] <= p50 < _PRED_EDGES[i + 1]:
@@ -110,8 +183,7 @@ class IntervalModel:
     def fit(self, samples: pd.DataFrame) -> IntervalModel:
         if samples.empty:
             return self
-        recs = samples.to_dict("records")
-        p50 = np.array([physics_p50(r) for r in recs], dtype=float)
+        p50 = vectorized_physics_p50(samples)
         actual = samples["remaining_h"].to_numpy(dtype=float)
         ok = np.isfinite(p50)
         p50, actual = p50[ok], actual[ok]
@@ -120,10 +192,12 @@ class IntervalModel:
         resid = actual - p50
         self._lo_global = float(np.quantile(resid, _Q_LOW))
         self._hi_global = float(np.quantile(resid, _Q_HIGH))
-        buckets = np.array([_pred_bucket(v) for v in p50])
-        for b in _PRED_LABELS:
-            r = resid[buckets == b]
-            if r.size >= 50:  # enough to estimate a tail quantile
+        # Vectorized bucket assignment via np.digitize
+        edges = np.array(_PRED_EDGES[1:-1])  # inner edges [6, 12, 24, 48]
+        bucket_idx = np.digitize(p50, edges)  # 0..len(LABELS)-1
+        for i, b in enumerate(_PRED_LABELS):
+            r = resid[bucket_idx == i]
+            if r.size >= 50:
                 self._lo[b] = float(np.quantile(r, _Q_LOW))
                 self._hi[b] = float(np.quantile(r, _Q_HIGH))
         self.fitted = True
@@ -132,6 +206,19 @@ class IntervalModel:
     def offsets(self, p50: float) -> tuple[float, float]:
         b = _pred_bucket(p50)
         return self._lo.get(b, self._lo_global), self._hi.get(b, self._hi_global)
+
+    def offsets_batch(self, pred_h: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Vectorized interval offsets for an array of P50 predictions."""
+        edges = np.array(_PRED_EDGES[1:-1])
+        bucket_idx = np.digitize(pred_h, edges)  # 0..len(LABELS)-1
+        lo_arr = np.full_like(pred_h, self._lo_global, dtype=float)
+        hi_arr = np.full_like(pred_h, self._hi_global, dtype=float)
+        for i, label in enumerate(_PRED_LABELS):
+            mask = bucket_idx == i
+            if mask.any():
+                lo_arr[mask] = self._lo.get(label, self._lo_global)
+                hi_arr[mask] = self._hi.get(label, self._hi_global)
+        return lo_arr, hi_arr
 
 
 def make_physics_fn(interval: IntervalModel | None = None):

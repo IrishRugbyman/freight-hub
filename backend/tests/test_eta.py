@@ -575,3 +575,85 @@ def test_metrics_written_to_db(ais_db, analytics_conn):
         "SELECT count(*) FROM eta_model_metrics WHERE model = 'naive'"
     ).fetchone()[0]
     assert n == len(metrics) > 0
+
+
+def test_score_vectorized_matches_row_loop(ais_db, analytics_conn):
+    """Vectorized scoring must agree with the original row-by-row ``score()``."""
+    from datetime import datetime
+
+    from analytics.eta_backtest import score, score_vectorized
+    from analytics.eta_samples import enrich_routes
+
+    q = _ais_query_for(ais_db)
+    analytics_conn.execute(
+        "INSERT OR REPLACE INTO eta_targets VALUES (?,?,?,?,?,?,?)",
+        [
+            _TARGET["target_id"],
+            _TARGET["target_type"],
+            _TARGET["name"],
+            _TARGET["lat"],
+            _TARGET["lon"],
+            _TARGET["reach_nm"],
+            _TARGET["is_canal"],
+        ],
+    )
+    el.mine_arrivals(analytics_conn, q, targets=[_TARGET])
+    raw = bt.build_samples(analytics_conn, q)
+    if raw.empty:
+        pytest.skip("no samples for fixture")
+    samples = enrich_routes(analytics_conn, raw)
+
+    run_ts = datetime(2026, 1, 1)
+    old = score(samples, bt.naive_eta_fn, model="naive", run_ts=run_ts)
+    agg, per_tgt = score_vectorized(samples, "naive", run_ts)
+
+    # Both should produce non-empty results with the same row count
+    assert not agg.empty
+    assert len(agg) == len(old), f"row count mismatch: {len(agg)} vs {len(old)}"
+
+    # Median absolute error should match closely (float ordering may differ by epsilon)
+    import numpy as np
+    for key in ["med_abs_err_h", "bias_h"]:
+        old_val = old[key].dropna().to_numpy()
+        new_val = agg[key].dropna().to_numpy()
+        if old_val.size and new_val.size:
+            assert np.allclose(old_val, new_val, atol=1e-6), f"{key} mismatch"
+
+    # Per-target list should be non-empty when samples exist
+    assert len(per_tgt) > 0
+
+
+def test_score_vectorized_by_target_written_to_db(ais_db, analytics_conn):
+    """score_vectorized per-target rows are persisted via write_metrics_by_target."""
+    from datetime import datetime
+
+    from analytics.eta_backtest import score_vectorized, write_metrics_by_target
+    from analytics.eta_samples import enrich_routes
+
+    q = _ais_query_for(ais_db)
+    analytics_conn.execute(
+        "INSERT OR REPLACE INTO eta_targets VALUES (?,?,?,?,?,?,?)",
+        [
+            _TARGET["target_id"],
+            _TARGET["target_type"],
+            _TARGET["name"],
+            _TARGET["lat"],
+            _TARGET["lon"],
+            _TARGET["reach_nm"],
+            _TARGET["is_canal"],
+        ],
+    )
+    el.mine_arrivals(analytics_conn, q, targets=[_TARGET])
+    raw = bt.build_samples(analytics_conn, q)
+    if raw.empty:
+        pytest.skip("no samples for fixture")
+    samples = enrich_routes(analytics_conn, raw)
+
+    run_ts = datetime(2026, 1, 1)
+    _, per_tgt = score_vectorized(samples, "naive", run_ts)
+    assert per_tgt, "expected per-target rows from fixture"
+    write_metrics_by_target(analytics_conn, per_tgt)
+    n = analytics_conn.execute(
+        "SELECT count(*) FROM eta_metrics_by_target WHERE model = 'naive'"
+    ).fetchone()[0]
+    assert n == len(per_tgt) > 0

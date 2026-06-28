@@ -40,6 +40,8 @@ from .schemas import (
     ChokepointCount,
     EtaAccuracyResponse,
     EtaAccuracyRow,
+    EtaByTargetResponse,
+    EtaByTargetRow,
     EtaDriftAlert,
     EtaPrediction,
     EtaResponse,
@@ -6408,6 +6410,82 @@ def _eta_drift_alerts() -> list["EtaDriftAlert"]:
             )
         )
     return out
+
+
+@app.get("/api/analytics/eta-by-target", response_model=EtaByTargetResponse, tags=["analytics"])
+def analytics_eta_by_target():
+    """Per-target physics_v1 accuracy vs naive baseline.
+
+    Reads ``eta_metrics_by_target`` (populated by the hourly analytics build once
+    at least one scored run has landed). Returns physics_v1 rows enriched with the
+    naive baseline MAE for the same target so the frontend can render the
+    improvement delta. Rows sorted best -> worst by physics median absolute error.
+    """
+    try:
+        df = db.query(
+            "SELECT model, target_id, n, med_abs_err_h, bias_h, p90_abs_err_h, "
+            "       mape, interval_coverage, run_ts "
+            "FROM eta_metrics_by_target "
+            "WHERE run_ts = (SELECT max(run_ts) FROM eta_metrics_by_target) "
+            "ORDER BY model, target_id",
+            db=db.analytics_db_path(),
+        )
+    except Exception:
+        return EtaByTargetResponse(run_ts=None, rows=[])
+    if df.empty:
+        return EtaByTargetResponse(run_ts=None, rows=[])
+
+    run_ts_val = df["run_ts"].iloc[0]
+    run_ts_str = run_ts_val.isoformat() if hasattr(run_ts_val, "isoformat") else str(run_ts_val)
+
+    try:
+        targets_df = db.query(
+            "SELECT target_id, name, target_type, is_canal FROM eta_targets",
+            db=db.analytics_db_path(),
+        )
+        target_meta = {
+            r["target_id"]: r for _, r in targets_df.iterrows()
+        }
+    except Exception:
+        target_meta = {}
+
+    naive_rows = df[df["model"] == "naive"].set_index("target_id")
+    physics_rows = df[df["model"] == "physics_v1"]
+
+    rows: list[EtaByTargetRow] = []
+    for _, r in physics_rows.iterrows():
+        tid = str(r["target_id"])
+        meta = target_meta.get(tid, {})
+        naive_mae: float | None = None
+        if tid in naive_rows.index:
+            v = naive_rows.at[tid, "med_abs_err_h"]
+            naive_mae = float(v) if v is not None and not (isinstance(v, float) and v != v) else None
+
+        def _float(x) -> float | None:
+            try:
+                v = float(x)
+                return None if v != v else v  # NaN -> None
+            except (TypeError, ValueError):
+                return None
+
+        rows.append(
+            EtaByTargetRow(
+                target_id=tid,
+                name=str(meta.get("name", tid.split(":")[-1])),
+                target_type=str(meta.get("target_type", "port")),
+                is_canal=bool(meta.get("is_canal", False)),
+                n=int(r["n"]),
+                med_abs_err_h=_float(r["med_abs_err_h"]),
+                bias_h=_float(r["bias_h"]),
+                p90_abs_err_h=_float(r["p90_abs_err_h"]),
+                mape=_float(r["mape"]),
+                interval_coverage=_float(r["interval_coverage"]),
+                naive_med_abs_err_h=naive_mae,
+            )
+        )
+
+    rows.sort(key=lambda x: x.med_abs_err_h if x.med_abs_err_h is not None else float("inf"))
+    return EtaByTargetResponse(run_ts=run_ts_str, rows=rows)
 
 
 @app.get("/api/analytics/arrivals", response_model=ArrivalsResponse, tags=["analytics"])

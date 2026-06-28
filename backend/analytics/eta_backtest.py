@@ -274,23 +274,16 @@ def _metric_rows(scored: pd.DataFrame, model: str, run_ts: datetime) -> list[dic
     return out
 
 
-def score(
-    samples: pd.DataFrame,
-    eta_fn,
-    model: str,
-    run_ts: datetime | None = None,
-    has_interval: bool = False,
+def _apply_eta_fn(
+    samples: pd.DataFrame, eta_fn, has_interval: bool
 ) -> pd.DataFrame:
-    """Score `eta_fn` over `samples`, return the metric table (not yet persisted).
+    """Run eta_fn over every row of samples; return the scored frame.
 
-    `eta_fn(obs) -> hours` (NaN to skip a sample, e.g. not underway). If
-    `has_interval`, the harness expects `eta_low_h`/`eta_high_h` from eta_fn via
-    a dict return; the naive baseline has no interval so coverage is NaN.
+    The returned frame has ``pred_h``, ``err_h``, and ``covered`` columns added.
+    Rows where the model returned NaN are dropped (e.g. vessel not underway).
+    This is extracted from ``score()`` so both aggregate and per-target metrics
+    can share one ETA-function pass over the full sample set.
     """
-    run_ts = run_ts or datetime.now(UTC).replace(tzinfo=None, microsecond=0)
-    if samples.empty:
-        return pd.DataFrame()
-
     preds, lows, highs = [], [], []
     for obs in samples.to_dict("records"):
         res = eta_fn(obs)
@@ -309,7 +302,7 @@ def score(
     scored["_hi"] = highs
     scored = scored[np.isfinite(scored["pred_h"])].copy()
     if scored.empty:
-        return pd.DataFrame()
+        return scored
     scored["err_h"] = scored["pred_h"] - scored["remaining_h"]
     if has_interval:
         scored["covered"] = (
@@ -317,8 +310,181 @@ def score(
         ).astype(float)
     else:
         scored["covered"] = np.nan
+    return scored
 
+
+def score(
+    samples: pd.DataFrame,
+    eta_fn,
+    model: str,
+    run_ts: datetime | None = None,
+    has_interval: bool = False,
+) -> pd.DataFrame:
+    """Score `eta_fn` over `samples`, return the metric table (not yet persisted).
+
+    `eta_fn(obs) -> hours` (NaN to skip a sample, e.g. not underway). If
+    `has_interval`, the harness expects `eta_low_h`/`eta_high_h` from eta_fn via
+    a dict return; the naive baseline has no interval so coverage is NaN.
+    """
+    run_ts = run_ts or datetime.now(UTC).replace(tzinfo=None, microsecond=0)
+    if samples.empty:
+        return pd.DataFrame()
+    scored = _apply_eta_fn(samples, eta_fn, has_interval)
+    if scored.empty:
+        return pd.DataFrame()
     return pd.DataFrame(_metric_rows(scored, model, run_ts))
+
+
+def _metric_rows_by_target(
+    scored: pd.DataFrame, model: str, run_ts: datetime
+) -> list[dict]:
+    """Compute per-target_id accuracy metrics from a pre-scored frame."""
+    out: list[dict] = []
+    if scored.empty or "target_id" not in scored.columns:
+        return out
+    for target_id, g in scored.groupby("target_id"):
+        err = g["err_h"].to_numpy()
+        abs_err = np.abs(err)
+        actual = g["remaining_h"].to_numpy()
+        mape = (
+            float(np.median(abs_err[actual > 0] / actual[actual > 0]))
+            if (actual > 0).any()
+            else float("nan")
+        )
+        cov = g["covered"].dropna()
+        out.append(
+            {
+                "run_ts": run_ts,
+                "model": model,
+                "target_id": str(target_id),
+                "n": int(len(g)),
+                "med_abs_err_h": float(np.median(abs_err)),
+                "bias_h": float(np.median(err)),
+                "mape": mape,
+                "p90_abs_err_h": float(np.percentile(abs_err, 90)),
+                "interval_coverage": float(cov.mean()) if not cov.empty else float("nan"),
+            }
+        )
+    return out
+
+
+_TARGET_METRICS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS eta_metrics_by_target (
+    run_ts            TIMESTAMP,
+    model             VARCHAR,
+    target_id         VARCHAR,
+    n                 INTEGER,
+    med_abs_err_h     DOUBLE,
+    bias_h            DOUBLE,
+    mape              DOUBLE,
+    p90_abs_err_h     DOUBLE,
+    interval_coverage DOUBLE,
+    PRIMARY KEY (run_ts, model, target_id)
+);
+"""
+
+
+def score_by_target(
+    samples: pd.DataFrame,
+    eta_fn,
+    model: str,
+    run_ts: datetime | None = None,
+    has_interval: bool = False,
+) -> list[dict]:
+    """Score eta_fn and return per-target metric rows (not yet persisted)."""
+    run_ts = run_ts or datetime.now(UTC).replace(tzinfo=None, microsecond=0)
+    if samples.empty:
+        return []
+    scored = _apply_eta_fn(samples, eta_fn, has_interval)
+    if scored.empty:
+        return []
+    return _metric_rows_by_target(scored, model, run_ts)
+
+
+def write_metrics_by_target(
+    conn: duckdb.DuckDBPyConnection, metrics: list[dict]
+) -> None:
+    """Persist per-target metric rows into eta_metrics_by_target."""
+    conn.execute(_TARGET_METRICS_SCHEMA)
+    for r in metrics:
+        conn.execute(
+            "INSERT OR REPLACE INTO eta_metrics_by_target "
+            "(run_ts, model, target_id, n, med_abs_err_h, bias_h, "
+            " mape, p90_abs_err_h, interval_coverage) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                r["run_ts"], r["model"], r["target_id"], r["n"],
+                r["med_abs_err_h"], r["bias_h"], r["mape"],
+                r["p90_abs_err_h"], r["interval_coverage"],
+            ],
+        )
+
+
+def score_vectorized(
+    samples: pd.DataFrame,
+    model: str,
+    run_ts: datetime,
+    interval=None,  # eta_physics.IntervalModel | None
+) -> tuple[pd.DataFrame, list[dict]]:
+    """Score a model using vectorized numpy/pandas ops; return (agg, per_target).
+
+    Equivalent to ``score() + score_by_target()`` but in a single data pass,
+    avoiding the Python-loop overhead of ``_apply_eta_fn``. Handles the three
+    built-in model keys: 'naive', 'naive+route', and 'physics_v1'.
+
+    Returns a tuple of:
+    - aggregate metric DataFrame (same schema as ``score()``)
+    - per-target metric list (same schema as ``score_by_target()``)
+    """
+    if samples.empty:
+        return pd.DataFrame(), []
+
+    sog = samples["sog"].fillna(0.0).to_numpy(dtype=float)
+    underway = sog >= _MIN_SOG_KN
+
+    if model == "naive":
+        gc = samples["gc_dist_nm"].to_numpy(dtype=float)
+        pred_h = np.where(underway & (sog > 0), gc / sog, np.nan)
+        has_interval = False
+
+    elif model == "naive+route":
+        route = samples["route_dist_nm"].to_numpy(dtype=float)
+        gc = samples["gc_dist_nm"].to_numpy(dtype=float)
+        dist = np.where(np.isfinite(route), route, gc)
+        pred_h = np.where(underway & (sog > 0), dist / sog, np.nan)
+        has_interval = False
+
+    elif model == "physics_v1":
+        from analytics.eta_physics import vectorized_physics_p50
+
+        pred_h = vectorized_physics_p50(samples)
+        has_interval = interval is not None and interval.fitted
+
+    else:
+        raise ValueError(f"score_vectorized: unknown model '{model}'")
+
+    scored = samples.copy()
+    scored["pred_h"] = pred_h
+    scored = scored[np.isfinite(scored["pred_h"])].copy()
+    if scored.empty:
+        return pd.DataFrame(), []
+
+    scored["err_h"] = scored["pred_h"] - scored["remaining_h"]
+
+    if has_interval:
+        p50_np = scored["pred_h"].to_numpy(dtype=float)
+        lo_off, hi_off = interval.offsets_batch(p50_np)
+        scored["_lo"] = np.maximum(0.0, p50_np + lo_off)
+        scored["_hi"] = p50_np + hi_off
+        scored["covered"] = (
+            (scored["remaining_h"] >= scored["_lo"]) & (scored["remaining_h"] <= scored["_hi"])
+        ).astype(float)
+    else:
+        scored["covered"] = np.nan
+
+    agg = pd.DataFrame(_metric_rows(scored, model, run_ts))
+    per_tgt = _metric_rows_by_target(scored, model, run_ts)
+    return agg, per_tgt
 
 
 def write_metrics(conn: duckdb.DuckDBPyConnection, metrics: pd.DataFrame) -> None:

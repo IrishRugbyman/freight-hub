@@ -1418,6 +1418,27 @@ class EtaAccuracyResponse(BaseModel):
     drift: list[EtaDriftAlert] = []  # active drift alerts from the latest run
 
 
+class EtaByTargetRow(BaseModel):
+    """Per-target accuracy row for one model."""
+
+    target_id: str                  # e.g. 'cp:suez', 'zone:rotterdam'
+    name: str
+    target_type: str                # 'chokepoint' | 'port'
+    is_canal: bool
+    n: int
+    med_abs_err_h: float | None
+    bias_h: float | None
+    p90_abs_err_h: float | None
+    mape: float | None
+    interval_coverage: float | None
+    naive_med_abs_err_h: float | None
+
+
+class EtaByTargetResponse(BaseModel):
+    run_ts: str | None
+    rows: list[EtaByTargetRow]      # physics_v1 rows, sorted best -> worst by med_abs_err_h
+
+
 class ArrivalTarget(BaseModel):
     """Ground-truth arrival activity at one resolved target over the window."""
 
