@@ -1164,7 +1164,7 @@ def analytics_sts_risk(days: int = 30, min_risk: int = 0):
     events_df = db.query(
         "SELECT event_id, mmsi, mmsi2, start_ts, region, kind, segment, details "
         "FROM ais_events "
-        "WHERE type = 'sts' AND start_ts >= ?",
+        "WHERE type = 'sts' AND start_ts >= ? AND segment != 'Small'",
         [cutoff],
         db=db.analytics_db_path(),
     )
@@ -2331,7 +2331,7 @@ def analytics_event_rate_timeline(hours: int = 72):
     cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=h)
     df = db.query(
         "SELECT start_ts, type FROM ais_events "
-        "WHERE type IN ('reroute', 'sts') AND start_ts >= ? ORDER BY start_ts",
+        "WHERE type IN ('reroute', 'sts') AND start_ts >= ? AND segment != 'Small' ORDER BY start_ts",
         [cutoff],
         db=db.analytics_db_path(),
     )
@@ -2588,7 +2588,8 @@ def analytics_shadow_fleet(days: int = 7, limit: int = 50):
 
     # STS participants in window
     sts_df = db.query(
-        "SELECT mmsi, mmsi2, start_ts FROM ais_events WHERE type = 'sts' AND start_ts >= ?",
+        "SELECT mmsi, mmsi2, start_ts FROM ais_events "
+        "WHERE type = 'sts' AND start_ts >= ? AND segment != 'Small'",
         [cutoff], db=_adb,
     )
     if sts_df.empty:
@@ -2876,7 +2877,7 @@ def _fetch_events_raw(types: list[str], days: int, limit: int) -> list[dict]:
     _db = db.analytics_db_path()
     cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
 
-    where_clauses = ["start_ts >= ?"]
+    where_clauses = ["start_ts >= ?", "segment != 'Small'"]
     params: list = [cutoff]
     if types:
         placeholders = ",".join(["?"] * len(types))
