@@ -1,5 +1,32 @@
 # Freight Hub Changelog
 
+## 2026-06-28 (session 5) - Ocean-only filters, Small-segment event noise, ETA upcoming metadata
+
+**Fix: TransitRiskCard default changed from hormuz to dover_channel:** Hormuz has zero
+collector coverage (no terrestrial AIS receivers); dover_channel has 24,764 transits in 14d.
+
+**Fix: market-summary event counts exclude Small segment:** All `ais_events` counts in
+`/api/analytics/market-summary` now filter `segment != 'Small'`. Reroutes dropped 691->314
+(377 were ARA inland waterway barges, 55% of total). Gaps similarly reduced.
+
+**Fix: reroutes endpoint adds ocean_only=true default:** `/api/analytics/reroutes` excludes
+Small segment by default. Toggle via `?ocean_only=false`.
+
+**Fix: /api/events adds ocean_only=true default:** Intelligence event feed now excludes
+Small segment vessels by default. Events are now all ocean-going vessels (Aframax, Panamax,
+Suezmax, etc.) with meaningful destination changes like port-to-port moves.
+
+**Fix: fleet-at-time uses segment-specific draught thresholds:** The `laden` classification
+previously used a flat 5m cutoff for all segments. Now uses `DESIGN_DRAUGHT` table: laden
+>= 80%, ballast <= 65% of design. Affects VLCC (22m design), Aframax (14.9m), etc.
+
+**Fix: eta-upcoming vessel metadata (3 bugs):** (1) Wrong column name `timestamp` should be
+`updated_ts` in live_positions join - silently caught by except, emptying live_meta. (2)
+`FREIGHT_STALE_HOURS` was undefined (should be `db.STALE_HOURS`) - same silent catch.
+(3) Missing `laden` column in live_positions - now derived from draught+segment thresholds.
+Result: vessel metadata (segment, sog, laden) now populated for 63-66% of upcoming arrivals.
+Added 0.25h minimum remaining filter to suppress already-arrived predictions.
+
 ## 2026-06-28 (session 4) - Analytics data quality fixes; 06:00 build verified (16m26s)
 
 **06:00 UTC build completed in 16m26s** (1,037,263 samples, 3432 unique route pairs, 3287
