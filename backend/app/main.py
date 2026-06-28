@@ -1584,6 +1584,8 @@ def fleet_flags(top_n: int = 40):
     top_n = max(5, min(100, top_n))
     as_of = _iso(datetime.now(UTC).replace(tzinfo=None)) or ""
     df = _live_all()
+    if not df.empty:
+        df = df[df["segment"] != "Small"]
     if df.empty:
         return FleetFlagsResponse(
             as_of=as_of, total_with_flag=0, total_unresolved=0,
@@ -1652,7 +1654,7 @@ def flag_mismatches():
     df = _live_all()
     if df.empty or "imo" not in df.columns:
         return FlagMismatchResponse(as_of=as_of, rows=[])
-    live = df[df["imo"].notna()].copy()
+    live = df[df["imo"].notna() & (df["segment"] != "Small")].copy()
     if live.empty:
         return FlagMismatchResponse(as_of=as_of, rows=[])
 
@@ -3209,7 +3211,7 @@ def analytics_slow_steamers(kind: str = "", limit: int = 50):
         sog_num = pd.to_numeric(lp_df["sog"], errors="coerce")
         ns_num = pd.to_numeric(lp_df.get("nav_status", pd.Series()), errors="coerce")
         ns_ok = ns_num.isna() | ~ns_num.isin([1, 5])
-        lp_df = lp_df[(sog_num > 0.5) & (sog_num < 25.0) & ns_ok].copy()
+        lp_df = lp_df[(sog_num > 0.5) & (sog_num < 25.0) & ns_ok & (lp_df["segment"] != "Small")].copy()
         needed = ["mmsi", "name", "kind", "segment", "region", "sog", "imo"]
         lp_df = lp_df[[c for c in needed if c in lp_df.columns]]
         if kind:
@@ -5370,7 +5372,7 @@ def analytics_speed_anomalies(kind: str = "tanker", min_z: float = 2.5, min_sog:
         fleet_df = fleet_df[fleet_df["sog"].fillna(0) >= min_sog]
         if kind:
             fleet_df = fleet_df[fleet_df["kind"] == kind]
-        fleet_df = fleet_df[fleet_df["segment"].notna()]
+        fleet_df = fleet_df[fleet_df["segment"].notna() & (fleet_df["segment"] != "Small")]
         needed = ["mmsi", "name", "kind", "segment", "region", "lat", "lon", "sog", "destination", "nav_status", "imo"]
         fleet_df = fleet_df[[c for c in needed if c in fleet_df.columns]]
 
@@ -5929,7 +5931,7 @@ def analytics_chokepoint_status():
     # 1. Live vessel counts per region from live_positions cache
     live_df = _live_all()
     if not live_df.empty:
-        live_df = live_df[live_df["region"].notna()]
+        live_df = live_df[live_df["region"].notna() & (live_df["segment"] != "Small")]
 
     live_by_region: dict[str, dict] = {}
     if not live_df.empty:
@@ -6885,6 +6887,7 @@ def analytics_european_inbound(horizon_h: int = 48, laden_only: bool = False):
             (sog_num >= 1.5)
             & fleet_df["destination"].notna()
             & fleet_df["segment"].notna()
+            & (fleet_df["segment"] != "Small")
         ].copy()
         needed = ["mmsi", "name", "lat", "lon", "sog", "destination", "segment", "kind", "imo", "region"]
         fleet_df = fleet_df[[c for c in needed if c in fleet_df.columns]]
