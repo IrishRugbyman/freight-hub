@@ -1825,6 +1825,38 @@ function EtaAccuracyCard() {
             </p>
           </div>
         )}
+        {trendPoints.length >= 2 && (() => {
+          const firstDate = trendPoints[0].date
+          const lastDate = trendPoints[trendPoints.length - 1].date
+          const msPerDay = 86400_000
+          const daysCollected = Math.round(
+            (new Date(lastDate).getTime() - new Date(firstDate).getTime()) / msPerDay
+          ) + 1
+          const ML_GATE_DAYS = 56
+          const pct = Math.min(100, (daysCollected / ML_GATE_DAYS) * 100)
+          return (
+            <div className="mt-3 rounded border border-border/60 bg-muted/20 px-3 py-2">
+              <div className="flex items-center justify-between text-[10px]">
+                <span className="font-medium text-muted-foreground">
+                  Phase D (ML ETA) unlock progress
+                </span>
+                <span className="tabular-nums text-muted-foreground/70">
+                  {daysCollected} / {ML_GATE_DAYS} days
+                </span>
+              </div>
+              <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full rounded-full bg-sky-500 transition-all"
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+              <p className="mt-1 text-[10px] text-muted-foreground/50">
+                Physics carries production until ML earns its gate. LightGBM quantile regression
+                trains on eta_samples when 8+ weeks of clean arrivals are accumulated.
+              </p>
+            </div>
+          )
+        })()}
         <p className="mt-2 text-[10px] text-muted-foreground/50">
           History starts at the collection date and cannot be backfilled; the learned (ML) model is gated until enough clean history accrues, so physics carries production today. A drift watch re-checks the champion every run and flags coverage or median-error regressions here.
         </p>
