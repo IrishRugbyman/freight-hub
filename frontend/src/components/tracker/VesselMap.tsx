@@ -82,6 +82,7 @@ export function VesselMap({
               mmsi={trailVessel.mmsi}
               points={trailPoints}
               color={colorFor(trailVessel.kind, trailVessel.segment)}
+              liveTip={{ lat: trailVessel.lat, lon: trailVessel.lon }}
             />
           )}
         </>
