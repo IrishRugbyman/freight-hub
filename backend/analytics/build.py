@@ -581,7 +581,15 @@ def _run_inner(conn: duckdb.DuckDBPyConnection, reset: bool) -> None:
     _set_watermark(conn, new_watermark)
     log.info("watermark advanced to %s", new_watermark)
 
+    # Log the scratch file size before closing so we can diagnose "missing" cases.
+    try:
+        sz_mb = _ANALYTICS_NEW.stat().st_size / (1024 * 1024)
+        log.info("closing scratch DB (%.1f MB); final checkpoint will write WAL to disk", sz_mb)
+    except OSError:
+        log.warning("scratch file already missing before conn.close() - this run will not promote")
+
     conn.close()
+    log.info("conn.close() returned; scratch WAL should be flushed")
 
     # Atomic swap: live DB was never locked during the build.
     _commit_scratch()

@@ -1,5 +1,26 @@
 # Freight Hub Changelog
 
+## 2026-06-28 (session 2) - ETA performance and scoreboard improvements
+
+**Fix: missing per-type rollup in metric rows:** `_metric_rows()` in `eta_backtest.py`
+only emitted `lead_bucket='all'` rows for `target_type='all'`. Added the same overall
+rollup for `chokepoint` and `port` target types. Enables the new scoreboard filter to
+show the overall "all leads" accuracy for each target class.
+
+**UX: target-type filter on ETA accuracy scoreboard:** `EtaAccuracyCard` now has
+All/Ports/Chokepoints filter buttons (mirrors the arrival card). Switches the lead-bucket
+bar chart and calibration coverage chart to the selected target class.
+
+**Perf: vectorized `enrich_routes`:** The Python loop over all N samples
+(typically 1M+) was replaced with: (1) snap all fixes to cells via numpy, (2) deduplicate
+to unique (cell, target) pairs (typically ~1920 pairs per 1M rows, a ~500x reduction),
+(3) call cache/searoute once per unique pair, (4) merge results back via list comprehension.
+Warm-cache runs drop from ~2s to ~0.3s for 1M samples.
+
+**Diagnostic: build scratch commit logging:** Added pre-close and post-close log lines
+around `conn.close()` in build.py to diagnose the "scratch file missing" race condition
+that caused two consecutive builds (466718, 499181) to lose their results.
+
 ## 2026-06-28 - Vectorized ETA scoring + per-target accuracy breakdown + trend chart
 
 **Performance fix:** The analytics build's ETA scoring step was iterating over 1M+
