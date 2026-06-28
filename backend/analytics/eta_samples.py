@@ -48,7 +48,7 @@ from quant_lib.freight.eta import (
 from analytics import eta_backtest as bt
 from analytics.eta_labels import ANALYTICS_DB, _default_ais_query, haversine_nm
 from analytics.eta_physics import IntervalModel
-from analytics.eta_routing import ROUTE_CACHE_SCHEMA, RouteCache, snap_cell
+from analytics.eta_routing import GRID_DEG as ROUTE_CACHE_GRID, ROUTE_CACHE_SCHEMA, RouteCache
 
 log = logging.getLogger(__name__)
 
@@ -143,6 +143,14 @@ def enrich_routes(conn: duckdb.DuckDBPyConnection, samples: pd.DataFrame) -> pd.
     equal while `cell_route` carries the cape/canal detour, so the full routing gain
     survives. Because `cell_route >= gc(cell->target)` (clamped at routing time), the
     result is provably never shorter than `gc(fix->target)`.
+
+    Vectorized: instead of a Python loop over all N rows (N can be 1M+), we:
+      1. Snap each fix to its grid cell (vectorized via pandas).
+      2. Deduplicate to unique (from_cell, target_id) pairs - typically O(1000s).
+      3. Call the cache/searoute once per unique pair.
+      4. Merge the per-pair result back to all rows, then apply the fix-level
+         snap correction vectorized via numpy. Reduces Python-loop iterations
+         from 1M to the number of unique cell-target combos.
     """
     if samples.empty:
         samples = samples.copy()
@@ -157,35 +165,71 @@ def enrich_routes(conn: duckdb.DuckDBPyConnection, samples: pd.DataFrame) -> pd.
         for t in conn.execute("SELECT target_id, lat, lon FROM eta_targets").fetchall()
     }
     cache = RouteCache(conn)
-    dists: list[float] = []
-    methods: list[str] = []
-    for r in samples.itertuples():
-        gc_fix = float(r.gc_dist_nm)
-        # Only route fixes that are actually underway. A drifting/anchored fix
-        # (sog < min) has no kinematic ETA - it is never scored by the baselines
-        # and carries no routing signal - so routing it just burns the cold-cache
-        # budget (~3x of the rows are sub-threshold). Leave route_dist_nm NULL.
-        if (r.sog or 0.0) < bt._MIN_SOG_KN:
-            dists.append(float("nan"))
-            methods.append(None)
-            continue
-        target = targets.get(r.target_id)
-        if target is None:  # target seeded after this arrival; degrade to gc
-            dists.append(gc_fix)
-            methods.append("gc")
-            continue
-        lat, lon = float(r.obs_lat), float(r.obs_lon)
-        cell_route, method = cache.distance(lat, lon, target)
-        clat, clon = snap_cell(lat, lon)
-        gc_cell = haversine_nm(clat, clon, target["lat"], target["lon"])
-        route_dist = max(cell_route - gc_cell + gc_fix, gc_fix)
-        dists.append(route_dist)
-        methods.append(method)
-    cache.flush()
 
     out = samples.copy()
-    out["route_dist_nm"] = dists
-    out["route_method"] = methods
+
+    # Step 1: vectorized snap - assign each fix to its 0.25-degree grid cell.
+    lats = out["obs_lat"].to_numpy(dtype=float)
+    lons = out["obs_lon"].to_numpy(dtype=float)
+    cell_lats = np.floor(lats / ROUTE_CACHE_GRID) * ROUTE_CACHE_GRID + ROUTE_CACHE_GRID / 2.0
+    cell_lons = np.floor(lons / ROUTE_CACHE_GRID) * ROUTE_CACHE_GRID + ROUTE_CACHE_GRID / 2.0
+    from_cells = np.array([f"{clat:.3f},{clon:.3f}" for clat, clon in zip(cell_lats, cell_lons)])
+    tids = out["target_id"].to_numpy(dtype=str)
+    sogs = out["sog"].fillna(0.0).to_numpy(dtype=float)
+
+    # Step 2: route each unique (cell, target) pair exactly once (typically ~5000 pairs).
+    underway_mask = sogs >= bt._MIN_SOG_KN
+    has_target_mask = np.isin(tids, list(targets))
+    routable_mask = underway_mask & has_target_mask
+    unique_pairs: dict[tuple[str, str], tuple[float, float, float]] = {}  # -> (cell_lat, cell_lon, gc_cell)
+    pair_route: dict[tuple[str, str], float] = {}
+    pair_method: dict[tuple[str, str], str] = {}
+    for fc, tid, clat, clon in zip(
+        from_cells[routable_mask], tids[routable_mask],
+        cell_lats[routable_mask], cell_lons[routable_mask],
+    ):
+        key = (fc, tid)
+        if key not in unique_pairs:
+            tgt = targets[tid]
+            gc_cell = haversine_nm(clat, clon, tgt["lat"], tgt["lon"])
+            unique_pairs[key] = (clat, clon, gc_cell)
+
+    for (fc, tid), (clat, clon, _gc_cell) in unique_pairs.items():
+        tgt = targets[tid]
+        cell_rt, method = cache.distance(float(clat), float(clon), tgt)
+        pair_route[(fc, tid)] = cell_rt
+        pair_method[(fc, tid)] = method
+    cache.flush()
+    log.info("enrich_routes: %d unique pairs routed (%d cache misses)", len(unique_pairs), cache.misses)
+
+    # Step 3: look up per-pair values for every row (one Python list comprehension each).
+    cell_route_arr = np.array(
+        [pair_route.get((fc, tid), np.nan) for fc, tid in zip(from_cells, tids)],
+        dtype=float,
+    )
+    gc_cell_arr = np.array(
+        [unique_pairs.get((fc, tid), (0.0, 0.0, np.nan))[2] for fc, tid in zip(from_cells, tids)],
+        dtype=float,
+    )
+    method_arr = [pair_method.get((fc, tid)) for fc, tid in zip(from_cells, tids)]
+
+    # Step 4: vectorized snap correction and gate logic.
+    gc_fix = out["gc_dist_nm"].to_numpy(dtype=float)
+    route_arr = np.full(len(out), np.nan)
+
+    route_ok = routable_mask & np.isfinite(cell_route_arr) & np.isfinite(gc_cell_arr)
+    route_arr[route_ok] = np.maximum(
+        cell_route_arr[route_ok] - gc_cell_arr[route_ok] + gc_fix[route_ok],
+        gc_fix[route_ok],
+    )
+    # Underway but unknown target (target added after this voyage) -> fall back to gc.
+    no_target = underway_mask & ~has_target_mask
+    route_arr[no_target] = gc_fix[no_target]
+    for i in np.where(no_target)[0]:
+        method_arr[i] = "gc"
+
+    out["route_dist_nm"] = route_arr
+    out["route_method"] = method_arr
     _add_physics_features(out)
     return out
 
