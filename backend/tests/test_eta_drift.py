@@ -92,9 +92,9 @@ def test_run_in_conn_persists_alert(tmp_path):
     for h, med, cov in rows:
         conn.execute(
             "INSERT INTO eta_model_metrics "
-            "(run_ts, model, lead_bucket, target_type, n, med_abs_err_h, bias_h, "
+            "(run_ts, model, lead_bucket, target_type, lead_basis, n, med_abs_err_h, bias_h, "
             " mape, p90_abs_err_h, interval_coverage) "
-            "VALUES (?, ?, 'all', 'all', 100, ?, 0, 0, 0, ?)",
+            "VALUES (?, ?, 'all', 'all', 'all', 100, ?, 0, 0, 0, ?)",
             [_T0 + timedelta(hours=h), dr.CHAMPION_MODEL, med, cov],
         )
     n = dr.run_in_conn(conn)

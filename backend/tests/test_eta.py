@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 
 import duckdb
 import numpy as np
+import pandas as pd
 import pytest
 from analytics import eta_backtest as bt
 from analytics import eta_labels as el
@@ -298,6 +299,66 @@ def test_lead_bucket_edges():
     assert bt.lead_bucket(23.9) == "12-24h"
     assert bt.lead_bucket(47.0) == "24-48h"
     assert bt.lead_bucket(100.0) == "48h+"
+
+
+def test_lead_buckets_vectorized_matches_scalar():
+    vals = [0.0, 5.9, 6.0, 23.9, 47.0, 100.0, float("nan")]
+    out = list(bt.lead_buckets(vals))
+    assert out[:-1] == [bt.lead_bucket(v) for v in vals[:-1]]
+    assert out[-1] == "0-6h"  # nan falls into the first bucket, never crashes
+
+
+def test_metric_rows_emit_dual_basis():
+    # A scored frame with predictions far from actuals so the two bucketings differ.
+    scored = pd.DataFrame(
+        {
+            "remaining_h": [1.0, 5.0, 30.0, 60.0],
+            "pred_h": [1.0, 2.0, 3.0, 4.0],  # every prediction lands in the 0-6h bucket
+            "err_h": [0.0, -3.0, -27.0, -56.0],
+            "target_type": ["port", "port", "chokepoint", "chokepoint"],
+            "covered": [float("nan")] * 4,
+        }
+    )
+    rows = pd.DataFrame(bt._metric_rows(scored, "physics_v1", datetime(2026, 6, 25)))
+    bases = set(rows["lead_basis"])
+    assert bases == {"all", "actual", "predicted"}
+    # Overall rollup is single and basis-independent.
+    overall = rows[(rows["lead_bucket"] == "all") & (rows["target_type"] == "all")]
+    assert len(overall) == 1 and overall.iloc[0]["lead_basis"] == "all"
+    # By predicted lead every row is in 0-6h; by actual they spread across buckets.
+    act = rows[(rows["lead_basis"] == "actual") & (rows["target_type"] == "all")]
+    pred = rows[(rows["lead_basis"] == "predicted") & (rows["target_type"] == "all")]
+    assert set(pred["lead_bucket"]) == {"0-6h"}
+    assert set(act["lead_bucket"]) == {"0-6h", "24-48h", "48h+"}
+
+
+def test_ensure_lead_basis_migration_preserves_history(tmp_path):
+    db = tmp_path / "legacy.duckdb"
+    conn = duckdb.connect(str(db))
+    # Create the OLD four-column-PK schema and seed two runs of history.
+    conn.execute(
+        "CREATE TABLE eta_model_metrics (run_ts TIMESTAMP, model VARCHAR, lead_bucket VARCHAR, "
+        "target_type VARCHAR, n INTEGER, med_abs_err_h DOUBLE, bias_h DOUBLE, mape DOUBLE, "
+        "p90_abs_err_h DOUBLE, interval_coverage DOUBLE, "
+        "PRIMARY KEY (run_ts, model, lead_bucket, target_type))"
+    )
+    conn.execute(
+        "INSERT INTO eta_model_metrics VALUES "
+        "('2026-06-25', 'physics_v1', 'all', 'all', 10, 1.0, 0.0, 0.1, 2.0, 0.8), "
+        "('2026-06-25', 'physics_v1', '0-6h', 'all', 5, 0.5, 0.1, 0.1, 1.0, 0.7)"
+    )
+    bt._ensure_lead_basis(conn)
+    cols = [d[0] for d in conn.execute("SELECT * FROM eta_model_metrics LIMIT 0").description]
+    assert "lead_basis" in cols
+    # History preserved, tagged: overall -> 'all', per-bucket -> 'actual'.
+    got = dict(
+        conn.execute("SELECT lead_bucket, lead_basis FROM eta_model_metrics").fetchall()
+    )
+    assert got == {"all": "all", "0-6h": "actual"}
+    # Idempotent: a second call is a no-op.
+    bt._ensure_lead_basis(conn)
+    assert conn.execute("SELECT count(*) FROM eta_model_metrics").fetchone()[0] == 2
+    conn.close()
 
 
 def test_voyage_split_no_leakage():

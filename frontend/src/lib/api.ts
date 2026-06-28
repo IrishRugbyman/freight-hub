@@ -2234,6 +2234,7 @@ export interface EtaAccuracyRow {
   model: string
   lead_bucket: string
   target_type: string
+  lead_basis: string
   n: number
   med_abs_err_h: number | null
   bias_h: number | null
@@ -2255,9 +2256,12 @@ export interface EtaAccuracyResponse {
   run_ts: string | null
   models: string[]
   lead_order: string[]
+  lead_basis: string
   rows: EtaAccuracyRow[]
   drift?: EtaDriftAlert[]
 }
+
+export type EtaLeadBasis = 'actual' | 'predicted'
 
 // True ETA Phase E/F: per-vessel resolvable-target ETAs (vessel-detail popup)
 export interface EtaPrediction {
@@ -2297,11 +2301,13 @@ export function useVesselEta(mmsi: number | null | undefined) {
   })
 }
 
-export function useEtaAccuracy(targetType = 'all') {
+export function useEtaAccuracy(targetType = 'all', leadBasis: EtaLeadBasis = 'actual') {
   return useQuery({
-    queryKey: ['eta-accuracy', targetType],
+    queryKey: ['eta-accuracy', targetType, leadBasis],
     queryFn: () =>
-      getJSON<EtaAccuracyResponse>(`/api/analytics/eta-accuracy?target_type=${targetType}`),
+      getJSON<EtaAccuracyResponse>(
+        `/api/analytics/eta-accuracy?target_type=${targetType}&lead_basis=${leadBasis}`,
+      ),
     staleTime: 10 * 60_000,
     refetchInterval: 10 * 60_000,
   })

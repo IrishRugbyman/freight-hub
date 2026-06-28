@@ -128,13 +128,14 @@ CREATE TABLE IF NOT EXISTS eta_model_metrics (
     model             VARCHAR,
     lead_bucket       VARCHAR,
     target_type       VARCHAR,
+    lead_basis        VARCHAR,            -- 'actual' | 'predicted' | 'all' (overall rows)
     n                 INTEGER,
     med_abs_err_h     DOUBLE,
     bias_h            DOUBLE,
     mape              DOUBLE,
     p90_abs_err_h     DOUBLE,
     interval_coverage DOUBLE,
-    PRIMARY KEY (run_ts, model, lead_bucket, target_type)
+    PRIMARY KEY (run_ts, model, lead_bucket, target_type, lead_basis)
 );
 """
 

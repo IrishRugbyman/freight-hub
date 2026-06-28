@@ -61,11 +61,25 @@ def _bearing_vec(lats, lons, lat0: float, lon0: float) -> np.ndarray:
 
 
 def lead_bucket(remaining_h: float) -> str:
-    """Return the lead-time bucket label for an actual remaining time (hours)."""
+    """Return the lead-time bucket label for a lead time (hours)."""
     for i in range(len(_LEAD_LABELS)):
         if _LEAD_EDGES[i] <= remaining_h < _LEAD_EDGES[i + 1]:
             return _LEAD_LABELS[i]
     return _LEAD_LABELS[-1]
+
+
+def lead_buckets(values) -> np.ndarray:
+    """Vectorized :func:`lead_bucket` over an array of hours.
+
+    `np.digitize` against the inner edges [6, 12, 24, 48] maps each value to its
+    bucket index; non-finite or negative inputs fall into bucket 0. Used to label
+    a whole scored frame at once by either the actual remaining time or the model's
+    own predicted lead (the two conditioning bases of the accuracy scoreboard).
+    """
+    arr = np.asarray(values, dtype=float)
+    idx = np.digitize(np.nan_to_num(arr, nan=0.0), _LEAD_EDGES[1:-1])
+    idx = np.clip(idx, 0, len(_LEAD_LABELS) - 1)
+    return np.asarray(_LEAD_LABELS, dtype=object)[idx]
 
 
 def voyage_id(mmsi: int, target_id: str, arrival_ts) -> int:
@@ -231,12 +245,27 @@ def voyage_split(samples: pd.DataFrame, test_frac: float = 1.0, seed: int = 0):
 
 
 def _metric_rows(scored: pd.DataFrame, model: str, run_ts: datetime) -> list[dict]:
-    """Aggregate signed/abs error into the lead-bucket x target-type table."""
+    """Aggregate signed/abs error into the lead-bucket x target-type table.
+
+    Per-lead-bucket rows are emitted under two conditioning bases:
+    ``lead_basis='actual'`` buckets by the true remaining time (the roadmap's
+    original framing) and ``lead_basis='predicted'`` buckets by the model's own
+    served ETA. The two disagree sharply at long lead because conditioning a
+    signed-error mean on either variable induces a regression-to-the-mean gradient
+    in opposite directions; serving both keeps that selection artifact visible
+    rather than hiding it behind one scary -50h number. The unconditional
+    (``lead_bucket='all'``) rollups are basis-independent and tagged ``'all'``.
+    """
     out: list[dict] = []
     if scored.empty:
         return out
 
-    def agg(g: pd.DataFrame, lead: str, ttype: str) -> dict:
+    scored = scored.assign(
+        _lead_actual=lead_buckets(scored["remaining_h"].to_numpy(dtype=float)),
+        _lead_pred=lead_buckets(scored["pred_h"].to_numpy(dtype=float)),
+    )
+
+    def agg(g: pd.DataFrame, lead: str, ttype: str, basis: str) -> dict:
         err = g["err_h"].to_numpy()
         abs_err = np.abs(err)
         actual = g["remaining_h"].to_numpy()
@@ -251,6 +280,7 @@ def _metric_rows(scored: pd.DataFrame, model: str, run_ts: datetime) -> list[dic
             "model": model,
             "lead_bucket": lead,
             "target_type": ttype,
+            "lead_basis": basis,
             "n": int(len(g)),
             "med_abs_err_h": float(np.median(abs_err)),
             "bias_h": float(np.median(err)),
@@ -259,20 +289,25 @@ def _metric_rows(scored: pd.DataFrame, model: str, run_ts: datetime) -> list[dic
             "interval_coverage": float(cov.mean()) if not cov.empty else float("nan"),
         }
 
+    # Unconditional rollups (basis-independent): per target type + overall.
     for ttype in ["chokepoint", "port"]:
         sub = scored[scored["target_type"] == ttype]
         if not sub.empty:
-            out.append(agg(sub, "all", ttype))  # overall row per type
+            out.append(agg(sub, "all", ttype, "all"))
+    out.append(agg(scored, "all", "all", "all"))
+
+    # Per-lead-bucket rows under each conditioning basis.
+    for basis, col in (("actual", "_lead_actual"), ("predicted", "_lead_pred")):
+        for ttype in ["chokepoint", "port"]:
+            sub = scored[scored["target_type"] == ttype]
+            for lead in _LEAD_LABELS:
+                g = sub[sub[col] == lead]
+                if not g.empty:
+                    out.append(agg(g, lead, ttype, basis))
         for lead in _LEAD_LABELS:
-            g = sub[sub["lead_bucket"] == lead]
+            g = scored[scored[col] == lead]
             if not g.empty:
-                out.append(agg(g, lead, ttype))
-    # 'all' target_type rollup per lead bucket + an overall row.
-    for lead in _LEAD_LABELS:
-        g = scored[scored["lead_bucket"] == lead]
-        if not g.empty:
-            out.append(agg(g, lead, "all"))
-    out.append(agg(scored, "all", "all"))
+                out.append(agg(g, lead, "all", basis))
     return out
 
 
@@ -490,20 +525,57 @@ def score_vectorized(
     return agg, per_tgt
 
 
+def _ensure_lead_basis(conn: duckdb.DuckDBPyConnection) -> None:
+    """Migrate a pre-`lead_basis` eta_model_metrics table in place, once.
+
+    The hourly build seeds its scratch DB by copying the live one forward, so a
+    table created under the old schema keeps its old four-column PK and lacks
+    ``lead_basis`` even after ``CREATE TABLE IF NOT EXISTS`` runs. Recreate it with
+    the new PK, tagging existing rows: the unconditional rollups
+    (``lead_bucket='all'``) become ``lead_basis='all'`` and every other historical
+    row was bucketed by actual remaining time, so it becomes ``lead_basis='actual'``.
+    History (69+ scored runs) is preserved verbatim.
+    """
+    cols = [d[0] for d in conn.execute("SELECT * FROM eta_model_metrics LIMIT 0").description]
+    if "lead_basis" in cols:
+        return
+    conn.execute("ALTER TABLE eta_model_metrics RENAME TO _eta_model_metrics_legacy")
+    conn.execute(
+        """
+        CREATE TABLE eta_model_metrics (
+            run_ts TIMESTAMP, model VARCHAR, lead_bucket VARCHAR, target_type VARCHAR,
+            lead_basis VARCHAR, n INTEGER, med_abs_err_h DOUBLE, bias_h DOUBLE,
+            mape DOUBLE, p90_abs_err_h DOUBLE, interval_coverage DOUBLE,
+            PRIMARY KEY (run_ts, model, lead_bucket, target_type, lead_basis)
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO eta_model_metrics "
+        "SELECT run_ts, model, lead_bucket, target_type, "
+        "  CASE WHEN lead_bucket = 'all' THEN 'all' ELSE 'actual' END AS lead_basis, "
+        "  n, med_abs_err_h, bias_h, mape, p90_abs_err_h, interval_coverage "
+        "FROM _eta_model_metrics_legacy"
+    )
+    conn.execute("DROP TABLE _eta_model_metrics_legacy")
+
+
 def write_metrics(conn: duckdb.DuckDBPyConnection, metrics: pd.DataFrame) -> None:
     """Persist a metric table into eta_model_metrics (idempotent per run_ts)."""
     conn.execute(ETA_SCHEMA)
+    _ensure_lead_basis(conn)
     for r in metrics.to_dict("records"):
         conn.execute(
             "INSERT OR REPLACE INTO eta_model_metrics "
-            "(run_ts, model, lead_bucket, target_type, n, med_abs_err_h, bias_h, "
-            " mape, p90_abs_err_h, interval_coverage) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "(run_ts, model, lead_bucket, target_type, lead_basis, n, med_abs_err_h, "
+            " bias_h, mape, p90_abs_err_h, interval_coverage) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 r["run_ts"],
                 r["model"],
                 r["lead_bucket"],
                 r["target_type"],
+                r.get("lead_basis", "actual"),
                 r["n"],
                 r["med_abs_err_h"],
                 r["bias_h"],
@@ -533,6 +605,10 @@ def export_baseline(metrics: pd.DataFrame, model: str) -> Path:
         "p90_abs_err_h",
         "interval_coverage",
     ]
+    # The committed reference snapshot is the by-actual scoreboard (its original
+    # framing); keep the predicted-basis rows out of the frozen CSV.
+    if "lead_basis" in metrics.columns:
+        metrics = metrics[metrics["lead_basis"].isin(["actual", "all"])]
     out = metrics[cols].copy()
     for c in ["med_abs_err_h", "bias_h", "mape", "p90_abs_err_h", "interval_coverage"]:
         out[c] = out[c].round(3)

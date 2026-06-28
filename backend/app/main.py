@@ -16,6 +16,7 @@ import tempfile
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
+import duckdb
 import pandas as pd
 from ais.regions import REGIONS
 from fastapi import FastAPI, Request
@@ -6529,26 +6530,46 @@ _ETA_MODEL_ORDER = ["naive", "naive+route", "physics_v1", "ml"]
 
 
 @app.get("/api/analytics/eta-accuracy", response_model=EtaAccuracyResponse, tags=["analytics"])
-def analytics_eta_accuracy(target_type: str = "all"):
+def analytics_eta_accuracy(target_type: str = "all", lead_basis: str = "actual"):
     """Latest leakage-free backtest scoreboard: model error by lead bucket.
 
     Serves `eta_model_metrics` from the most recent scored run (True ETA Phases
     A-C), the credibility centerpiece: median |err|, bias, P90 |err| and interval
-    coverage for each model (naive -> +route -> physics) across actual-remaining
-    lead buckets. `target_type` filters to 'chokepoint' | 'port' | 'all'.
+    coverage for each model (naive -> +route -> physics) across lead buckets.
+    `target_type` filters to 'chokepoint' | 'port' | 'all'. `lead_basis` selects how
+    the per-bucket rows are conditioned: 'actual' (true remaining time, the original
+    framing) or 'predicted' (the model's own served ETA, what a user sees at decision
+    time). The unconditional overall rows (lead_bucket='all') are returned regardless.
     """
+    lead_basis = lead_basis if lead_basis in ("actual", "predicted") else "actual"
     # Each model's most recent scored run (the three baselines may carry slightly
     # different run_ts on older data, so a single global max() would drop some).
-    df = db.query(
-        "SELECT m.model, m.lead_bucket, m.target_type, m.n, m.med_abs_err_h, "
-        "       m.bias_h, m.p90_abs_err_h, m.interval_coverage "
-        "FROM eta_model_metrics m "
-        "JOIN (SELECT model, max(run_ts) AS rt FROM eta_model_metrics GROUP BY model) latest "
-        "  ON m.model = latest.model AND m.run_ts = latest.rt "
-        "WHERE m.target_type = ?",
-        [target_type],
-        db=db.analytics_db_path(),
-    )
+    try:
+        df = db.query(
+            "SELECT m.model, m.lead_bucket, m.target_type, m.lead_basis, m.n, m.med_abs_err_h, "
+            "       m.bias_h, m.p90_abs_err_h, m.interval_coverage "
+            "FROM eta_model_metrics m "
+            "JOIN (SELECT model, max(run_ts) AS rt FROM eta_model_metrics GROUP BY model) latest "
+            "  ON m.model = latest.model AND m.run_ts = latest.rt "
+            "WHERE m.target_type = ? AND m.lead_basis IN ('all', ?)",
+            [target_type, lead_basis],
+            db=db.analytics_db_path(),
+        )
+    except duckdb.BinderException:
+        # Live DB predates the lead_basis migration (next build adds it). Serve the
+        # legacy by-actual scoreboard so the endpoint never 500s during that window.
+        df = db.query(
+            "SELECT m.model, m.lead_bucket, m.target_type, m.n, m.med_abs_err_h, "
+            "       m.bias_h, m.p90_abs_err_h, m.interval_coverage "
+            "FROM eta_model_metrics m "
+            "JOIN (SELECT model, max(run_ts) AS rt FROM eta_model_metrics GROUP BY model) latest "
+            "  ON m.model = latest.model AND m.run_ts = latest.rt "
+            "WHERE m.target_type = ?",
+            [target_type],
+            db=db.analytics_db_path(),
+        )
+        if not df.empty:
+            df["lead_basis"] = df["lead_bucket"].map(lambda b: "all" if b == "all" else "actual")
     if df.empty:
         return EtaAccuracyResponse(run_ts=None, models=[], lead_order=_ETA_LEAD_ORDER, rows=[])
 
@@ -6574,6 +6595,7 @@ def analytics_eta_accuracy(target_type: str = "all"):
             model=str(r["model"]),
             lead_bucket=str(r["lead_bucket"]),
             target_type=str(r["target_type"]),
+            lead_basis=str(r.get("lead_basis", "actual")),
             n=int(r["n"]),
             med_abs_err_h=_num(r["med_abs_err_h"]),
             bias_h=_num(r["bias_h"]),
@@ -6589,7 +6611,7 @@ def analytics_eta_accuracy(target_type: str = "all"):
 
     return EtaAccuracyResponse(
         run_ts=run_ts, models=models, lead_order=_ETA_LEAD_ORDER, rows=rows,
-        drift=_eta_drift_alerts(),
+        lead_basis=lead_basis, drift=_eta_drift_alerts(),
     )
 
 

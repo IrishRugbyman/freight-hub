@@ -11,7 +11,7 @@ import {
   useCargoStateChanges, useLaden, useDensity, useEuropeanInbound,
   useLngInbound, useTransitRateTimeline, useEtaAccuracy, useArrivals,
   useEtaByTarget, useEtaTrend,
-  type EuropeanInboundVessel, type LngVessel, type EtaByTargetRow,
+  type EuropeanInboundVessel, type LngVessel, type EtaByTargetRow, type EtaLeadBasis,
 } from '@/lib/api'
 import { fmt, EmptyState, ChartSkeleton, TOOLTIP_STYLE, LEGEND_STYLE, REGION_LABELS } from './-analyticsShared'
 import { EtaChip } from '@/components/EtaChip'
@@ -1608,7 +1608,8 @@ const ETA_MODEL_META: Record<string, { label: string; hex: string }> = {
 
 function EtaAccuracyCard() {
   const [targetType, setTargetType] = React.useState<'all' | 'port' | 'chokepoint'>('all')
-  const { data, isLoading } = useEtaAccuracy(targetType)
+  const [leadBasis, setLeadBasis] = React.useState<EtaLeadBasis>('actual')
+  const { data, isLoading } = useEtaAccuracy(targetType, leadBasis)
   const { data: trendData } = useEtaTrend()
 
   // Sample count trend from the run history (shows data flywheel growing toward ML gate)
@@ -1691,7 +1692,8 @@ function EtaAccuracyCard() {
             <CardTitle className="text-sm">True ETA Accuracy</CardTitle>
             <p className="mt-0.5 text-xs text-muted-foreground">
               Leakage-free backtest (voyage-grouped split) over reconstructed AIS arrivals: median absolute
-              error per model by actual lead time. Lower is better; physics is the shipping champion.
+              error per model, bucketed by {leadBasis === 'actual' ? 'actual lead time' : 'the model’s own predicted lead'}.
+              Lower is better; physics is the shipping champion.
             </p>
           </div>
           <div className="flex shrink-0 flex-col items-end gap-1.5">
@@ -1712,6 +1714,27 @@ function EtaAccuracyCard() {
                   }`}
                 >
                   {t === 'all' ? 'All' : t === 'port' ? 'Ports' : 'Chokepoints'}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="text-[9px] uppercase tracking-wide text-muted-foreground/50">bucket by</span>
+              {(['actual', 'predicted'] as const).map(b => (
+                <button
+                  key={b}
+                  onClick={() => setLeadBasis(b)}
+                  title={
+                    b === 'actual'
+                      ? 'Bucket each sample by its true remaining time (original framing)'
+                      : 'Bucket each sample by the model’s own served ETA (what a user sees at decision time)'
+                  }
+                  className={`rounded px-1.5 py-0.5 text-[10px] transition-colors ${
+                    leadBasis === b
+                      ? 'bg-primary/20 text-primary'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {b === 'actual' ? 'Actual lead' : 'Predicted lead'}
                 </button>
               ))}
             </div>
@@ -1747,6 +1770,11 @@ function EtaAccuracyCard() {
             </BarChart>
           </ResponsiveContainer>
         </div>
+        <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground/60">
+          {leadBasis === 'actual'
+            ? 'Bucketed by actual remaining time: long-lead bias looks large because conditioning a signed error on the true outcome pulls it negative (regression to the mean). Switch to “Predicted lead” for the decision-time view.'
+            : 'Bucketed by the model’s own served ETA: this is what a user knows at decision time. The gradient reverses vs “Actual lead” — both are selection effects, so read the unconditional bias in the table below as the headline number.'}
+        </p>
 
         {calibrationData.length > 0 && (
           <div className="mt-4">

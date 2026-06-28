@@ -1395,6 +1395,7 @@ class EtaAccuracyRow(BaseModel):
     model: str                      # 'naive' | 'naive+route' | 'physics_v1'
     lead_bucket: str                # '0-6h' | '6-12h' | '12-24h' | '24-48h' | '48h+' | 'all'
     target_type: str                # 'chokepoint' | 'port' | 'all'
+    lead_basis: str = "actual"      # 'actual' | 'predicted' (per-bucket); 'all' for overall rows
     n: int
     med_abs_err_h: float | None
     bias_h: float | None
@@ -1418,6 +1419,7 @@ class EtaAccuracyResponse(BaseModel):
     run_ts: str | None              # ISO timestamp of the latest scored run
     models: list[str]               # models present, baseline-first order
     lead_order: list[str]           # lead buckets in chronological order
+    lead_basis: str = "actual"      # conditioning basis applied to per-bucket rows
     rows: list[EtaAccuracyRow]
     drift: list[EtaDriftAlert] = []  # active drift alerts from the latest run
 

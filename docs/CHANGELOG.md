@@ -1,5 +1,44 @@
 # Freight Hub Changelog
 
+## 2026-06-28 (session 8) - Dual-basis ETA accuracy scoreboard (expose the conditioning artifact)
+
+**Feature: the True ETA accuracy scoreboard now conditions per-bucket error on
+either actual or predicted lead time, switchable in the UI.** The old scoreboard
+bucketed every model's error by the *actual* remaining time only, which made the
+physics champion look catastrophically optimistic at long range (48h+ bias -50h,
+median |err| 50h). That number is a selection artifact: conditioning a signed-error
+mean on the true outcome pulls it negative (regression to the mean). Re-bucketing
+the identical predictions by the model's *own served ETA* - what a user actually
+knows at decision time - reverses the gradient and tells a far more defensible
+story: at 48h+ *predicted* lead the physics median |err| is ~17h (not 50h) and the
+bias is +16h. Neither single conditioning is "the truth"; the unconditional bias is
+~-8h. Serving both, with an in-card explainer, surfaces the artifact instead of
+hiding it - squarely on the project's "an ETA you can defend in an interview" bar.
+
+- `eta_model_metrics` gains a `lead_basis` column ('actual' | 'predicted' | 'all')
+  in the primary key. `_metric_rows` now emits each per-lead-bucket aggregate twice
+  (once per conditioning basis); the unconditional `lead_bucket='all'` rollups are
+  basis-independent and tagged 'all', so the Phase-G drift watch (which reads only
+  those rows) is unaffected.
+- `lead_buckets()`: a vectorized `np.digitize` twin of the scalar `lead_bucket`,
+  used to label a whole scored frame by actual and predicted lead in one pass.
+- `_ensure_lead_basis()`: idempotent in-place migration. The hourly build copies the
+  live DB forward, so `CREATE TABLE IF NOT EXISTS` cannot add the new PK column;
+  the migration recreates the table, tagging the 69 runs of existing history
+  (per-bucket -> 'actual', overall -> 'all') with zero data loss. Verified on the
+  live 2210-row table.
+- `GET /api/analytics/eta-accuracy` takes a `lead_basis` param (default 'actual',
+  preserving the original framing) and echoes it; it returns the selected basis's
+  per-bucket rows plus the basis-independent overall rows. Falls back to the legacy
+  by-actual query if the live DB predates the migration, so it never 500s during the
+  deploy window before the next build runs.
+- Frontend: a "bucket by Actual lead / Predicted lead" toggle on the True ETA
+  Accuracy card, a dynamic description, and a footnote explaining the conditioning
+  reversal and pointing at the unconditional bias as the headline number.
+- Tests: vectorized-bucket parity, dual-basis emission, the migration (column added,
+  history preserved, idempotent), and the endpoint's default vs predicted basis.
+  Total tests: 466 -> 471.
+
 ## 2026-06-28 (session 7) - Freeze the ETA baseline reference; stop the hourly git-tree churn
 
 **Fix: the hourly analytics job no longer mutates git-tracked baseline CSVs.**
