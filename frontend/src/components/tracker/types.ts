@@ -22,7 +22,7 @@ export const DEFAULT_LAYERS: LayerState = {
   pipelines: false,
   deckgl: false,
   heatmap: false,
-  riskOverlay: true,
+  riskOverlay: false,
   oceanOnly: true,
 }
 
