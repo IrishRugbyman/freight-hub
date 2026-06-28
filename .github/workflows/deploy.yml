@@ -1,0 +1,34 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            set -e
+            export PATH="$HOME/.local/bin:$PATH"
+            cd ~/quant/freight
+            git pull origin main
+
+            echo "=== Backend ==="
+            cd backend
+            uv sync
+            sudo systemctl restart freight-api
+
+            echo "=== Frontend ==="
+            cd ../frontend
+            npm ci --silent
+            npm run build
+
+            echo "=== Done ==="
+            sudo systemctl is-active freight-api
