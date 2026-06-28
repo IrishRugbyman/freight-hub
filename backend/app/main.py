@@ -665,10 +665,16 @@ def vessels(
 def vessel_track(mmsi: int, hours: int = 24):
     """Historical trail for a vessel from ais_snapshots. hours clamped to [1, 336].
 
-    Points are thinned: only kept when the vessel has moved >= 200m from the
-    previous kept point, so anchored vessels don't produce scribble-circles.
-    The most recent point is always included.
+    Spatial cleanup so anchored vessels don't draw scribble-circles. An anchored
+    vessel swings around its chain inside a ~500m circle while its SOG blips
+    0.1<->0.9 kn from tidal current, so speed-based detection fractures the run.
+    Instead we cluster spatially: any maximal run of points staying within ~400m
+    of their running centroid is "stationary" and collapses to a single fix (the
+    last one). Genuinely moving points are distance-thinned to ~200m for size.
+    The most recent fix is always included.
     """
+    import math
+
     h = max(1, min(hours, 336))
     cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=h)
     df = db.query(
@@ -681,15 +687,44 @@ def vessel_track(mmsi: int, hours: int = 24):
     df = df.astype(object).where(df.notna(), None)
     rows = list(df.itertuples())
 
-    # Distance-threshold thinning (~200m = 0.0018 deg). Keeps all points for
-    # vessels moving >= 1 kn (300m+ per 10-min snapshot) and strips anchor drift.
-    _MIN_DEG2 = 0.0018 ** 2
-    kept = [rows[0]]
-    for r in rows[1:]:
-        prev = kept[-1]
-        if (r.lat - prev.lat) ** 2 + (r.lon - prev.lon) ** 2 >= _MIN_DEG2:
-            kept.append(r)
-    if kept[-1] is not rows[-1]:
+    _CLUSTER_M = 400.0        # within this of the run centroid => stationary swing
+    _MOVE_M = 200.0           # distance-thinning for moving points
+    _M_PER_DEG = 111_000.0
+    _coslat = math.cos(math.radians(rows[0].lat))
+
+    def _dist_m(a_lat, a_lon, b_lat, b_lon) -> float:
+        dlat = (a_lat - b_lat) * _M_PER_DEG
+        dlon = (a_lon - b_lon) * _M_PER_DEG * _coslat
+        return math.hypot(dlat, dlon)
+
+    kept: list = []
+    i, n = 0, len(rows)
+    while i < n:
+        # Grow a stationary cluster from i: extend while the next fix stays within
+        # _CLUSTER_M of the running centroid (robust to SOG noise and swing).
+        sum_lat, sum_lon, cnt, j = rows[i].lat, rows[i].lon, 1, i
+        while j + 1 < n:
+            c_lat, c_lon = sum_lat / cnt, sum_lon / cnt
+            nxt = rows[j + 1]
+            if _dist_m(nxt.lat, nxt.lon, c_lat, c_lon) <= _CLUSTER_M:
+                sum_lat += nxt.lat
+                sum_lon += nxt.lon
+                cnt += 1
+                j += 1
+            else:
+                break
+        if cnt >= 3:
+            kept.append(rows[j])   # collapse the swing to its departure fix
+            i = j + 1
+        else:
+            r = rows[i]
+            if not kept or _dist_m(r.lat, r.lon, kept[-1].lat, kept[-1].lon) >= _MOVE_M:
+                kept.append(r)
+            i += 1
+
+    if not kept:
+        kept.append(rows[-1])
+    elif kept[-1] is not rows[-1]:
         kept.append(rows[-1])  # always include the most recent fix
 
     return [TrackPoint(ts=_iso(r.snapshot_ts), lat=r.lat, lon=r.lon, sog=r.sog) for r in kept]
