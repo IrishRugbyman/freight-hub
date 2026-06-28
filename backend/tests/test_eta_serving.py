@@ -392,3 +392,31 @@ def test_eta_accuracy_empty_when_no_metrics(eta_client):
     body = r.json()
     assert body["run_ts"] is None
     assert body["rows"] == []
+
+
+def test_eta_upcoming_returns_within_horizon(eta_client):
+    # eta_client seeds: hormuz in 8h, rotterdam in 300h.
+    r = eta_client.get("/api/analytics/eta-upcoming", params={"horizon_h": 48})
+    assert r.status_code == 200
+    body = r.json()
+    # Only hormuz (8h) should be within 48h; rotterdam (300h) excluded.
+    assert body["total"] == 1
+    assert body["rows"][0]["target_id"] == "cp:hormuz"
+    assert 0 < body["rows"][0]["remaining_h"] <= 48
+
+
+def test_eta_upcoming_chokepoint_filter(eta_client):
+    # target_type=chokepoint must only return chokepoint targets.
+    r = eta_client.get("/api/analytics/eta-upcoming", params={"horizon_h": 96, "target_type": "chokepoint"})
+    assert r.status_code == 200
+    body = r.json()
+    assert all(row["target_type"] == "chokepoint" for row in body["rows"])
+
+
+def test_eta_upcoming_sorted_ascending(eta_client):
+    # With a wide horizon, results must be sorted by remaining_h ascending.
+    r = eta_client.get("/api/analytics/eta-upcoming", params={"horizon_h": 400})
+    assert r.status_code == 200
+    body = r.json()
+    remaining = [row["remaining_h"] for row in body["rows"]]
+    assert remaining == sorted(remaining)
