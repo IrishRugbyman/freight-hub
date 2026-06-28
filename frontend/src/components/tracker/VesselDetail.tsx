@@ -253,31 +253,48 @@ export function VesselDetail({
         <div className="text-[11px] font-semibold text-muted-foreground mb-1">Voyage</div>
         <Row label="Destination" value={vessel.destination} />
         <Row label="ETA (reported)" value={vessel.eta} />
-        {etaPreds.length > 0 && (
-          <div className="mt-0.5 space-y-0.5">
-            {etaPreds.map((pred, i) => pred.eta_p50_h != null && (
-              <div key={pred.target_id} className="flex items-baseline justify-between gap-2 py-0.5">
-                <span className="text-xs text-muted-foreground truncate min-w-0">
-                  {i === 0 ? 'True ETA' : ''}{' '}
-                  <span className="text-muted-foreground/60 text-[10px]">
-                    to {pred.target_name ?? pred.target_id}
+        {etaPreds.length > 0 && (() => {
+          // Compute remaining hours from absolute arrival timestamp so the display
+          // stays correct even when predictions are several hours old.
+          const nowMs = Date.now()
+          const live = etaPreds
+            .map(pred => {
+              const arrivalMs = pred.eta_arrival_ts ? new Date(pred.eta_arrival_ts).getTime() : null
+              const remainingH = arrivalMs != null ? (arrivalMs - nowMs) / 3_600_000 : pred.eta_p50_h
+              // Offset band endpoints by same staleness delta
+              const deltaH = pred.eta_p50_h != null && remainingH != null
+                ? remainingH - pred.eta_p50_h
+                : 0
+              return { pred, remainingH, deltaH }
+            })
+            .filter(({ remainingH }) => remainingH == null || remainingH > -1)
+          if (!live.length) return null
+          return (
+            <div className="mt-0.5 space-y-0.5">
+              {live.map(({ pred, remainingH, deltaH }, i) => (
+                <div key={pred.target_id} className="flex items-baseline justify-between gap-2 py-0.5">
+                  <span className="text-xs text-muted-foreground truncate min-w-0">
+                    {i === 0 ? 'True ETA' : ''}{' '}
+                    <span className="text-muted-foreground/60 text-[10px]">
+                      to {pred.target_name ?? pred.target_id}
+                    </span>
                   </span>
-                </span>
-                <EtaChip
-                  vessel={{
-                    eta_true_h: pred.eta_p50_h,
-                    eta_low_h: pred.eta_low_h,
-                    eta_high_h: pred.eta_high_h,
-                    eta_naive_h: pred.eta_naive_h,
-                    eta_method: pred.method,
-                  }}
-                  fallbackH={pred.eta_naive_h}
-                  showBand={i === 0}
-                />
-              </div>
-            ))}
-          </div>
-        )}
+                  <EtaChip
+                    vessel={{
+                      eta_true_h: remainingH,
+                      eta_low_h: pred.eta_low_h != null ? pred.eta_low_h + deltaH : null,
+                      eta_high_h: pred.eta_high_h != null ? pred.eta_high_h + deltaH : null,
+                      eta_naive_h: pred.eta_naive_h,
+                      eta_method: pred.method,
+                    }}
+                    fallbackH={pred.eta_naive_h}
+                    showBand={i === 0}
+                  />
+                </div>
+              ))}
+            </div>
+          )
+        })()}
         <Row label="Draught" value={vessel.draught != null ? `${vessel.draught.toFixed(1)} m` : null} />
       </Section>
 
