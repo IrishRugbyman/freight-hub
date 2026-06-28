@@ -38,8 +38,21 @@ Replaced with vectorized numpy/pandas operations:
   Demonstrates the data flywheel and confirms the model is not regressing as the
   sample set grows toward the ML gate.
 
-**Tests:** 2 new tests added (score_vectorized matches row-loop output; per-target
-write roundtrip). Total: 436 passing.
+**Critical perf fix - persist_samples:** `persist_samples()` was using
+`conn.executemany()` with a 1M-row Python list, serializing each row via Python
+type conversion. At ~1ms/row this takes ~17-34 minutes per build. Replaced with
+DuckDB register-then-bulk-copy: `conn.register("_f", df)` + `INSERT ... SELECT
+FROM _f`, completing in ~4 seconds (~250x speedup). Confirmed in benchmark.
+
+**UX: multi-target ETA in vessel popup:** `VesselDetail.tsx` previously showed
+only `predictions[0]` (the nearest target). Now shows all resolved targets (up to
+3) - nearest with P10-P90 band, secondaries showing P50 + method badge only.
+
+**UX: ML gate progress bar:** Added to `EtaAccuracyCard` - shows days collected
+vs the 56-day ML gate, computed from `trendData.points[0]` (no new endpoint).
+
+**Tests:** 4 new tests added (score_vectorized, per-target write roundtrip, eta-
+trend endpoint, eta-by-target endpoint). Total: 438 passing.
 
 ## 2026-06-27 - Feature: MMSI-derived flag state (FOC / shadow-fleet / mismatch)
 
