@@ -114,7 +114,10 @@ def vectorized_physics_p50(samples: pd.DataFrame) -> np.ndarray:
     else:
         seg = samples["segment"] if "segment" in samples.columns else pd.Series(index=samples.index, dtype=str)
         base_spd = seg.map(SEGMENT_SERVICE_SPEED).fillna(DEFAULT_SERVICE_SPEED).to_numpy(dtype=float)
-        laden = samples["laden"].to_numpy() if "laden" in samples.columns else np.full(len(samples), None)
+        if "laden" in samples.columns:
+            laden = samples["laden"].to_numpy(dtype=object, na_value=None)
+        else:
+            laden = np.full(len(samples), None)
         factor = np.where(
             laden == True,  # noqa: E712 - intentional numpy array comparison
             _LADEN_FACTOR,
