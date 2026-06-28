@@ -148,51 +148,57 @@ _REG_INSERT = (
 _NOW = datetime.now(UTC).replace(tzinfo=None)
 
 
-def _make_registry_client(tmp_path, monkeypatch, reg_rows: list[tuple]) -> TestClient:
-    """Build a TestClient with the given registry rows seeded, AIS DB from conftest."""
+_AIS_SCHEMA_REGISTRY = """
+CREATE TABLE live_positions (
+    mmsi BIGINT PRIMARY KEY, name VARCHAR, lat DOUBLE, lon DOUBLE,
+    sog DOUBLE, cog DOUBLE, heading DOUBLE, destination VARCHAR,
+    ship_type INTEGER, length_m DOUBLE, kind VARCHAR, segment VARCHAR,
+    region VARCHAR, updated_ts TIMESTAMP,
+    imo BIGINT, draught DOUBLE, nav_status INTEGER, eta VARCHAR
+);
+CREATE TABLE ais_snapshots (
+    snapshot_ts TIMESTAMP, mmsi BIGINT, kind VARCHAR, segment VARCHAR,
+    region VARCHAR, lat DOUBLE, lon DOUBLE, ship_type INTEGER, length_m DOUBLE,
+    sog DOUBLE, nav_status INTEGER, draught DOUBLE, destination VARCHAR,
+    PRIMARY KEY (snapshot_ts, mmsi)
+);
+"""
+
+
+def _make_registry_client(tmp_path, monkeypatch, pg_rows: list[dict]) -> TestClient:
+    """Build a TestClient with the given registry rows seeded in PostgreSQL."""
+    from conftest import setup_pg_vessels
+
     ais_file = tmp_path / "ais.duckdb"
     ais_conn = duckdb.connect(str(ais_file))
-    ais_conn.execute("""
-        CREATE TABLE live_positions (
-            mmsi BIGINT PRIMARY KEY, name VARCHAR, lat DOUBLE, lon DOUBLE,
-            sog DOUBLE, cog DOUBLE, heading DOUBLE, destination VARCHAR,
-            ship_type INTEGER, length_m DOUBLE, kind VARCHAR, segment VARCHAR,
-            region VARCHAR, updated_ts TIMESTAMP,
-            imo BIGINT, draught DOUBLE, nav_status INTEGER, eta VARCHAR
-        );
-        CREATE TABLE ais_snapshots (
-            snapshot_ts TIMESTAMP, mmsi BIGINT, kind VARCHAR, segment VARCHAR,
-            region VARCHAR, lat DOUBLE, lon DOUBLE, ship_type INTEGER, length_m DOUBLE,
-            sog DOUBLE, nav_status INTEGER, draught DOUBLE, destination VARCHAR,
-            PRIMARY KEY (snapshot_ts, mmsi)
-        );
-    """)
+    ais_conn.execute(_AIS_SCHEMA_REGISTRY)
     ais_conn.close()
 
-    reg_file = tmp_path / "registry.duckdb"
-    reg_conn = duckdb.connect(str(reg_file))
-    reg_conn.execute(_REG_SCHEMA)
-    for row in reg_rows:
-        reg_conn.execute(_REG_INSERT, list(row))
-    reg_conn.close()
-
+    setup_pg_vessels(monkeypatch, pg_rows)
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
-    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
     from app.main import app
     return TestClient(app)
 
 
 def test_equasis_registry_hit(tmp_path, monkeypatch):
     """When the registry has a row with fetch_ok=true, return it without hitting Equasis."""
-    row = (
-        9321483, "EMMA MAERSK", "Singapore", "SGP", "9VCY3",
-        171542, 174239, "Container Ship", 2006, "In Service/Commission",
-        "MOLLER SINGAPORE AP PTE LTD", "MAERSK A/S", "MAERSK A/S",
-        "American Bureau of Shipping (IACS)", "Britannia",
-        10.0, "White", "White", "not targeted",
-        _NOW, True,
-    )
-    client = _make_registry_client(tmp_path, monkeypatch, [row])
+    client = _make_registry_client(tmp_path, monkeypatch, [
+        {
+            "imo": 9321483, "ship_name": "EMMA MAERSK", "flag": "Singapore",
+            "flag_code": "SGP", "call_sign": "9VCY3",
+            "gross_tonnage": 171542, "dwt": 174239,
+            "ship_type": "Container Ship", "year_built": 2006,
+            "ship_status": "In Service/Commission",
+            "owner": "MOLLER SINGAPORE AP PTE LTD",
+            "ism_manager": "MAERSK A/S", "ship_manager": "MAERSK A/S",
+            "class_society": "American Bureau of Shipping (IACS)",
+            "pi_club": "Britannia",
+            "detention_rate_pct": 10.0,
+            "paris_mou": "White", "tokyo_mou": "White",
+            "uscg_targeting": "not targeted",
+            "fetched_ts": _NOW, "fetch_ok": True,
+        }
+    ])
 
     # Patch get_ship_info to fail - should never be called on a registry hit
     monkeypatch.setattr("app.equasis.get_ship_info", lambda imo: None)
@@ -216,14 +222,9 @@ def test_equasis_registry_miss_returns_404(tmp_path, monkeypatch):
 
 def test_equasis_fetch_ok_false_returns_404(tmp_path, monkeypatch):
     """A row with fetch_ok=false is treated as a miss - returns 404, no live scrape."""
-    row = (
-        9999999, None, None, None, None,
-        None, None, None, None, None,
-        None, None, None, None, None,
-        None, None, None, None,
-        _NOW, False,  # fetch_ok = false
-    )
-    client = _make_registry_client(tmp_path, monkeypatch, [row])
+    client = _make_registry_client(tmp_path, monkeypatch, [
+        {"imo": 9999999, "fetched_ts": _NOW, "fetch_ok": False},
+    ])
 
     r = client.get("/api/vessels/9999999/equasis")
     assert r.status_code == 404

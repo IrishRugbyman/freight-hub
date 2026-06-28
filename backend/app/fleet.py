@@ -97,47 +97,56 @@ def _load_registry(
 
     if q:
         ql = q.lower()
-        where.append("(LOWER(COALESCE(ship_name,'')) LIKE ? OR CAST(imo AS VARCHAR) LIKE ?)")
+        where.append("(LOWER(COALESCE(ship_name,'')) LIKE %s OR CAST(imo AS VARCHAR) LIKE %s)")
         params += [f"%{ql}%", f"%{q}%"]
     if flag:
-        where.append("flag = ?")
+        where.append("flag = %s")
         params.append(flag)
     if owner:
-        where.append("LOWER(COALESCE(owner,'')) LIKE ?")
+        where.append("LOWER(COALESCE(owner,'')) LIKE %s")
         params.append(f"%{owner.lower()}%")
     if class_society:
-        where.append("class_society = ?")
+        where.append("class_society = %s")
         params.append(class_society)
     if pi_club:
-        where.append("pi_club = ?")
+        where.append("pi_club = %s")
         params.append(pi_club)
     if paris_mou:
-        where.append("paris_mou = ?")
+        where.append("paris_mou = %s")
         params.append(paris_mou)
     if tokyo_mou:
-        where.append("tokyo_mou = ?")
+        where.append("tokyo_mou = %s")
         params.append(tokyo_mou)
     if built_min is not None:
-        where.append("year_built >= ?")
+        where.append("year_built >= %s")
         params.append(built_min)
     if built_max is not None:
-        where.append("year_built <= ?")
+        where.append("year_built <= %s")
         params.append(built_max)
     if dwt_min is not None:
-        where.append("dwt >= ?")
+        where.append("dwt >= %s")
         params.append(dwt_min)
     if dwt_max is not None:
-        where.append("dwt <= ?")
+        where.append("dwt <= %s")
         params.append(dwt_max)
     if detention_min is not None:
-        where.append("detention_rate_pct >= ?")
+        where.append("detention_rate_pct >= %s")
         params.append(detention_min)
     if risk_min is not None:
-        where.append("risk_score >= ?")
+        where.append("risk_score >= %s")
         params.append(risk_min)
 
-    sql = f"SELECT * FROM vessel_registry WHERE {' AND '.join(where)}"  # noqa: S608
-    return db.query(sql, params, db=db.registry_db_path())
+    # Select only Equasis registry columns; live-position columns (mmsi, kind, segment,
+    # region, lat, lon, sog, live_name) come from the subsequent live_positions join.
+    sql = (
+        "SELECT imo, ship_name, flag, flag_code, call_sign, gross_tonnage, dwt, "
+        "       ship_type, year_built, ship_status, owner, ism_manager, ship_manager, "
+        "       class_society, pi_club, detention_rate_pct, paris_mou, tokyo_mou, "
+        "       uscg_targeting, fetched_ts, fetch_ok, risk_score, risk_indicators, "
+        "       ofac_sanctioned "
+        f"FROM vessels WHERE {' AND '.join(where)}"  # noqa: S608
+    )
+    return db.pg_query(sql, params)
 
 
 def query_fleet(
@@ -282,10 +291,9 @@ def query_fleet(
 
 
 def query_facets() -> FleetFacets:
-    reg_df = db.query(
+    reg_df = db.pg_query(
         "SELECT flag, class_society, pi_club, paris_mou, tokyo_mou, owner "
-        "FROM vessel_registry WHERE fetch_ok = true",
-        db=db.registry_db_path(),
+        "FROM vessels WHERE fetch_ok = true",
     )
 
     live_df = db.query(

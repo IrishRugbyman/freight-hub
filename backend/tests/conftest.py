@@ -1,6 +1,11 @@
 """Pytest fixtures: a temporary ais_positions.duckdb seeded with known vessels,
 wired into the app via the AIS_POSITIONS_DB env var, exposed as a TestClient.
 Also includes fixtures that seed static JSON for the routes/dispersion endpoints.
+
+PostgreSQL vessel registry:
+Use setup_pg_vessels(monkeypatch, rows) to patch app.db.pg_query so that all
+vessel-registry reads are served from a temporary PostgreSQL table (same connection,
+shadows the real 'vessels' table via temp table precedence in search_path).
 """
 
 from __future__ import annotations
@@ -10,8 +15,59 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import duckdb
+import psycopg2
 import pytest
 from fastapi.testclient import TestClient
+
+_PG_DSN = "postgresql:///market_data"
+
+
+def setup_pg_vessels(monkeypatch, rows: list[dict]) -> None:
+    """Patch app.db.pg_query to serve registry reads from a per-test temp table.
+
+    Creates a TEMP TABLE named 'vessels' in a dedicated psycopg2 session.
+    Because PostgreSQL temp tables take precedence in the search_path, all
+    queries that reference 'vessels' will hit the seeded temp table for the
+    lifetime of this connection.  Monkeypatch restores pg_query at end of test.
+    """
+    import pandas as pd
+    from app import db as _db
+
+    conn = psycopg2.connect(_PG_DSN)
+    cur = conn.cursor()
+    cur.execute("CREATE TEMP TABLE vessels (LIKE public.vessels)")
+
+    for row in rows:
+        if not row:
+            continue
+        cols = list(row.keys())
+        vals = list(row.values())
+        placeholders = ",".join(["%s"] * len(cols))
+        col_str = ",".join(cols)
+        cur.execute(f"INSERT INTO vessels ({col_str}) VALUES ({placeholders})", vals)
+
+    conn.commit()
+
+    def _patched(sql: str, params: list | None = None) -> "pd.DataFrame":
+        try:
+            c = conn.cursor()
+            c.execute(sql, params or [])
+            if c.description is None:
+                c.close()
+                return pd.DataFrame()
+            col_names = [d[0] for d in c.description]
+            data = c.fetchall()
+            c.close()
+            return pd.DataFrame(data, columns=col_names)
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            return pd.DataFrame()
+
+    monkeypatch.setattr("app.db.pg_query", _patched)
+    # Connection is closed when garbage-collected at end of test.
 
 _SCHEMA = """
 CREATE TABLE live_positions (

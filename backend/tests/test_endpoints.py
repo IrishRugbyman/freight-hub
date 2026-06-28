@@ -1348,17 +1348,6 @@ def risk_events_client(tmp_path, monkeypatch):
     );
     """
 
-    reg_schema = """
-    CREATE TABLE vessel_registry (
-        imo BIGINT PRIMARY KEY, name VARCHAR, flag VARCHAR, owner VARCHAR,
-        class_society VARCHAR, pi_club VARCHAR, gross_tonnage INTEGER, dwt INTEGER,
-        year_built INTEGER, risk_score INTEGER, ofac_sanctioned BOOLEAN,
-        risk_indicators VARCHAR, paris_mou_detentions DOUBLE, tokyo_mou_detentions DOUBLE,
-        paris_mou_status VARCHAR, tokyo_mou_status VARCHAR,
-        fetched_ts TIMESTAMP, fetch_ok BOOLEAN
-    );
-    """
-
     an_schema = """
     CREATE TABLE meta_watermark (key VARCHAR PRIMARY KEY, ts TIMESTAMP);
     CREATE TABLE ais_events (
@@ -1405,19 +1394,12 @@ def risk_events_client(tmp_path, monkeypatch):
     )
     ais_conn.close()
 
-    reg_file = tmp_path / "registry.duckdb"
-    reg_conn = duckdb.connect(str(reg_file))
-    reg_conn.execute(reg_schema)
-    reg_conn.execute(
-        "INSERT INTO vessel_registry (imo, risk_score, ofac_sanctioned, fetch_ok) VALUES (2000001, 80, false, true)",
-    )
-    reg_conn.execute(
-        "INSERT INTO vessel_registry (imo, risk_score, ofac_sanctioned, fetch_ok) VALUES (2000002, 60, true, true)",
-    )
-    reg_conn.execute(
-        "INSERT INTO vessel_registry (imo, risk_score, ofac_sanctioned, fetch_ok) VALUES (2000003, 10, false, true)",
-    )
-    reg_conn.close()
+    from conftest import setup_pg_vessels
+    setup_pg_vessels(monkeypatch, [
+        {"imo": 2000001, "risk_score": 80, "ofac_sanctioned": False, "fetch_ok": True},
+        {"imo": 2000002, "risk_score": 60, "ofac_sanctioned": True, "fetch_ok": True},
+        {"imo": 2000003, "risk_score": 10, "ofac_sanctioned": False, "fetch_ok": True},
+    ])
 
     an_file = tmp_path / "analytics.duckdb"
     an_conn = duckdb.connect(str(an_file))
@@ -1444,7 +1426,6 @@ def risk_events_client(tmp_path, monkeypatch):
 
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
     monkeypatch.setenv("ANALYTICS_DB", str(an_file))
-    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
     from app.main import app
     return TestClient(app)
 
@@ -2006,22 +1987,15 @@ def risk_leaderboard_client(tmp_path, monkeypatch):
     )
     an_conn.close()
 
-    reg_file = tmp_path / "registry.duckdb"
-    reg_conn = duckdb.connect(str(reg_file))
-    reg_conn.execute(reg_schema)
-    reg_conn.executemany(
-        "INSERT INTO vessel_registry (imo, ship_name, fetch_ok, risk_score, ofac_sanctioned) VALUES (?,?,?,?,?)",
-        [
-            (7001, "VLCC RISK",    True, 80,  False),
-            (7003, "TANKER OFAC",  True, 60,  True),
-            (7004, "BULK CLEAN",   True, 10,  False),
-        ],
-    )
-    reg_conn.close()
+    from conftest import setup_pg_vessels
+    setup_pg_vessels(monkeypatch, [
+        {"imo": 7001, "ship_name": "VLCC RISK", "fetch_ok": True, "risk_score": 80, "ofac_sanctioned": False},
+        {"imo": 7003, "ship_name": "TANKER OFAC", "fetch_ok": True, "risk_score": 60, "ofac_sanctioned": True},
+        {"imo": 7004, "ship_name": "BULK CLEAN", "fetch_ok": True, "risk_score": 10, "ofac_sanctioned": False},
+    ])
 
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
     monkeypatch.setenv("ANALYTICS_DB", str(an_file))
-    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
     from app.main import app
     return TestClient(app)
 
@@ -3697,32 +3671,27 @@ def owner_intel_client(tmp_path, monkeypatch):
     """)
     an_conn.close()
 
-    reg_file = tmp_path / "reg_oi.duckdb"
-    reg_conn = duckdb.connect(str(reg_file))
-    reg_conn.execute("""
-    CREATE TABLE vessel_registry (
-        imo BIGINT PRIMARY KEY, ship_name VARCHAR, flag VARCHAR, flag_code VARCHAR,
-        call_sign VARCHAR, gross_tonnage INTEGER, dwt INTEGER, ship_type VARCHAR,
-        year_built INTEGER, ship_status VARCHAR, owner VARCHAR, ism_manager VARCHAR,
-        ship_manager VARCHAR, class_society VARCHAR, pi_club VARCHAR,
-        detention_rate_pct DOUBLE, paris_mou VARCHAR, tokyo_mou VARCHAR,
-        uscg_targeting VARCHAR, fetched_ts TIMESTAMP, fetch_ok BOOLEAN,
-        risk_score INTEGER, risk_indicators VARCHAR, ofac_sanctioned BOOLEAN
-    );
-    """)
-    reg_conn.executemany(
-        "INSERT INTO vessel_registry VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        [
-            (1000001, "V1", "Russia", "RU", None, 200000, 300000, "Tanker", 2005, "In Service", "SHADOW FLEET LLC", None, None, "RMRS", None, None, "Black", "Black", None, None, True, 72, None, True),
-            (1000002, "V2", "Nauru", "NR", None, 200000, 300000, "Tanker", 2004, "In Service", "SHADOW FLEET LLC", None, None, "RMRS", None, None, "Black", "Black", None, None, True, 75, None, False),
-            (1000003, "V3", "Marshall Islands", "MH", None, 150000, 200000, "Bulk Carrier", 2018, "In Service", "CLEAN OWNER PTE", None, None, "ABS (IACS)", None, None, "White", "White", None, None, True, 10, None, False),
-        ],
-    )
-    reg_conn.close()
+    from conftest import setup_pg_vessels
+    setup_pg_vessels(monkeypatch, [
+        {"imo": 1000001, "ship_name": "V1", "flag": "Russia", "flag_code": "RU",
+         "gross_tonnage": 200000, "dwt": 300000, "ship_type": "Tanker", "year_built": 2005,
+         "ship_status": "In Service", "owner": "SHADOW FLEET LLC", "class_society": "RMRS",
+         "paris_mou": "Black", "tokyo_mou": "Black", "fetch_ok": True,
+         "risk_score": 72, "ofac_sanctioned": True},
+        {"imo": 1000002, "ship_name": "V2", "flag": "Nauru", "flag_code": "NR",
+         "gross_tonnage": 200000, "dwt": 300000, "ship_type": "Tanker", "year_built": 2004,
+         "ship_status": "In Service", "owner": "SHADOW FLEET LLC", "class_society": "RMRS",
+         "paris_mou": "Black", "tokyo_mou": "Black", "fetch_ok": True,
+         "risk_score": 75, "ofac_sanctioned": False},
+        {"imo": 1000003, "ship_name": "V3", "flag": "Marshall Islands", "flag_code": "MH",
+         "gross_tonnage": 150000, "dwt": 200000, "ship_type": "Bulk Carrier", "year_built": 2018,
+         "ship_status": "In Service", "owner": "CLEAN OWNER PTE", "class_society": "ABS (IACS)",
+         "paris_mou": "White", "tokyo_mou": "White", "fetch_ok": True,
+         "risk_score": 10, "ofac_sanctioned": False},
+    ])
 
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
     monkeypatch.setenv("ANALYTICS_DB", str(an_file))
-    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
 
     from app.main import app as freight_app
     return TestClient(freight_app)
@@ -4621,32 +4590,27 @@ def owner_fleet_client(tmp_path, monkeypatch):
     ])
     an_conn.close()
 
-    reg_file = tmp_path / "reg_ofs.duckdb"
-    reg_conn = duckdb.connect(str(reg_file))
-    reg_conn.execute("""
-    CREATE TABLE vessel_registry (
-        imo BIGINT PRIMARY KEY, ship_name VARCHAR, flag VARCHAR, flag_code VARCHAR,
-        call_sign VARCHAR, gross_tonnage INTEGER, dwt INTEGER, ship_type VARCHAR,
-        year_built INTEGER, ship_status VARCHAR, owner VARCHAR, ism_manager VARCHAR,
-        ship_manager VARCHAR, class_society VARCHAR, pi_club VARCHAR,
-        detention_rate_pct DOUBLE, paris_mou VARCHAR, tokyo_mou VARCHAR,
-        uscg_targeting VARCHAR, fetched_ts TIMESTAMP, fetch_ok BOOLEAN,
-        risk_score INTEGER, risk_indicators VARCHAR, ofac_sanctioned BOOLEAN
-    );
-    """)
-    reg_conn.executemany(
-        "INSERT INTO vessel_registry VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        [
-            (2000001, "T1", "Russia", "RU", None, 200000, 300000, "Tanker", 2005, "In Service", "SHADOW FLEET LLC", None, None, "RMRS", None, None, "Black", "Black", None, None, True, 72, None, True),
-            (2000002, "T2", "Nauru", "NR", None, 200000, 300000, "Tanker", 2004, "In Service", "SHADOW FLEET LLC", None, None, "RMRS", None, None, "Black", "Black", None, None, True, 75, None, False),
-            (2000003, "B1", "Marshall Islands", "MH", None, 150000, 200000, "Bulk Carrier", 2018, "In Service", "CLEAN OWNER PTE", None, None, "ABS (IACS)", None, None, "White", "White", None, None, True, 10, None, False),
-        ],
-    )
-    reg_conn.close()
+    from conftest import setup_pg_vessels
+    setup_pg_vessels(monkeypatch, [
+        {"imo": 2000001, "ship_name": "T1", "flag": "Russia", "flag_code": "RU",
+         "gross_tonnage": 200000, "dwt": 300000, "ship_type": "Tanker", "year_built": 2005,
+         "ship_status": "In Service", "owner": "SHADOW FLEET LLC", "class_society": "RMRS",
+         "paris_mou": "Black", "tokyo_mou": "Black", "fetch_ok": True,
+         "risk_score": 72, "ofac_sanctioned": True},
+        {"imo": 2000002, "ship_name": "T2", "flag": "Nauru", "flag_code": "NR",
+         "gross_tonnage": 200000, "dwt": 300000, "ship_type": "Tanker", "year_built": 2004,
+         "ship_status": "In Service", "owner": "SHADOW FLEET LLC", "class_society": "RMRS",
+         "paris_mou": "Black", "tokyo_mou": "Black", "fetch_ok": True,
+         "risk_score": 75, "ofac_sanctioned": False},
+        {"imo": 2000003, "ship_name": "B1", "flag": "Marshall Islands", "flag_code": "MH",
+         "gross_tonnage": 150000, "dwt": 200000, "ship_type": "Bulk Carrier", "year_built": 2018,
+         "ship_status": "In Service", "owner": "CLEAN OWNER PTE", "class_society": "ABS (IACS)",
+         "paris_mou": "White", "tokyo_mou": "White", "fetch_ok": True,
+         "risk_score": 10, "ofac_sanctioned": False},
+    ])
 
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
     monkeypatch.setenv("ANALYTICS_DB", str(an_file))
-    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
 
     from app.main import app as freight_app
     return TestClient(freight_app)
@@ -4805,11 +4769,10 @@ def test_european_inbound_laden_only_filter(eur_inbound_client):
 # ===========================================================================
 
 @pytest.fixture
-def lng_client(tmp_path):
+def lng_client(tmp_path, monkeypatch):
     """Seeded TestClient with a known LNG tanker heading to Gate LNG Rotterdam."""
     ais_db = tmp_path / "ais.duckdb"
     ana_db = tmp_path / "analytics.duckdb"
-    reg_db = tmp_path / "registry.duckdb"
 
     import duckdb
     from datetime import datetime, UTC
@@ -4856,39 +4819,18 @@ def lng_client(tmp_path):
     """, [fifteen_days_ago, fifteen_days_ago])
     ana.close()
 
-    # Registry: QATARI STAR is an LNG tanker
-    reg = duckdb.connect(str(reg_db))
-    reg.execute("""
-        CREATE TABLE vessel_registry (
-            imo INT, ship_name TEXT, flag TEXT, flag_code TEXT, call_sign TEXT,
-            gross_tonnage INT, dwt INT, ship_type TEXT, year_built INT, ship_status TEXT,
-            owner TEXT, ism_manager TEXT, ship_manager TEXT, class_society TEXT,
-            pi_club TEXT, detention_rate_pct DOUBLE, paris_mou DOUBLE, tokyo_mou DOUBLE,
-            uscg_targeting DOUBLE, fetched_ts TIMESTAMP, fetch_ok BOOLEAN,
-            risk_score INT, risk_indicators TEXT, ofac_sanctioned BOOLEAN
-        )
-    """)
-    reg.execute("""
-        INSERT INTO vessel_registry (imo, ship_name, ship_type, owner)
-        VALUES (9451818, 'QATARI STAR', 'LNG Tanker', 'Qatar Gas Transport')
-    """)
-    reg.close()
+    # Registry: QATARI STAR is an LNG tanker (seeded into PostgreSQL temp table)
+    from conftest import setup_pg_vessels
+    setup_pg_vessels(monkeypatch, [
+        {"imo": 9451818, "ship_name": "QATARI STAR", "ship_type": "LNG Tanker",
+         "owner": "Qatar Gas Transport"},
+    ])
 
-    import os
     from fastapi.testclient import TestClient
-    env = {
-        "AIS_POSITIONS_DB": str(ais_db),
-        "ANALYTICS_DB": str(ana_db),
-        "REGISTRY_DB": str(reg_db),
-    }
-    with __import__('unittest.mock', fromlist=['patch']).patch.dict(os.environ, env):
-        from importlib import reload
-        from app import db
-        reload(db)
-        from app import main as m
-        reload(m)
-        client = TestClient(m.app)
-        yield client
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_db))
+    monkeypatch.setenv("ANALYTICS_DB", str(ana_db))
+    from app.main import app
+    return TestClient(app)
 
 
 def test_lng_inbound_structure(lng_client):
@@ -4983,28 +4925,17 @@ def _flag_client(tmp_path, monkeypatch):
     )
     conn.close()
 
-    reg_schema = """
-    CREATE TABLE vessel_registry (
-        imo BIGINT PRIMARY KEY, ship_name VARCHAR, flag VARCHAR, flag_code VARCHAR,
-        fetch_ok BOOLEAN
-    )
-    """
-    reg_file = tmp_path / "registry.duckdb"
-    rconn = duckdb.connect(str(reg_file))
-    rconn.execute(reg_schema)
-    rconn.executemany(
-        "INSERT INTO vessel_registry VALUES (?,?,?,?,?)",
-        [
-            # Registry uses ISO3 codes (as Equasis does); normalization must still
-            # detect LR != PA (mismatch) and GB == GBR (match).
-            (1000001, "LIBERIA VLCC", "Panama", "PAN", True),   # MMSI=LR -> mismatch
-            (1000003, "UK CAPE", "United Kingdom", "GBR", True),  # MMSI=GB -> match
-        ],
-    )
-    rconn.close()
+    from conftest import setup_pg_vessels
+    setup_pg_vessels(monkeypatch, [
+        # Registry uses ISO3 codes (as Equasis does); normalization must still
+        # detect LR != PA (mismatch) and GB == GBR (match).
+        {"imo": 1000001, "ship_name": "LIBERIA VLCC", "flag": "Panama", "flag_code": "PAN",
+         "fetch_ok": True},   # MMSI=LR -> mismatch
+        {"imo": 1000003, "ship_name": "UK CAPE", "flag": "United Kingdom", "flag_code": "GBR",
+         "fetch_ok": True},   # MMSI=GB -> match
+    ])
 
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
-    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
     from app.main import app
     return TestClient(app)
 

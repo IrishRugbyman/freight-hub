@@ -839,11 +839,10 @@ def vessel_behavioral_risk(mmsi: int, days: int = 30):
     reg_risk: int | None = None
     ofac = False
     if imo:
-        reg_df = db.query(
-            "SELECT risk_score, ofac_sanctioned FROM vessel_registry "
-            "WHERE imo = ? AND fetch_ok = true",
+        reg_df = db.pg_query(
+            "SELECT risk_score, ofac_sanctioned FROM vessels "
+            "WHERE imo = %s AND fetch_ok = true",
             [imo],
-            db=db.registry_db_path(),
         )
         if not reg_df.empty:
             rs = reg_df.iloc[0].get("risk_score")
@@ -956,12 +955,11 @@ def analytics_high_risk_positions(min_risk: int = 60):
     min_risk = max(0, min(100, min_risk))
     cutoff = _fresh_cutoff()
 
-    reg_df = db.query(
+    reg_df = db.pg_query(
         "SELECT imo, risk_score, COALESCE(ofac_sanctioned, false) AS ofac_sanctioned "
-        "FROM vessel_registry "
-        "WHERE risk_score >= ? AND fetch_ok = true AND imo IS NOT NULL",
+        "FROM vessels "
+        "WHERE risk_score >= %s AND fetch_ok = true AND imo IS NOT NULL",
         [min_risk],
-        db=db.registry_db_path(),
     )
     if reg_df.empty:
         return HighRiskPositionsResponse(
@@ -1207,12 +1205,10 @@ def analytics_sts_risk(days: int = 30, min_risk: int = 0):
     known_imos = [i for i in known_imos if i is not None]
     if known_imos:
         imo_list = list(set(known_imos))
-        ph3 = ",".join("?" * len(imo_list))
-        reg_df = db.query(
-            f"SELECT imo, risk_score, COALESCE(ofac_sanctioned, false) AS ofac_sanctioned "
-            f"FROM vessel_registry WHERE imo IN ({ph3}) AND fetch_ok = true",
-            imo_list,
-            db=db.registry_db_path(),
+        reg_df = db.pg_query(
+            "SELECT imo, risk_score, COALESCE(ofac_sanctioned, false) AS ofac_sanctioned "
+            "FROM vessels WHERE imo = ANY(%s) AND fetch_ok = true",
+            [imo_list],
         )
         for _, r in reg_df.iterrows():
             imo_risk[int(r["imo"])] = {
@@ -1330,11 +1326,10 @@ def analytics_sts_offenders(days: int = 30, limit: int = 50):
         for _, row in lp_df.iterrows():
             lp_map[int(row["mmsi"])] = row.to_dict()
 
-    reg_df = db.query(
-        "SELECT imo, risk_score, ofac_sanctioned FROM vessel_registry "
-        "WHERE fetch_ok = TRUE AND imo = ANY(?)",
+    reg_df = db.pg_query(
+        "SELECT imo, risk_score, ofac_sanctioned FROM vessels "
+        "WHERE fetch_ok = TRUE AND imo = ANY(%s)",
         [list({lp_map[m]["imo"] for m in mmsi_list if m in lp_map and lp_map[m].get("imo")})],
-        db=db.registry_db_path(),
     )
     reg_map: dict[int, dict] = {}
     if not reg_df.empty:
@@ -1433,12 +1428,10 @@ def analytics_reroutes(
     _rr_imos = [_valid_imo(v.get("imo")) for v in mmsi_info.values()]
     known_imos = list(set(i for i in _rr_imos if i is not None))
     if known_imos:
-        ph3 = ",".join("?" * len(known_imos))
-        reg_df = db.query(
-            f"SELECT imo, risk_score, COALESCE(ofac_sanctioned, false) AS ofac_sanctioned "
-            f"FROM vessel_registry WHERE imo IN ({ph3}) AND fetch_ok = true",
-            known_imos,
-            db=db.registry_db_path(),
+        reg_df = db.pg_query(
+            "SELECT imo, risk_score, COALESCE(ofac_sanctioned, false) AS ofac_sanctioned "
+            "FROM vessels WHERE imo = ANY(%s) AND fetch_ok = true",
+            [known_imos],
         )
         for _, r in reg_df.iterrows():
             imo_risk[int(r["imo"])] = {
@@ -1490,7 +1483,7 @@ def analytics_reroutes(
 
 @app.get("/api/vessels/{imo}/equasis")
 def vessel_equasis(imo: int):
-    """Equasis registry data for a vessel by IMO, served from vessel_registry.duckdb.
+    """Equasis registry data for a vessel by IMO, served from vessels PG table.
 
     Read-only: the crawler (registry/crawl.py via freight-registry.service) is the
     sole writer. No live Equasis requests are made here - those consume the monthly
@@ -1498,10 +1491,9 @@ def vessel_equasis(imo: int):
     """
     from fastapi import HTTPException
 
-    reg_df = db.query(
-        "SELECT * FROM vessel_registry WHERE imo = ? AND fetch_ok = true",
+    reg_df = db.pg_query(
+        "SELECT * FROM vessels WHERE imo = %s AND fetch_ok = true",
         [imo],
-        db=db.registry_db_path(),
     )
     if reg_df.empty:
         raise HTTPException(status_code=404, detail="Not in registry yet")
@@ -1646,10 +1638,9 @@ def flag_mismatches():
     if live.empty:
         return FlagMismatchResponse(as_of=as_of, rows=[])
 
-    reg = db.query(
+    reg = db.pg_query(
         "SELECT imo, flag AS registry_flag, flag_code AS registry_flag_code "
-        "FROM vessel_registry WHERE fetch_ok = true AND flag_code IS NOT NULL",
-        db=db.registry_db_path(),
+        "FROM vessels WHERE fetch_ok = true AND flag_code IS NOT NULL",
     )
     if reg.empty:
         return FlagMismatchResponse(as_of=as_of, rows=[])
@@ -1798,11 +1789,10 @@ def analytics_transit_risk(chokepoint: str = "hormuz", days: int = 30, min_risk:
     imo_risk: dict[int, dict] = {}
     known_imos = list(set(i for i in (_valid_imo(v.get("imo")) for v in mmsi_info.values()) if i))
     if known_imos:
-        ph3 = ",".join("?" * len(known_imos))
-        reg_df = db.query(
-            f"SELECT imo, risk_score, COALESCE(ofac_sanctioned, false) AS ofac_sanctioned "
-            f"FROM vessel_registry WHERE imo IN ({ph3}) AND fetch_ok = true",
-            known_imos, db=db.registry_db_path(),
+        reg_df = db.pg_query(
+            "SELECT imo, risk_score, COALESCE(ofac_sanctioned, false) AS ofac_sanctioned "
+            "FROM vessels WHERE imo = ANY(%s) AND fetch_ok = true",
+            [known_imos],
         )
         for _, r in reg_df.iterrows():
             imo_risk[int(r["imo"])] = {
@@ -1958,11 +1948,10 @@ def analytics_anchorage_dwell(zone: str = "singapore_west", limit: int = 50):
     known_imos = list(set(i for i in mmsi_imo.values() if i))
     imo_risk: dict[int, dict] = {}
     if known_imos:
-        ph3 = ",".join("?" * len(known_imos))
-        reg_df = db.query(
-            f"SELECT imo, risk_score, COALESCE(ofac_sanctioned, false) AS ofac_sanctioned "
-            f"FROM vessel_registry WHERE imo IN ({ph3}) AND fetch_ok = true",
-            known_imos, db=db.registry_db_path(),
+        reg_df = db.pg_query(
+            "SELECT imo, risk_score, COALESCE(ofac_sanctioned, false) AS ofac_sanctioned "
+            "FROM vessels WHERE imo = ANY(%s) AND fetch_ok = true",
+            [known_imos],
         )
         for _, r in reg_df.iterrows():
             imo_risk[int(r["imo"])] = {
@@ -2134,12 +2123,10 @@ def analytics_cargo_transitions(days: int = 7, min_change: float = 2.0, segment:
     known_imos = list(set(i for i in mmsi_imo.values() if i))
     imo_risk: dict[int, dict] = {}
     if known_imos:
-        ph4 = ",".join("?" * len(known_imos))
-        reg_df = db.query(
-            f"SELECT imo, risk_score, COALESCE(ofac_sanctioned, false) AS ofac_sanctioned "
-            f"FROM vessel_registry WHERE imo IN ({ph4}) AND fetch_ok = true",
-            known_imos,
-            db=db.registry_db_path(),
+        reg_df = db.pg_query(
+            "SELECT imo, risk_score, COALESCE(ofac_sanctioned, false) AS ofac_sanctioned "
+            "FROM vessels WHERE imo = ANY(%s) AND fetch_ok = true",
+            [known_imos],
         )
         for _, r in reg_df.iterrows():
             imo_risk[int(r["imo"])] = {
@@ -2643,11 +2630,10 @@ def analytics_shadow_fleet(days: int = 7, limit: int = 50):
     known_imos = [_valid_imo(v.get("imo")) for v in mmsi_info.values() if _valid_imo(v.get("imo"))]
     imo_risk: dict[int, dict] = {}
     if known_imos:
-        ph_imo = ",".join("?" * len(known_imos))
-        reg_df = db.query(
-            f"SELECT imo, risk_score, COALESCE(ofac_sanctioned, false) AS ofac, flag "
-            f"FROM vessel_registry WHERE imo IN ({ph_imo}) AND fetch_ok = true",
-            known_imos, db=db.registry_db_path(),
+        reg_df = db.pg_query(
+            "SELECT imo, risk_score, COALESCE(ofac_sanctioned, false) AS ofac, flag "
+            "FROM vessels WHERE imo = ANY(%s) AND fetch_ok = true",
+            [known_imos],
         )
         for _, r in reg_df.iterrows():
             imo_risk[int(r["imo"])] = {
@@ -3004,11 +2990,10 @@ def fleet_owner_risk(min_vessels: int = 2, top_n: int = 30):
     min_vessels = max(1, min(10, min_vessels))
     top_n = max(1, min(100, top_n))
 
-    df = db.query(
+    df = db.pg_query(
         "SELECT owner, risk_score, flag, ofac_sanctioned "
-        "FROM vessel_registry "
+        "FROM vessels "
         "WHERE fetch_ok = true AND owner IS NOT NULL AND risk_score IS NOT NULL",
-        db=db.registry_db_path(),
     )
     if df.empty:
         return OwnerRiskResponse(as_of=_iso(datetime.now(UTC).replace(tzinfo=None)) or "", rows=[])
@@ -3047,13 +3032,12 @@ def fleet_flag_risk(top_n: int = 30):
     Sorts by avg_risk_score descending. top_n clamped 5-100.
     """
     top_n = max(5, min(100, top_n))
-    df = db.query(
+    df = db.pg_query(
         "SELECT flag, flag_code, risk_score, "
         "       COALESCE(ofac_sanctioned, false) AS ofac_sanctioned, "
         "       paris_mou, tokyo_mou "
-        "FROM vessel_registry "
+        "FROM vessels "
         "WHERE fetch_ok = true AND flag IS NOT NULL AND risk_score IS NOT NULL",
-        db=db.registry_db_path(),
     )
     if df.empty:
         return FlagRiskResponse(as_of=_iso(datetime.now(UTC).replace(tzinfo=None)) or "", rows=[])
@@ -3097,10 +3081,9 @@ def fleet_kpis():
     Single-query summary: total vessels, risk coverage, OFAC count,
     high/critical risk counts, avg score among scored vessels.
     """
-    df = db.query(
+    df = db.pg_query(
         "SELECT risk_score, COALESCE(ofac_sanctioned, false) AS ofac_sanctioned "
-        "FROM vessel_registry WHERE fetch_ok = true",
-        db=db.registry_db_path(),
+        "FROM vessels WHERE fetch_ok = true",
     )
     if df.empty:
         return FleetKPIs(
@@ -3140,10 +3123,9 @@ def fleet_age():
     correlates with risk profile across the registry.
     """
     ref_year = datetime.now(UTC).year
-    df = db.query(
+    df = db.pg_query(
         "SELECT year_built, risk_score, COALESCE(ofac_sanctioned, false) AS ofac_sanctioned, dwt "
-        "FROM vessel_registry WHERE fetch_ok = true AND year_built IS NOT NULL",
-        db=db.registry_db_path(),
+        "FROM vessels WHERE fetch_ok = true AND year_built IS NOT NULL",
     )
     if df.empty:
         return FleetAgeResponse(
@@ -3257,12 +3239,10 @@ def analytics_slow_steamers(kind: str = "", limit: int = 50):
     all_imos = list(set(c["imo"] for c in candidates if c["imo"]))
     imo_risk: dict[int, dict] = {}
     if all_imos:
-        ph = ",".join("?" * len(all_imos))
-        reg_df = db.query(
-            f"SELECT imo, risk_score, COALESCE(ofac_sanctioned, false) AS ofac_sanctioned "
-            f"FROM vessel_registry WHERE imo IN ({ph}) AND fetch_ok = true",
-            all_imos,
-            db=db.registry_db_path(),
+        reg_df = db.pg_query(
+            "SELECT imo, risk_score, COALESCE(ofac_sanctioned, false) AS ofac_sanctioned "
+            "FROM vessels WHERE imo = ANY(%s) AND fetch_ok = true",
+            [all_imos],
         )
         for _, r in reg_df.iterrows():
             imo_risk[int(r["imo"])] = {
@@ -3549,11 +3529,10 @@ def analytics_risk_events(min_risk: int = 25, days: int = 2, limit: int = 50):
     now_ts = datetime.now(UTC).replace(tzinfo=None)
 
     # Step 1: high-risk IMOs from registry
-    reg_df = db.query(
+    reg_df = db.pg_query(
         "SELECT imo, risk_score, COALESCE(ofac_sanctioned, false) AS ofac "
-        "FROM vessel_registry WHERE risk_score >= ? AND fetch_ok = true",
+        "FROM vessels WHERE risk_score >= %s AND fetch_ok = true",
         [min_risk],
-        db=db.registry_db_path(),
     )
     if reg_df.empty:
         return RiskEventsResponse(
@@ -4084,12 +4063,10 @@ def analytics_anomaly_watchlist(
     live_imos = [_valid_imo(r.get("imo")) for _, r in lp_df.iterrows() if _valid_imo(r.get("imo")) is not None]
     reg_map: dict[int, dict] = {}
     if live_imos:
-        ph = ",".join(["?"] * len(live_imos))
-        reg_df = db.query(
-            f"SELECT imo, risk_score, ofac_sanctioned FROM vessel_registry "
-            f"WHERE imo IN ({ph}) AND fetch_ok = true",
-            live_imos,
-            db=db.registry_db_path(),
+        reg_df = db.pg_query(
+            "SELECT imo, risk_score, ofac_sanctioned FROM vessels "
+            "WHERE imo = ANY(%s) AND fetch_ok = true",
+            [live_imos],
         )
         if not reg_df.empty:
             for _, r in reg_df.iterrows():
@@ -4269,12 +4246,10 @@ def analytics_trade_lane_matrix(
     live_imos = [_valid_imo(r.get("imo")) for _, r in lp_df.iterrows() if _valid_imo(r.get("imo")) is not None]
     reg_map: dict[int, dict] = {}  # imo -> {risk_score, ofac}
     if live_imos:
-        placeholders = ",".join(["?"] * len(live_imos))
-        reg_df = db.query(
-            f"SELECT imo, risk_score, ofac_sanctioned FROM vessel_registry "
-            f"WHERE imo IN ({placeholders}) AND fetch_ok = true",
-            live_imos,
-            db=db.registry_db_path(),
+        reg_df = db.pg_query(
+            "SELECT imo, risk_score, ofac_sanctioned FROM vessels "
+            "WHERE imo = ANY(%s) AND fetch_ok = true",
+            [live_imos],
         )
         if not reg_df.empty:
             for _, r in reg_df.iterrows():
@@ -4513,12 +4488,10 @@ def analytics_vessel_risk_scores(
     live_imos = [v["imo"] for v in lp_map.values() if v["imo"] is not None]
     reg_map: dict[int, dict] = {}  # keyed by imo
     if live_imos:
-        placeholders = ",".join(["?"] * len(live_imos))
-        reg_df = db.query(
-            f"SELECT imo, risk_score, ofac_sanctioned FROM vessel_registry "
-            f"WHERE imo IN ({placeholders}) AND fetch_ok = true",
-            live_imos,
-            db=db.registry_db_path(),
+        reg_df = db.pg_query(
+            "SELECT imo, risk_score, ofac_sanctioned FROM vessels "
+            "WHERE imo = ANY(%s) AND fetch_ok = true",
+            [live_imos],
         )
         if not reg_df.empty:
             for _, r in reg_df.iterrows():
@@ -4806,12 +4779,10 @@ def analytics_owner_intelligence(min_vessels: int = 2, min_risk: int = 0, limit:
     limit = max(1, min(limit, 200))
     now_dt = datetime.now(UTC).replace(tzinfo=None)
 
-    reg_df = db.query(
+    reg_df = db.pg_query(
         "SELECT imo, owner, flag, risk_score, ship_type "
-        "FROM vessel_registry "
+        "FROM vessels "
         "WHERE fetch_ok = true AND owner IS NOT NULL AND owner != '' ",
-        [],
-        db=db.registry_db_path(),
     )
     if reg_df.empty:
         return OwnerIntelResponse(as_of=now_dt.isoformat(), total_owners=0, rows=[])
@@ -4947,12 +4918,10 @@ def analytics_owner_fleet_status(
         return OwnerFleetStatusResponse(
             as_of=now_dt.isoformat(), kind=kind, total_owners=0, rows=[]
         )
-    ph = ",".join("?" for _ in imos)
-    reg_df = db.query(
-        f"SELECT imo, owner, risk_score, flag FROM vessel_registry "
-        f"WHERE imo IN ({ph}) AND fetch_ok = true AND owner IS NOT NULL AND owner != ''",
-        imos,
-        db=db.registry_db_path(),
+    reg_df = db.pg_query(
+        "SELECT imo, owner, risk_score, flag FROM vessels "
+        "WHERE imo = ANY(%s) AND fetch_ok = true AND owner IS NOT NULL AND owner != ''",
+        [imos],
     )
     imo_to_reg: dict[int, dict] = {}
     if not reg_df.empty:
@@ -5235,11 +5204,10 @@ def analytics_cargo_state_changes(days: int = 7, kind: str = "tanker", min_chang
     imo_list = [int(v["imo"]) for v in live_map.values() if v.get("imo") and not pd.isna(v.get("imo"))]
     risk_map: dict[int, int] = {}
     if imo_list:
-        reg_df = db.query(
-            "SELECT imo, risk_score FROM vessel_registry "
-            "WHERE imo IN (" + ",".join("?" * len(imo_list)) + ") AND fetch_ok = true",
-            imo_list,
-            db=db.registry_db_path(),
+        reg_df = db.pg_query(
+            "SELECT imo, risk_score FROM vessels "
+            "WHERE imo = ANY(%s) AND fetch_ok = true",
+            [imo_list],
         )
         if not reg_df.empty:
             for _, r in reg_df.iterrows():
@@ -5439,11 +5407,10 @@ def analytics_speed_anomalies(kind: str = "tanker", min_z: float = 2.5, min_sog:
     # Enrich with registry risk before constructing Pydantic objects
     imo_list = [d["imo"] for d in raw_rows if d["imo"] is not None]
     if imo_list:
-        reg_df = db.query(
-            "SELECT imo, risk_score FROM vessel_registry "
-            "WHERE imo IN (" + ",".join("?" * len(imo_list)) + ") AND fetch_ok = true",
-            imo_list,
-            db=db.registry_db_path(),
+        reg_df = db.pg_query(
+            "SELECT imo, risk_score FROM vessels "
+            "WHERE imo = ANY(%s) AND fetch_ok = true",
+            [imo_list],
         )
         risk_m: dict[int, int] = {}
         if not reg_df.empty:
@@ -5652,11 +5619,10 @@ def analytics_port_arrivals(horizon_h: int = 48, kind: str = "tanker", ocean_onl
     all_imos = [d["imo"] for buckets in port_buckets.values() for d in buckets if d["imo"]]
     risk_m: dict[int, int] = {}
     if all_imos:
-        reg_df = db.query(
-            "SELECT imo, risk_score FROM vessel_registry "
-            "WHERE imo IN (" + ",".join("?" * len(all_imos)) + ") AND fetch_ok = true",
-            all_imos,
-            db=db.registry_db_path(),
+        reg_df = db.pg_query(
+            "SELECT imo, risk_score FROM vessels "
+            "WHERE imo = ANY(%s) AND fetch_ok = true",
+            [all_imos],
         )
         if not reg_df.empty:
             for _, rr in reg_df.iterrows():
@@ -6986,11 +6952,10 @@ def analytics_european_inbound(horizon_h: int = 48, laden_only: bool = False):
     all_imos = [c["imo"] for c in candidates if c.get("imo")]
     risk_m: dict[int, int] = {}
     if all_imos:
-        reg_df = db.query(
-            "SELECT imo, risk_score FROM vessel_registry "
-            "WHERE imo IN (" + ",".join("?" * len(all_imos)) + ") AND fetch_ok = true",
-            all_imos,
-            db=db.registry_db_path(),
+        reg_df = db.pg_query(
+            "SELECT imo, risk_score FROM vessels "
+            "WHERE imo = ANY(%s) AND fetch_ok = true",
+            [all_imos],
         )
         if not reg_df.empty:
             for _, rr in reg_df.iterrows():
@@ -7258,9 +7223,9 @@ async def get_lng_inbound(horizon_h: int = 72):
     stale_cutoff = now_dt - timedelta(hours=db.STALE_HOURS)
 
     # --- 1. Load LNG IMOs from registry ---
-    reg_df = db.query(
-        "SELECT imo, ship_name, owner, ship_type FROM vessel_registry WHERE ship_type LIKE '%LNG%' OR ship_type LIKE '%Liquefied Gas%'",
-        db=db.registry_db_path(),
+    reg_df = db.pg_query(
+        "SELECT imo, ship_name, owner, ship_type FROM vessels WHERE ship_type LIKE %s OR ship_type LIKE %s",
+        ["%LNG%", "%Liquefied Gas%"],
     )
     lng_imos: set[int] = set(reg_df["imo"].dropna().astype(int).tolist()) if not reg_df.empty else set()
     reg_by_imo: dict[int, dict] = {}

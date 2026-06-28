@@ -8,29 +8,9 @@ import duckdb
 import pytest
 from fastapi.testclient import TestClient
 
+from conftest import setup_pg_vessels
+
 _NOW = datetime.now(UTC).replace(tzinfo=None)
-
-_REG_SCHEMA = """
-CREATE TABLE IF NOT EXISTS vessel_registry (
-    imo BIGINT PRIMARY KEY,
-    ship_name VARCHAR, flag VARCHAR, flag_code VARCHAR, call_sign VARCHAR,
-    gross_tonnage INTEGER, dwt INTEGER,
-    ship_type VARCHAR, year_built INTEGER, ship_status VARCHAR,
-    owner VARCHAR, ism_manager VARCHAR, ship_manager VARCHAR,
-    class_society VARCHAR, pi_club VARCHAR,
-    detention_rate_pct DOUBLE, paris_mou VARCHAR, tokyo_mou VARCHAR, uscg_targeting VARCHAR,
-    fetched_ts TIMESTAMP, fetch_ok BOOLEAN,
-    risk_score INTEGER, risk_indicators VARCHAR, ofac_sanctioned BOOLEAN
-)
-"""
-
-_REG_INSERT = (
-    "INSERT INTO vessel_registry "
-    "(imo, ship_name, flag, flag_code, call_sign, gross_tonnage, dwt, ship_type, year_built,"
-    " ship_status, owner, ism_manager, ship_manager, class_society, pi_club,"
-    " detention_rate_pct, paris_mou, tokyo_mou, uscg_targeting, fetched_ts, fetch_ok)"
-    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
-)
 
 _AIS_SCHEMA = """
 CREATE TABLE live_positions (
@@ -48,34 +28,43 @@ CREATE TABLE ais_snapshots (
 );
 """
 
-# imo, ship_name, flag, flag_code, call_sign, gt, dwt, ship_type, year_built, ship_status,
-# owner, ism_mgr, ship_mgr, class, pi, detention, paris, tokyo, uscg, fetched_ts, fetch_ok
+# Vessel registry rows as dicts for PostgreSQL insertion.
+# Columns: imo, ship_name, flag, flag_code, call_sign, gross_tonnage, dwt,
+#          ship_type, year_built, ship_status, owner, ism_manager, ship_manager,
+#          class_society, pi_club, detention_rate_pct, paris_mou, tokyo_mou,
+#          uscg_targeting, fetched_ts, fetch_ok
 _REG_ROWS = [
-    (9111111, "ALPHA VLCC", "Liberia", "LBR", "A1A1A1", 160000, 310000,
-     "Crude Oil Tanker", 2005, "In Service/Commission",
-     "OCEAN OWNER LTD", "OCEAN ISM", "OCEAN ISM",
-     "Lloyd's Register (IACS)", "West of England",
-     2.5, "White", "White", "not targeted", _NOW, True),
-    (9222222, "BETA BULK", "Barbados", "BRB", "B2B2B2", 45000, 82000,
-     "Bulk Carrier", 2010, "In Service/Commission",
-     "BULK OWNER SA", "BULK ISM", "BULK ISM",
-     "DNV (IACS)", "Britannia",
-     8.0, "Grey", "White", "targeted", _NOW, True),
-    (9333333, "GAMMA TANKER", "Marshall Islands", "MHL", "C3C3C3", 28000, 46000,
-     "Chemical Tanker", 2015, "In Service/Commission",
-     "OCEAN OWNER LTD", "GAMMA ISM", "GAMMA ISM",
-     "Bureau Veritas (IACS)", "UK P&I",
-     0.0, "White", "Grey", "not targeted", _NOW, True),
-    (9444444, "REGISTRY ONLY", "Panama", "PAN", "D4D4D4", 5000, 8000,
-     "General Cargo Ship", 2000, "In Service/Commission",
-     "PANAMA OWNER", "PANAMA ISM", "PANAMA ISM",
-     "American Bureau of Shipping (IACS)", "Standard P&I",
-     15.0, "Black", "Black", "targeted", _NOW, True),
-    # fetch_ok=false should be excluded from all results
-    (9555555, "FAILED VESSEL", "Togo", "TGO", None,
-     None, None, None, None, None,
-     None, None, None, None, None,
-     None, None, None, None, _NOW, False),
+    {"imo": 9111111, "ship_name": "ALPHA VLCC", "flag": "Liberia", "flag_code": "LBR",
+     "call_sign": "A1A1A1", "gross_tonnage": 160000, "dwt": 310000,
+     "ship_type": "Crude Oil Tanker", "year_built": 2005, "ship_status": "In Service/Commission",
+     "owner": "OCEAN OWNER LTD", "ism_manager": "OCEAN ISM", "ship_manager": "OCEAN ISM",
+     "class_society": "Lloyd's Register (IACS)", "pi_club": "West of England",
+     "detention_rate_pct": 2.5, "paris_mou": "White", "tokyo_mou": "White",
+     "uscg_targeting": "not targeted", "fetched_ts": _NOW, "fetch_ok": True},
+    {"imo": 9222222, "ship_name": "BETA BULK", "flag": "Barbados", "flag_code": "BRB",
+     "call_sign": "B2B2B2", "gross_tonnage": 45000, "dwt": 82000,
+     "ship_type": "Bulk Carrier", "year_built": 2010, "ship_status": "In Service/Commission",
+     "owner": "BULK OWNER SA", "ism_manager": "BULK ISM", "ship_manager": "BULK ISM",
+     "class_society": "DNV (IACS)", "pi_club": "Britannia",
+     "detention_rate_pct": 8.0, "paris_mou": "Grey", "tokyo_mou": "White",
+     "uscg_targeting": "targeted", "fetched_ts": _NOW, "fetch_ok": True},
+    {"imo": 9333333, "ship_name": "GAMMA TANKER", "flag": "Marshall Islands", "flag_code": "MHL",
+     "call_sign": "C3C3C3", "gross_tonnage": 28000, "dwt": 46000,
+     "ship_type": "Chemical Tanker", "year_built": 2015, "ship_status": "In Service/Commission",
+     "owner": "OCEAN OWNER LTD", "ism_manager": "GAMMA ISM", "ship_manager": "GAMMA ISM",
+     "class_society": "Bureau Veritas (IACS)", "pi_club": "UK P&I",
+     "detention_rate_pct": 0.0, "paris_mou": "White", "tokyo_mou": "Grey",
+     "uscg_targeting": "not targeted", "fetched_ts": _NOW, "fetch_ok": True},
+    {"imo": 9444444, "ship_name": "REGISTRY ONLY", "flag": "Panama", "flag_code": "PAN",
+     "call_sign": "D4D4D4", "gross_tonnage": 5000, "dwt": 8000,
+     "ship_type": "General Cargo Ship", "year_built": 2000, "ship_status": "In Service/Commission",
+     "owner": "PANAMA OWNER", "ism_manager": "PANAMA ISM", "ship_manager": "PANAMA ISM",
+     "class_society": "American Bureau of Shipping (IACS)", "pi_club": "Standard P&I",
+     "detention_rate_pct": 15.0, "paris_mou": "Black", "tokyo_mou": "Black",
+     "uscg_targeting": "targeted", "fetched_ts": _NOW, "fetch_ok": True},
+    # fetch_ok=False should be excluded from all results
+    {"imo": 9555555, "ship_name": "FAILED VESSEL", "flag": "Togo", "flag_code": "TGO",
+     "fetched_ts": _NOW, "fetch_ok": False},
 ]
 
 # mmsi, name, lat, lon, sog, cog, heading, dest, type, len, kind, segment, region, ts,
@@ -98,14 +87,8 @@ def _make_client(tmp_path, monkeypatch) -> TestClient:
     )
     ais_conn.close()
 
-    reg_file = tmp_path / "registry.duckdb"
-    reg_conn = duckdb.connect(str(reg_file))
-    reg_conn.execute(_REG_SCHEMA)
-    reg_conn.executemany(_REG_INSERT, _REG_ROWS)
-    reg_conn.close()
-
+    setup_pg_vessels(monkeypatch, _REG_ROWS)
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
-    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
     from app.main import app
     return TestClient(app)
 
@@ -267,37 +250,20 @@ def test_fleet_export_filtered(tmp_path, monkeypatch):
 
 def test_fleet_risk_min(tmp_path, monkeypatch):
     """risk_min filter returns only vessels with risk_score >= threshold."""
-    # Seed two vessels with different risk scores
     ais_file = tmp_path / "ais.duckdb"
     ais_conn = duckdb.connect(str(ais_file))
     ais_conn.execute(_AIS_SCHEMA)
     ais_conn.close()
 
-    reg_file = tmp_path / "registry.duckdb"
-    reg_conn = duckdb.connect(str(reg_file))
-    reg_conn.execute(_REG_SCHEMA)
-    reg_conn.execute(
-        "INSERT INTO vessel_registry "
-        "(imo, ship_name, flag, fetch_ok, fetched_ts, risk_score) "
-        "VALUES (1000001, 'LOW RISK', 'Norway', true, ?, 10)",
-        [_NOW],
-    )
-    reg_conn.execute(
-        "INSERT INTO vessel_registry "
-        "(imo, ship_name, flag, fetch_ok, fetched_ts, risk_score) "
-        "VALUES (1000002, 'HIGH RISK', 'Cameroon', true, ?, 65)",
-        [_NOW],
-    )
-    reg_conn.execute(
-        "INSERT INTO vessel_registry "
-        "(imo, ship_name, flag, fetch_ok, fetched_ts) "
-        "VALUES (1000003, 'NO SCORE', 'Panama', true, ?)",
-        [_NOW],
-    )
-    reg_conn.close()
-
+    setup_pg_vessels(monkeypatch, [
+        {"imo": 1000001, "ship_name": "LOW RISK", "flag": "Norway",
+         "fetch_ok": True, "fetched_ts": _NOW, "risk_score": 10},
+        {"imo": 1000002, "ship_name": "HIGH RISK", "flag": "Cameroon",
+         "fetch_ok": True, "fetched_ts": _NOW, "risk_score": 65},
+        {"imo": 1000003, "ship_name": "NO SCORE", "flag": "Panama",
+         "fetch_ok": True, "fetched_ts": _NOW},
+    ])
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
-    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
     from app.main import app
     client = TestClient(app)
 
@@ -320,32 +286,26 @@ def _make_owner_risk_client(tmp_path, monkeypatch) -> "TestClient":
     ais_conn.execute(_AIS_SCHEMA)
     ais_conn.close()
 
-    reg_file = tmp_path / "registry.duckdb"
-    reg_conn = duckdb.connect(str(reg_file))
-    reg_conn.execute(_REG_SCHEMA)
-    # owner A has 3 vessels (scores 60, 40, 80) -> avg=60, max=80, high=2
-    reg_conn.executemany(
-        "INSERT INTO vessel_registry (imo, ship_name, flag, owner, risk_score, fetch_ok, fetched_ts) VALUES (?,?,?,?,?,true,?)",
-        [
-            (8000001, "SHIP A1", "Liberia", "OWNER_A", 60, _NOW),
-            (8000002, "SHIP A2", "Liberia", "OWNER_A", 40, _NOW),
-            (8000003, "SHIP A3", "Panama", "OWNER_A", 80, _NOW),
-            # owner B has 2 vessels (scores 20, 30) -> avg=25, max=30, high=0
-            (8000004, "SHIP B1", "Malta", "OWNER_B", 20, _NOW),
-            (8000005, "SHIP B2", "Malta", "OWNER_B", 30, _NOW),
-            # owner C has 1 vessel (score 90) - excluded by min_vessels=2
-            (8000006, "SHIP C1", "Togo", "OWNER_C", 90, _NOW),
-            # fetch_ok=false should be excluded
-        ],
-    )
-    reg_conn.execute(
-        "INSERT INTO vessel_registry (imo, ship_name, flag, owner, risk_score, fetch_ok, fetched_ts) VALUES (?,?,?,?,?,false,?)",
-        [8000099, "BROKEN", "None", "OWNER_D", 50, _NOW],
-    )
-    reg_conn.close()
-
+    setup_pg_vessels(monkeypatch, [
+        {"imo": 8000001, "ship_name": "SHIP A1", "flag": "Liberia", "owner": "OWNER_A",
+         "risk_score": 60, "fetch_ok": True, "fetched_ts": _NOW},
+        {"imo": 8000002, "ship_name": "SHIP A2", "flag": "Liberia", "owner": "OWNER_A",
+         "risk_score": 40, "fetch_ok": True, "fetched_ts": _NOW},
+        {"imo": 8000003, "ship_name": "SHIP A3", "flag": "Panama", "owner": "OWNER_A",
+         "risk_score": 80, "fetch_ok": True, "fetched_ts": _NOW},
+        # owner B has 2 vessels (scores 20, 30) -> avg=25, max=30, high=0
+        {"imo": 8000004, "ship_name": "SHIP B1", "flag": "Malta", "owner": "OWNER_B",
+         "risk_score": 20, "fetch_ok": True, "fetched_ts": _NOW},
+        {"imo": 8000005, "ship_name": "SHIP B2", "flag": "Malta", "owner": "OWNER_B",
+         "risk_score": 30, "fetch_ok": True, "fetched_ts": _NOW},
+        # owner C has 1 vessel (score 90) - excluded by min_vessels=2
+        {"imo": 8000006, "ship_name": "SHIP C1", "flag": "Togo", "owner": "OWNER_C",
+         "risk_score": 90, "fetch_ok": True, "fetched_ts": _NOW},
+        # fetch_ok=false should be excluded
+        {"imo": 8000099, "ship_name": "BROKEN", "flag": "None", "owner": "OWNER_D",
+         "risk_score": 50, "fetch_ok": False, "fetched_ts": _NOW},
+    ])
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
-    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
     from app.main import app
     return TestClient(app)
 
@@ -440,20 +400,13 @@ def _make_high_risk_client(tmp_path, monkeypatch) -> "TestClient":
     )
     ais_conn.close()
 
-    reg_file = tmp_path / "registry.duckdb"
-    reg_conn = duckdb.connect(str(reg_file))
-    reg_conn.execute(_REG_SCHEMA)
-    reg_conn.executemany(
-        "INSERT INTO vessel_registry (imo, ship_name, flag, risk_score, ofac_sanctioned, fetch_ok, fetched_ts) VALUES (?,?,?,?,?,true,?)",
-        [
-            (5000001, "HIGH RISK TANKER", "Togo", 75, False, _NOW),
-            (5000002, "MED TANKER", "Panama", 45, False, _NOW),
-        ],
-    )
-    reg_conn.close()
-
+    setup_pg_vessels(monkeypatch, [
+        {"imo": 5000001, "ship_name": "HIGH RISK TANKER", "flag": "Togo",
+         "risk_score": 75, "ofac_sanctioned": False, "fetch_ok": True, "fetched_ts": _NOW},
+        {"imo": 5000002, "ship_name": "MED TANKER", "flag": "Panama",
+         "risk_score": 45, "ofac_sanctioned": False, "fetch_ok": True, "fetched_ts": _NOW},
+    ])
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
-    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
     from app.main import app
     return TestClient(app)
 
@@ -559,21 +512,15 @@ def test_flag_risk_sorted_desc(tmp_path, monkeypatch):
     ais_conn.execute(_AIS_SCHEMA)
     ais_conn.close()
 
-    reg_file = tmp_path / "registry.duckdb"
-    reg_conn = duckdb.connect(str(reg_file))
-    reg_conn.execute(_REG_SCHEMA)
-    reg_conn.executemany(
-        "INSERT INTO vessel_registry (imo, ship_name, flag, flag_code, risk_score, fetch_ok, fetched_ts) VALUES (?,?,?,?,?,true,?)",
-        [
-            (9900001, "SHIP1", "Togo", "TGO", 80, _NOW),
-            (9900002, "SHIP2", "Malta", "MLT", 30, _NOW),
-            (9900003, "SHIP3", "Togo", "TGO", 60, _NOW),
-        ],
-    )
-    reg_conn.close()
-
+    setup_pg_vessels(monkeypatch, [
+        {"imo": 9900001, "ship_name": "SHIP1", "flag": "Togo", "flag_code": "TGO",
+         "risk_score": 80, "fetch_ok": True, "fetched_ts": _NOW},
+        {"imo": 9900002, "ship_name": "SHIP2", "flag": "Malta", "flag_code": "MLT",
+         "risk_score": 30, "fetch_ok": True, "fetched_ts": _NOW},
+        {"imo": 9900003, "ship_name": "SHIP3", "flag": "Togo", "flag_code": "TGO",
+         "risk_score": 60, "fetch_ok": True, "fetched_ts": _NOW},
+    ])
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
-    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
     from app.main import app
     client = TestClient(app)
 
@@ -597,29 +544,20 @@ def _make_kpi_client(tmp_path, monkeypatch) -> TestClient:
     ais_conn.execute(_AIS_SCHEMA)
     ais_conn.close()
 
-    reg_file = tmp_path / "registry.duckdb"
-    reg_conn = duckdb.connect(str(reg_file))
-    reg_conn.execute(_REG_SCHEMA)
-    reg_conn.executemany(
-        "INSERT INTO vessel_registry (imo, ship_name, flag, risk_score, ofac_sanctioned, fetch_ok, fetched_ts) "
-        "VALUES (?,?,?,?,?,true,?)",
-        [
-            (9900001, "CRITICAL", "Iran", 80, True, _NOW),   # critical + ofac
-            (9900002, "HIGH", "Togo", 55, False, _NOW),      # high risk
-            (9900003, "LOW", "Malta", 15, False, _NOW),      # low risk, scored
-            (9900004, "UNSCORED", "Panama", None, False, _NOW),  # no risk_score
-        ],
-    )
-    # fetch_ok=false vessel - should NOT appear
-    reg_conn.execute(
-        "INSERT INTO vessel_registry (imo, ship_name, flag, risk_score, fetch_ok, fetched_ts) "
-        "VALUES (9900005, 'EXCLUDED', 'Cuba', 90, false, ?)",
-        [_NOW],
-    )
-    reg_conn.close()
-
+    setup_pg_vessels(monkeypatch, [
+        {"imo": 9900001, "ship_name": "CRITICAL", "flag": "Iran",
+         "risk_score": 80, "ofac_sanctioned": True, "fetch_ok": True, "fetched_ts": _NOW},
+        {"imo": 9900002, "ship_name": "HIGH", "flag": "Togo",
+         "risk_score": 55, "ofac_sanctioned": False, "fetch_ok": True, "fetched_ts": _NOW},
+        {"imo": 9900003, "ship_name": "LOW", "flag": "Malta",
+         "risk_score": 15, "ofac_sanctioned": False, "fetch_ok": True, "fetched_ts": _NOW},
+        {"imo": 9900004, "ship_name": "UNSCORED", "flag": "Panama",
+         "ofac_sanctioned": False, "fetch_ok": True, "fetched_ts": _NOW},
+        # fetch_ok=false vessel - should NOT appear
+        {"imo": 9900005, "ship_name": "EXCLUDED", "flag": "Cuba",
+         "risk_score": 90, "fetch_ok": False, "fetched_ts": _NOW},
+    ])
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
-    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
     from app.main import app
     return TestClient(app)
 
@@ -671,10 +609,8 @@ def test_fleet_kpis_empty_registry(tmp_path, monkeypatch):
     """Empty registry returns zeros."""
     ais_file = tmp_path / "ais.duckdb"
     duckdb.connect(str(ais_file)).execute(_AIS_SCHEMA)
-    reg_file = tmp_path / "registry.duckdb"
-    duckdb.connect(str(reg_file)).execute(_REG_SCHEMA)
+    setup_pg_vessels(monkeypatch, [])
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
-    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
     from app.main import app
     r = TestClient(app).get("/api/fleet/kpis")
     assert r.status_code == 200
@@ -692,30 +628,24 @@ def _make_age_client(tmp_path, monkeypatch) -> TestClient:
     ais_file = tmp_path / "ais.duckdb"
     duckdb.connect(str(ais_file)).execute(_AIS_SCHEMA)
 
-    reg_file = tmp_path / "registry.duckdb"
-    reg_conn = duckdb.connect(str(reg_file))
-    reg_conn.execute(_REG_SCHEMA)
-    # year 2026 reference: age = 2026 - year_built
-    # 2 new (age 2, band "0-4"), 2 mid-aged (age 8, band "5-9"), 1 old (age 30, band "25+")
-    reg_conn.executemany(
-        "INSERT INTO vessel_registry (imo, ship_name, flag, year_built, dwt, risk_score, fetch_ok, fetched_ts) VALUES (?,?,?,?,?,?,true,?)",
-        [
-            (9910001, "NEW1", "Malta", 2024, 300000, 10, _NOW),
-            (9910002, "NEW2", "Malta", 2024, 280000, 15, _NOW),
-            (9910003, "MID1", "Panama", 2018, 80000, 40, _NOW),
-            (9910004, "MID2", "Panama", 2018, 75000, 55, _NOW),  # high risk
-            (9910005, "OLD1", "Iran", 1996, 150000, 80, _NOW),   # old + high risk
-        ],
-    )
-    # fetch_ok=false vessel should be excluded
-    reg_conn.execute(
-        "INSERT INTO vessel_registry (imo, ship_name, flag, year_built, fetch_ok, fetched_ts) VALUES (9910006, 'EXCLUDED', 'Cuba', 2000, false, ?)",
-        [_NOW],
-    )
-    reg_conn.close()
-
+    setup_pg_vessels(monkeypatch, [
+        # year 2026 reference: age = 2026 - year_built
+        # 2 new (age 2, band "0-4"), 2 mid-aged (age 8, band "5-9"), 1 old (age 30, band "25+")
+        {"imo": 9910001, "ship_name": "NEW1", "flag": "Malta", "year_built": 2024,
+         "dwt": 300000, "risk_score": 10, "fetch_ok": True, "fetched_ts": _NOW},
+        {"imo": 9910002, "ship_name": "NEW2", "flag": "Malta", "year_built": 2024,
+         "dwt": 280000, "risk_score": 15, "fetch_ok": True, "fetched_ts": _NOW},
+        {"imo": 9910003, "ship_name": "MID1", "flag": "Panama", "year_built": 2018,
+         "dwt": 80000, "risk_score": 40, "fetch_ok": True, "fetched_ts": _NOW},
+        {"imo": 9910004, "ship_name": "MID2", "flag": "Panama", "year_built": 2018,
+         "dwt": 75000, "risk_score": 55, "fetch_ok": True, "fetched_ts": _NOW},
+        {"imo": 9910005, "ship_name": "OLD1", "flag": "Iran", "year_built": 1996,
+         "dwt": 150000, "risk_score": 80, "fetch_ok": True, "fetched_ts": _NOW},
+        # fetch_ok=false vessel should be excluded
+        {"imo": 9910006, "ship_name": "EXCLUDED", "flag": "Cuba", "year_built": 2000,
+         "fetch_ok": False, "fetched_ts": _NOW},
+    ])
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
-    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
     from app.main import app
     return TestClient(app)
 
@@ -763,17 +693,11 @@ def test_fleet_age_excludes_no_year_built(tmp_path, monkeypatch):
     """Vessels without year_built are excluded from bands."""
     ais_file = tmp_path / "ais.duckdb"
     duckdb.connect(str(ais_file)).execute(_AIS_SCHEMA)
-    reg_file = tmp_path / "registry.duckdb"
-    reg_conn = duckdb.connect(str(reg_file))
-    reg_conn.execute(_REG_SCHEMA)
-    # Only vessel with no year_built
-    reg_conn.execute(
-        "INSERT INTO vessel_registry (imo, ship_name, flag, fetch_ok, fetched_ts) VALUES (9920001, 'NOYR', 'Malta', true, ?)",
-        [_NOW],
-    )
-    reg_conn.close()
+    setup_pg_vessels(monkeypatch, [
+        {"imo": 9920001, "ship_name": "NOYR", "flag": "Malta",
+         "fetch_ok": True, "fetched_ts": _NOW},
+    ])
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
-    monkeypatch.setenv("REGISTRY_DB", str(reg_file))
     from app.main import app
     d = TestClient(app).get("/api/fleet/age").json()
     assert d["bands"] == []
