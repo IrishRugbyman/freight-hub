@@ -444,28 +444,74 @@ def _live_all():
 
 
 def _live_visible():
-    """Full live_positions within the visible window (VISIBLE_HOURS, default 24h).
+    """Vessels active within VISIBLE_HOURS (default 24h) for the map endpoint.
 
-    Used only by /api/vessels so the map can show grey last-known-position markers
-    for dark vessels. All analytics endpoints use _live_all() (3h fresh window) so
-    stale vessels never corrupt counts/flows/chokepoints.
+    Combines two sources so collector restarts don't erase dark vessels:
+      1. live_positions: full data for any MMSI currently in the collector's memory.
+      2. ais_snapshots: last-known fix for MMSIs that went dark and were evicted from
+         live_positions (e.g. after a collector restart with no new transmission).
+
+    All analytics endpoints use _live_all() (3h fresh window) - this function must
+    never be used for counts/flows/chokepoints or stale vessels would corrupt them.
     """
     import time
 
-    now = time.monotonic()
+    now_mono = time.monotonic()
     current_path = str(db.db_path())
     with _live_cache_lock:
         path_match = _live_visible_cache["path"] == current_path
-        if path_match and _live_visible_cache["df"] is not None and now - _live_visible_cache["ts"] < _LIVE_CACHE_TTL:
+        if path_match and _live_visible_cache["df"] is not None and now_mono - _live_visible_cache["ts"] < _LIVE_CACHE_TTL:
             return _live_visible_cache["df"]
-    df = db.query(
-        "SELECT * FROM live_positions WHERE updated_ts > ?",
-        [_visible_cutoff()],
+
+    cutoff = _visible_cutoff()
+
+    # Source 1: live fleet (may have been trimmed to 24h by collector, or shorter after restart)
+    live_df = db.query("SELECT * FROM live_positions WHERE updated_ts > ?", [cutoff])
+    live_mmsis: set = set(live_df["mmsi"].tolist()) if not live_df.empty else set()
+
+    # Source 2: last-known snapshot per MMSI for vessels not in live_positions.
+    # ROW_NUMBER over 24h of snapshots: DuckDB handles ~400k rows in <200ms columnar.
+    ghost_df = db.query(
+        """
+        SELECT mmsi, kind, segment, region, lat, lon, sog, nav_status, draught,
+               destination, ship_type, length_m, snapshot_ts AS updated_ts
+        FROM (
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY mmsi ORDER BY snapshot_ts DESC) AS rn
+            FROM ais_snapshots
+            WHERE snapshot_ts > ?
+        ) sub
+        WHERE rn = 1
+        """,
+        [cutoff],
     )
+    if not ghost_df.empty:
+        if live_mmsis:
+            ghost_df = ghost_df[~ghost_df["mmsi"].isin(live_mmsis)]
+        if not ghost_df.empty:
+            # Enrich ghost rows: pull name + imo from vessels PG table (no duplication,
+            # just a keyed lookup - ais_name is written by the collector, ship_name by Equasis).
+            mmsi_list = ghost_df["mmsi"].tolist()
+            reg = db.pg_query(
+                "SELECT mmsi, imo, COALESCE(ship_name, ais_name) AS name "
+                "FROM vessels WHERE mmsi = ANY(%s)",
+                [mmsi_list],
+            )
+            if not reg.empty:
+                reg = reg.set_index("mmsi")
+                ghost_df["name"] = ghost_df["mmsi"].map(reg["name"])
+                ghost_df["imo"] = ghost_df["mmsi"].map(reg["imo"])
+            else:
+                ghost_df["name"] = None
+                ghost_df["imo"] = None
+            for col in ("cog", "heading", "eta"):
+                ghost_df[col] = None
+            live_df = pd.concat([live_df, ghost_df], ignore_index=True) if not live_df.empty else ghost_df
+
+    df = live_df
     if not df.empty:
         with _live_cache_lock:
             _live_visible_cache["df"] = df
-            _live_visible_cache["ts"] = now
+            _live_visible_cache["ts"] = now_mono
             _live_visible_cache["path"] = current_path
     elif _live_visible_cache["df"] is not None and path_match:
         return _live_visible_cache["df"]
@@ -572,14 +618,16 @@ def vessels(
         df = df[df["flag_shadow"]]
     if df.empty:
         return []
-    # Round to AIS-native resolution: cuts JSON size ~35% before gzip, lossless for display
-    df["lat"] = df["lat"].round(5)   # ~1.1 m precision
-    df["lon"] = df["lon"].round(5)
+    # Round to AIS-native resolution: cuts JSON size ~35% before gzip, lossless for display.
+    # Use pd.to_numeric first: ghost rows (from ais_snapshots fallback) may have Python None
+    # in numeric columns which causes .round() to raise TypeError.
+    df["lat"] = pd.to_numeric(df["lat"], errors="coerce").round(5)
+    df["lon"] = pd.to_numeric(df["lon"], errors="coerce").round(5)
     for col, nd in (("sog", 1), ("cog", 1), ("draught", 1)):
         if col in df.columns:
-            df[col] = df[col].round(nd)
+            df[col] = pd.to_numeric(df[col], errors="coerce").round(nd)
     if "heading" in df.columns:
-        df["heading"] = df["heading"].round(0)
+        df["heading"] = pd.to_numeric(df["heading"], errors="coerce").round(0)
     df = df.astype(object).where(df.notna(), None)  # NaN -> None for pydantic
     cols = set(df.columns)
     return [
