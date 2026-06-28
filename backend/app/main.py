@@ -2660,36 +2660,30 @@ def analytics_shadow_fleet(days: int = 7, limit: int = 50):
 
 @app.get("/api/analytics/laden", response_model=LadenResponse)
 def analytics_laden(kind: str = "tanker"):
-    """Current fleet laden/ballast/unknown split by segment from vessel_state."""
+    """Current fleet laden/ballast/unknown split by segment from fleet_density.
+
+    Uses the most recent hour of fleet_density (which already aggregates
+    laden/ballast counts per segment/kind) rather than a cross-DB join
+    between vessel_state and live_positions.
+    """
     df = db.query(
-        "SELECT vs.mmsi, vs.laden, lp.segment "
-        "FROM vessel_state vs "
-        "LEFT JOIN ( "
-        "   SELECT mmsi, segment FROM live_positions "
-        ") lp ON vs.mmsi = lp.mmsi "
-        "WHERE lp.kind = ? OR lp.kind IS NULL",
+        "SELECT segment, kind, laden_count, ballast_count, unknown_count "
+        "FROM fleet_density "
+        "WHERE ts = (SELECT max(ts) FROM fleet_density) AND kind = ?",
         [kind],
         db=db.analytics_db_path(),
     )
-    # vessel_state has no kind column; join with live_positions for kind filter
-    # Fallback: query vessel_state alone if analytics DB has no join candidates
-    if df.empty or "segment" not in df.columns or df["segment"].isna().all():
-        df = db.query(
-            "SELECT mmsi, laden, CAST(NULL AS VARCHAR) as segment FROM vessel_state",
-            db=db.analytics_db_path(),
-        )
 
     if df.empty:
         return LadenResponse(kind=kind, segments=[])
 
-    df["laden"] = df["laden"].fillna("unknown").astype(str)
-    df["segment"] = df["segment"].fillna("Unknown").astype(str)
     result: dict[str, dict[str, int]] = {}
     for _, row in df.iterrows():
-        seg = str(row["segment"]) if row["segment"] else "Unknown"
-        status = str(row["laden"])
+        seg = str(row["segment"])
         entry = result.setdefault(seg, {"laden": 0, "ballast": 0, "unknown": 0})
-        entry[status] = entry.get(status, 0) + 1
+        entry["laden"] += int(row["laden_count"] or 0)
+        entry["ballast"] += int(row["ballast_count"] or 0)
+        entry["unknown"] += int(row["unknown_count"] or 0)
 
     segments = [
         LadenSegment(segment=seg, laden=v["laden"], ballast=v["ballast"], unknown=v["unknown"])
