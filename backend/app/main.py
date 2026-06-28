@@ -248,32 +248,95 @@ def _norm_dest(s: str) -> str:
 # spellings, all in _norm_dest form). The first token of a name+berth string is
 # matched too, so unlisted berths still fold into the city.
 _PORT_CANON: dict[str, list[str]] = {
-    "Rotterdam":    ["NLRTM", "ROTTERDAM", "EUROPOORT", "BOTLEK", "MAASVLAKTE", "PERNIS"],
-    "Amsterdam":    ["NLAMS", "AMSTERDAM"],
-    "Antwerp":      ["BEANR", "ANTWERPEN", "ANTWERP"],
-    "Ghent":        ["BEGNE", "GENT", "GHENT"],
-    "Zeebrugge":    ["BEZEE", "ZEEBRUGGE", "ZEEBRUGE"],
-    "Vlissingen":   ["NLVLI", "VLISSINGEN", "FLUSHING"],
-    "Terneuzen":    ["NLTNZ", "TERNEUZEN"],
-    "Dordrecht":    ["NLDOR", "DORDRECHT"],
-    "Moerdijk":     ["NLMOE", "MOERDIJK"],
-    "Vlaardingen":  ["NLVLA", "VLAARDINGEN"],
-    "Harlingen":    ["NLHAR", "HARLINGEN"],
-    "Delfzijl":     ["NLDZL", "DELFZIJL", "EEMSHAVEN", "NLEEM"],
-    "Dunkirk":      ["FRDKK", "DUNKIRK", "DUNKERQUE"],
-    "Le Havre":     ["FRLEH", "LEHAVRE", "LE HAVRE", "HAVRE"],
-    "Southampton":  ["GBSOU", "SOUTHAMPTON"],
-    "Gibraltar":    ["GIGIB", "GIBRALTAR"],
-    "Algeciras":    ["ESALG", "ALGECIRAS"],
-    "Singapore":    ["SGSIN", "SINGAPORE"],
-    "Busan":        ["KRPUS", "BUSAN", "PUSAN"],
-    "Incheon":      ["KRINC", "INCHEON"],
-    "Houston":      ["USHOU", "HOUSTON"],
-    "Port Said":    ["EGPSD", "PORTSAID", "PORT SAID"],
-    "Istanbul":     ["TRIST", "ISTANBUL"],
-    "Tuzla":        ["TRTUZ", "TUZLA"],
-    "Trieste":      ["ITTRS", "TRIESTE"],
-    "Tallinn":      ["EETLL", "TALLINN", "MUUGA"],
+    # NW Europe - Netherlands
+    "Rotterdam":        ["NLRTM", "ROTTERDAM", "EUROPOORT", "BOTLEK", "MAASVLAKTE", "PERNIS",
+                         "HARTELHAVEN", "CALANDKANAAL", "MAASHAVEN", "MERWEHAVEN",
+                         "NECKARHAVEN", "DINTELHAVEN", "YANGTZEKANAAL", "PRINSES AMALIAHAVEN"],
+    "Amsterdam":        ["NLAMS", "AMSTERDAM"],
+    "Dordrecht":        ["NLDOR", "DORDRECHT"],
+    "Moerdijk":         ["NLMOE", "MOERDIJK"],
+    "Vlaardingen":      ["NLVLA", "VLAARDINGEN"],
+    "Harlingen":        ["NLHAR", "HARLINGEN"],
+    "Delfzijl":         ["NLDZL", "DELFZIJL", "EEMSHAVEN", "NLEEM"],
+    "Terneuzen":        ["NLTNZ", "TERNEUZEN"],
+    "Vlissingen":       ["NLVLI", "VLISSINGEN", "FLUSHING"],
+    # NW Europe - Belgium
+    "Antwerp":          ["BEANR", "ANTWERPEN", "ANTWERP",
+                         "KALLO", "DEURGANCKDOK", "LEOPOLDDOK", "CHURCHILLDOK", "KANAALDOK"],
+    "Ghent":            ["BEGNE", "GENT", "GHENT", "KLUIZENDOK"],
+    "Zeebrugge":        ["BEZEE", "ZEEBRUGGE", "ZEEBRUGE"],
+    # NW Europe - France / UK / Ireland
+    "Dunkirk":          ["FRDKK", "DUNKIRK", "DUNKERQUE"],
+    "Le Havre":         ["FRLEH", "LEHAVRE", "LE HAVRE", "HAVRE"],
+    "Southampton":      ["GBSOU", "SOUTHAMPTON"],
+    "Fawley":           ["GBFAW", "FAWLEY"],
+    "Tilbury":          ["GBTIL", "TILBURY"],
+    "Immingham":        ["GBIMM", "IMMINGHAM"],
+    "Teesside":         ["GBTEE", "TEESSIDE", "TEESPORT"],
+    "Liverpool":        ["GBLIV", "LIVERPOOL"],
+    "Dublin":           ["IEDUB", "DUBLIN"],
+    # Mediterranean / Iberia
+    "Gibraltar":        ["GIGIB", "GIBRALTAR"],
+    "Algeciras":        ["ESALG", "ALGECIRAS"],
+    "Huelva":           ["ESHUV", "HUELVA"],
+    "Valencia":         ["ESVLC", "VALENCIA"],
+    "Trieste":          ["ITTRS", "TRIESTE"],
+    # Scandinavia / Baltic states
+    "Gothenburg":       ["SEGOT", "GOTHENBURG", "GOTEBORG"],
+    "Helsinki":         ["FIHEL", "HELSINKI"],
+    "Turku":            ["FITKU", "TURKU"],
+    "Hamina":           ["FIHMN", "HAMINA"],
+    "Gdansk":           ["PLGDN", "GDANSK"],
+    "Klaipeda":         ["LTKLJ", "KLAIPEDA"],
+    # Russia / Eastern Europe
+    "St. Petersburg":   ["RULED", "ST PETERSBURG", "SAINT PETERSBURG"],
+    "Ust-Luga":         ["RUULU", "USTLUGA"],
+    "Kaliningrad":      ["RUKGD", "KALININGRAD"],
+    "Novorossiysk":     ["RUNVS", "NOVOROSSIYSK"],
+    "Taman":            ["RUTAM", "TAMAN"],
+    "Constanta":        ["ROCND", "CONSTANTA"],
+    # Turkey
+    "Istanbul":         ["TRIST", "ISTANBUL"],
+    "Tuzla":            ["TRTUZ", "TUZLA"],
+    "Izmit":            ["TRIZT", "IZMIT"],
+    "Izmir":            ["TRIZM", "IZMIR"],
+    "Ambarli":          ["TRAMB", "AMBARLI"],
+    "Dilovasi":         ["TRDIL", "DILOVASI"],
+    "Tekirdag":         ["TRTEK", "TEKIRDAG"],
+    # Black Sea / Caucasus
+    "Bourgas":          ["BGBOJ", "BOURGAS", "BURGAS"],
+    "Poti":             ["GEPTI", "POTI"],
+    "Batumi":           ["GEBUS", "BATUMI"],
+    # Egypt / Middle East
+    "Port Said":        ["EGPSD", "EGPSE", "PORTSAID", "PORT SAID", "PORTSAIDOPL",
+                         "OPLPORTSAID", "PORTSAIDEGYPT"],
+    "Suez":             ["EGSUZ", "SUEZ"],
+    # Africa
+    "Cape Town":        ["ZACPT", "CAPE TOWN"],
+    "Durban":           ["ZADUR", "DURBAN"],
+    # Morocco
+    "Tangier Med":      ["MAPTM", "TANGIER MED", "TANGIERMED"],
+    # Israel
+    "Ashdod":           ["ILASH", "ASHDOD"],
+    # Singapore
+    "Singapore":        ["SGSIN", "SINGAPORE"],
+    # East Asia
+    "Ulsan":            ["KRUSN", "ULSAN"],
+    "Busan":            ["KRPUS", "BUSAN", "PUSAN"],
+    "Incheon":          ["KRINC", "INCHEON"],
+    "Nagoya":           ["JPNGO", "NAGOYA"],
+    "Tokyo":            ["JPTYO", "TOKYO"],
+    # Americas
+    "Houston":          ["USHOU", "HOUSTON"],
+    "Corpus Christi":   ["USCRP", "CORPUS CHRISTI"],
+    "Beaumont":         ["USBPT", "BEAUMONT"],
+    "New York":         ["USNYC", "NEW YORK"],
+    "Seattle":          ["USSEA", "SEATTLE"],
+    "Norfolk":          ["USORF", "NORFOLK"],
+    "Santos":           ["BRSSZ", "SANTOS"],
+    # Germany (Rhine/Kiel Canal)
+    "Brunsbuttel":      ["DEBRV", "BRUNSBUTTEL"],
+    "Tallinn":          ["EETLL", "TALLINN", "MUUGA"],
 }
 
 # Flat alias -> canonical name (normalised; LOCODE spaces removed so "NL RTM"
@@ -297,7 +360,11 @@ def _canonical_port(raw: str | None) -> str | None:
     if not raw:
         return None
     norm = _norm_dest(raw)
-    if not norm or norm in {"FOR ORDERS", "ORDERS", "TBN", "UNKNOWN", "NA", "NONE"}:
+    if not norm or norm in {
+        "FOR ORDERS", "FOR ORDER", "FORORDERS", "TO ORDER", "ORDERS", "ORDER",
+        "TBN", "UNKNOWN", "NA", "NONE", "AT SEA", "AT ANCHOR", "DRIFTING",
+        "GOF FOR ORDER",
+    }:
         return None
     # Collapse a "XX YYY" spaced UN/LOCODE to "XXYYY" before lookup.
     m = _LOCODE_RE.match(norm)
