@@ -1294,7 +1294,8 @@ def analytics_sts_offenders(days: int = 30, limit: int = 50):
     cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=d)
 
     ev_df = db.query(
-        "SELECT mmsi, mmsi2 FROM ais_events WHERE type = 'sts' AND start_ts >= ?",
+        "SELECT mmsi, mmsi2 FROM ais_events "
+        "WHERE type = 'sts' AND start_ts >= ? AND segment != 'Small'",
         [cutoff],
         db=db.analytics_db_path(),
     )
