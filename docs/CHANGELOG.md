@@ -1,5 +1,46 @@
 # Freight Hub Changelog
 
+## 2026-06-28 - Vectorized ETA scoring + per-target accuracy breakdown + trend chart
+
+**Performance fix:** The analytics build's ETA scoring step was iterating over 1M+
+samples in a Python loop (one dict per row, per model), taking hours on the first run
+after the target expansion from 72 to 96 targets inflated the route cache rebuild time.
+Replaced with vectorized numpy/pandas operations:
+
+- `vectorized_physics_p50(samples)`: single numpy pass over columnar data, ~100x faster
+  than the row-by-row `physics_p50()` loop.
+- `IntervalModel.fit()` now calls `vectorized_physics_p50` instead of iterating rows.
+- `IntervalModel.offsets_batch(pred_h)`: vectorized per-bucket interval lookup via
+  `np.digitize`.
+- `score_vectorized(samples, model, run_ts, interval)` in `eta_backtest.py`: returns
+  both aggregate and per-target metrics in one pass without a second data sweep.
+- `score_baselines()` in `eta_samples.py` updated to use `score_vectorized` for all
+  three models.
+
+**New feature - per-target accuracy (eta_metrics_by_target):**
+- New table `eta_metrics_by_target` (run_ts, model, target_id, n, med_abs_err_h,
+  bias_h, mape, p90_abs_err_h, interval_coverage) populated every hourly build for
+  naive + physics_v1 models.
+- New endpoint `GET /api/analytics/eta-by-target`: physics_v1 rows enriched with naive
+  baseline MAE per target, sorted best to worst.
+- New `EtaByTargetCard` on the analytics Ports & Cargo tab: type filter
+  (port/chokepoint), bar chart showing physics MAE vs naive MAE for the top 15 targets,
+  per-target table with improvement %, bias, P90, canal indicator. Shows where the
+  physics model wins and where it underperforms naive (negative improvement signals
+  edge cases worth investigating).
+
+**New feature - accuracy trend chart:**
+- New endpoint `GET /api/analytics/eta-trend`: pivots `eta_model_metrics` on `run_ts`
+  for the `all` lead bucket, returning one row per build run with naive_mae,
+  route_mae, physics_mae, and n.
+- Trend LineChart embedded in `EtaAccuracyCard` (below the calibration bar): shows
+  physics vs naive overall MAE over time (one point per day, last run of each day).
+  Demonstrates the data flywheel and confirms the model is not regressing as the
+  sample set grows toward the ML gate.
+
+**Tests:** 2 new tests added (score_vectorized matches row-loop output; per-target
+write roundtrip). Total: 436 passing.
+
 ## 2026-06-27 - Feature: MMSI-derived flag state (FOC / shadow-fleet / mismatch)
 
 **Tried:** Borrowed the one genuinely new idea from the open-source Hormuz tracker
