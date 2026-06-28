@@ -1,5 +1,26 @@
 # Freight Hub Changelog
 
+## 2026-06-28 (session 6b) - Complete Small-segment sweep; NaN sanitization; endpoint health
+
+**Fix: ocean_only filter propagated to 5 more endpoints:**
+european-inbound (Small AIS tankers appeared as terminal arrivals), slow-steamers
+(inland barges distorted segment median SOGs), speed-anomalies (segment MAD distorted),
+chokepoint-status live counts, fleet-flags (NL/BE flag counts inflated by ARA barges),
+flag-mismatches (inland barge flag mismatches polluted shadow-fleet signal).
+
+**Fix: ocean_only filter propagated to all transit_events and anchored_episodes queries:**
+transits, transit-risk, transit-rate-timeline, market-summary transits_24h,
+chokepoint-heatmap, chokepoint-anomaly (2 queries), cargo-state-changes, and
+chokepoint-status now all filter `segment != 'Small'`. Total: 8 additional SQL fixes.
+
+**Fix: owner-intelligence 500 error from pandas NaN in segment/name fields:**
+`live_info.get("segment")` returned pandas float NaN, which is truthy in Python,
+causing it to be appended to the segments accumulator and then picked as `top_segment`.
+Pydantic v2 rejects float NaN for a `str|None` field. Fixed with `_str_or_none()`.
+Same guard applied to transit-risk, shadow-fleet, and eta-upcoming segment/name reads.
+
+**Chore: drop unused @heroicons/react dependency; update ETA baselines with 24h of new samples.**
+
 ## 2026-06-28 (session 6) - Systematic ocean-only propagation; AIS coverage disclosure; region selector fixes
 
 **Fix: ocean_only (Small segment) filter propagated across all remaining analytics endpoints:**
