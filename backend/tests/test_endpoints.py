@@ -5077,3 +5077,212 @@ def test_eta_by_target_endpoint_empty_when_no_metrics(analytics_client):
     assert isinstance(d["rows"], list)
     # No eta_metrics_by_target in the seed -> empty list, not a 500
     assert d["rows"] == []
+
+
+# ---------------------------------------------------------------------------
+# Smoke tests: all analytics endpoints must return 200 and a valid JSON body
+# with the right top-level keys even when the seeded DBs are empty/minimal.
+# ---------------------------------------------------------------------------
+
+
+def test_anchorage_dwell_smoke(analytics_client):
+    r = analytics_client.get("/api/analytics/anchorage-dwell")
+    assert r.status_code == 200
+    d = r.json()
+    assert "as_of" in d
+    assert "rows" in d
+    assert isinstance(d["rows"], list)
+
+
+def test_anomaly_watchlist_smoke(analytics_client):
+    r = analytics_client.get("/api/analytics/anomaly-watchlist")
+    assert r.status_code == 200
+    d = r.json()
+    assert "as_of" in d
+    assert "rows" in d
+    assert isinstance(d["rows"], list)
+
+
+def test_arrivals_smoke(analytics_client):
+    r = analytics_client.get("/api/analytics/arrivals")
+    assert r.status_code == 200
+    d = r.json()
+    assert "as_of" in d
+    assert "rows" in d
+    assert isinstance(d["rows"], list)
+
+
+def test_cargo_state_changes_smoke(analytics_client):
+    r = analytics_client.get("/api/analytics/cargo-state-changes")
+    assert r.status_code == 200
+    d = r.json()
+    assert "as_of" in d
+    assert "rows" in d
+    assert isinstance(d["rows"], list)
+
+
+def test_chokepoint_heatmap_smoke(analytics_client):
+    r = analytics_client.get("/api/analytics/chokepoint-heatmap")
+    assert r.status_code == 200
+    d = r.json()
+    assert "as_of" in d
+    assert "cells" in d
+    assert isinstance(d["cells"], list)
+
+
+def test_eta_endpoint_smoke(analytics_client):
+    """ETA endpoint returns 404 for unknown vessel, not 500."""
+    r = analytics_client.get("/api/analytics/eta?mmsi=999999999")
+    assert r.status_code in (200, 404)
+
+
+def test_eta_accuracy_smoke(analytics_client):
+    r = analytics_client.get("/api/analytics/eta-accuracy")
+    assert r.status_code == 200
+    d = r.json()
+    assert "rows" in d
+    assert isinstance(d["rows"], list)
+
+
+def test_eta_upcoming_smoke(analytics_client):
+    r = analytics_client.get("/api/analytics/eta-upcoming")
+    assert r.status_code == 200
+    d = r.json()
+    assert "as_of" in d
+    assert "rows" in d
+    assert isinstance(d["rows"], list)
+
+
+def test_arrivals_structure(analytics_client):
+    r = analytics_client.get("/api/analytics/arrivals")
+    assert r.status_code == 200
+    d = r.json()
+    assert "as_of" in d
+    assert "total_arrivals" in d
+    assert "total_vessels" in d
+
+
+def test_european_inbound_smoke(analytics_client):
+    r = analytics_client.get("/api/analytics/european-inbound")
+    assert r.status_code == 200
+    d = r.json()
+    assert "as_of" in d
+    assert "vessels" in d
+    assert isinstance(d["vessels"], list)
+
+
+def test_high_risk_positions_smoke(analytics_client):
+    r = analytics_client.get("/api/analytics/high-risk-positions")
+    assert r.status_code == 200
+    d = r.json()
+    assert "as_of" in d
+    assert "rows" in d
+    assert isinstance(d["rows"], list)
+
+
+def test_lng_inbound_smoke(analytics_client):
+    r = analytics_client.get("/api/analytics/lng-inbound")
+    assert r.status_code == 200
+    d = r.json()
+    assert "as_of" in d
+    assert "vessels" in d
+    assert isinstance(d["vessels"], list)
+
+
+def test_port_arrivals_smoke(analytics_client):
+    r = analytics_client.get("/api/analytics/port-arrivals")
+    assert r.status_code == 200
+    d = r.json()
+    assert "as_of" in d
+    assert "ports" in d
+    assert isinstance(d["ports"], list)
+
+
+def test_port_congestion_smoke(analytics_client):
+    r = analytics_client.get("/api/analytics/port-congestion")
+    assert r.status_code == 200
+    d = r.json()
+    assert "as_of" in d
+    assert "rows" in d
+    assert isinstance(d["rows"], list)
+
+
+def test_reroutes_smoke(analytics_client):
+    r = analytics_client.get("/api/analytics/reroutes")
+    assert r.status_code == 200
+    d = r.json()
+    assert "as_of" in d
+    assert "rows" in d
+    assert isinstance(d["rows"], list)
+
+
+def test_risk_events_smoke(analytics_client):
+    r = analytics_client.get("/api/analytics/risk-events")
+    assert r.status_code == 200
+    d = r.json()
+    assert "as_of" in d
+    assert "rows" in d
+    assert isinstance(d["rows"], list)
+
+
+def test_shadow_fleet_smoke(analytics_client):
+    r = analytics_client.get("/api/analytics/shadow-fleet")
+    assert r.status_code == 200
+    d = r.json()
+    assert "as_of" in d
+    assert "rows" in d
+    assert isinstance(d["rows"], list)
+
+
+def test_speed_anomalies_smoke(analytics_client):
+    r = analytics_client.get("/api/analytics/speed-anomalies")
+    assert r.status_code == 200
+    d = r.json()
+    assert "as_of" in d
+    assert "rows" in d
+    assert isinstance(d["rows"], list)
+
+
+def test_speed_trend_smoke(analytics_client):
+    r = analytics_client.get("/api/analytics/speed-trend")
+    assert r.status_code == 200
+    d = r.json()
+    assert "kind" in d
+    assert "series" in d
+    assert isinstance(d["series"], list)
+
+
+def test_sts_offenders_smoke(analytics_client):
+    r = analytics_client.get("/api/analytics/sts-offenders")
+    assert r.status_code == 200
+    d = r.json()
+    assert "as_of" in d
+    assert "rows" in d
+    assert isinstance(d["rows"], list)
+
+
+def test_sts_risk_smoke(analytics_client):
+    r = analytics_client.get("/api/analytics/sts-risk")
+    assert r.status_code == 200
+    d = r.json()
+    assert "as_of" in d
+    assert "rows" in d
+    assert isinstance(d["rows"], list)
+
+
+def test_trade_lane_matrix_smoke(analytics_client):
+    r = analytics_client.get("/api/analytics/trade-lane-matrix")
+    assert r.status_code == 200
+    d = r.json()
+    assert "as_of" in d
+    assert "cells" in d
+    assert isinstance(d["cells"], list)
+
+
+def test_transit_risk_smoke(analytics_client):
+    r = analytics_client.get("/api/analytics/transit-risk")
+    assert r.status_code == 200
+    d = r.json()
+    assert "as_of" in d
+    assert "rows" in d
+    assert isinstance(d["rows"], list)
