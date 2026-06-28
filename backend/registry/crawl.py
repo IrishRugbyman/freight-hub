@@ -27,9 +27,12 @@ import json
 
 import duckdb
 import pandas as pd
+import psycopg2
 
 from app.db import analytics_db_path as _analytics_db_path
 from app.db import query as _db_query
+
+_PG_DSN = os.environ.get("DATABASE_URL", "postgresql:///market_data")
 from app.equasis import EquasisAccountLocked, get_ship_info
 from registry.risk import risk_score as _risk_score
 
@@ -293,6 +296,35 @@ def _upsert(
     risk_indicators_json: str | None = None,
     ofac_sanctioned: bool | None = None,
 ) -> None:
+    values = [
+        imo,
+        mmsi,
+        data.get("ship_name"),
+        data.get("flag"),
+        data.get("flag_code"),
+        data.get("call_sign"),
+        _to_int(data.get("gross_tonnage")),
+        _to_int(data.get("dwt")),
+        data.get("ship_type"),
+        _to_int(data.get("year_built")),
+        data.get("ship_status"),
+        data.get("owner"),
+        data.get("ism_manager"),
+        data.get("ship_manager"),
+        data.get("class_society"),
+        data.get("pi_club"),
+        data.get("detention_rate_pct"),
+        data.get("paris_mou"),
+        data.get("tokyo_mou"),
+        data.get("uscg_targeting"),
+        now,
+        True,
+        risk_score_val,
+        risk_indicators_json,
+        ofac_sanctioned,
+    ]
+
+    # Write to DuckDB (vessel_registry.duckdb) - kept for legacy/test compat
     conn.execute(
         """
         INSERT OR REPLACE INTO vessel_registry (
@@ -303,34 +335,59 @@ def _upsert(
             fetched_ts, fetch_ok, risk_score, risk_indicators, ofac_sanctioned
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        [
-            imo,
-            mmsi,
-            data.get("ship_name"),
-            data.get("flag"),
-            data.get("flag_code"),
-            data.get("call_sign"),
-            _to_int(data.get("gross_tonnage")),
-            _to_int(data.get("dwt")),
-            data.get("ship_type"),
-            _to_int(data.get("year_built")),
-            data.get("ship_status"),
-            data.get("owner"),
-            data.get("ism_manager"),
-            data.get("ship_manager"),
-            data.get("class_society"),
-            data.get("pi_club"),
-            data.get("detention_rate_pct"),
-            data.get("paris_mou"),
-            data.get("tokyo_mou"),
-            data.get("uscg_targeting"),
-            now,
-            True,
-            risk_score_val,
-            risk_indicators_json,
-            ofac_sanctioned,
-        ],
+        values,
     )
+
+    # Write to PG vessels (primary read path for the API)
+    try:
+        pg = psycopg2.connect(_PG_DSN)
+        pg_cur = pg.cursor()
+        pg_cur.execute(
+            """
+            INSERT INTO vessels (
+                imo, mmsi, ship_name, flag, flag_code, call_sign,
+                gross_tonnage, dwt, ship_type, year_built, ship_status,
+                owner, ism_manager, ship_manager, class_society, pi_club,
+                detention_rate_pct, paris_mou, tokyo_mou, uscg_targeting,
+                fetched_ts, fetch_ok, risk_score, risk_indicators, ofac_sanctioned,
+                updated_at
+            ) VALUES (
+                %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now()
+            )
+            ON CONFLICT (imo) DO UPDATE SET
+                mmsi = COALESCE(EXCLUDED.mmsi, vessels.mmsi),
+                ship_name = EXCLUDED.ship_name,
+                flag = EXCLUDED.flag,
+                flag_code = EXCLUDED.flag_code,
+                call_sign = COALESCE(EXCLUDED.call_sign, vessels.call_sign),
+                gross_tonnage = EXCLUDED.gross_tonnage,
+                dwt = EXCLUDED.dwt,
+                ship_type = EXCLUDED.ship_type,
+                year_built = EXCLUDED.year_built,
+                ship_status = EXCLUDED.ship_status,
+                owner = EXCLUDED.owner,
+                ism_manager = EXCLUDED.ism_manager,
+                ship_manager = EXCLUDED.ship_manager,
+                class_society = EXCLUDED.class_society,
+                pi_club = EXCLUDED.pi_club,
+                detention_rate_pct = EXCLUDED.detention_rate_pct,
+                paris_mou = EXCLUDED.paris_mou,
+                tokyo_mou = EXCLUDED.tokyo_mou,
+                uscg_targeting = EXCLUDED.uscg_targeting,
+                fetched_ts = EXCLUDED.fetched_ts,
+                fetch_ok = EXCLUDED.fetch_ok,
+                risk_score = EXCLUDED.risk_score,
+                risk_indicators = EXCLUDED.risk_indicators,
+                ofac_sanctioned = EXCLUDED.ofac_sanctioned,
+                updated_at = now()
+            """,
+            values,
+        )
+        pg.commit()
+        pg_cur.close()
+        pg.close()
+    except Exception as exc:
+        logger.warning("PG vessels upsert failed for imo=%d: %s", imo, exc)
 
 
 def _upsert_failed(conn: duckdb.DuckDBPyConnection, imo: int, now: datetime) -> None:
