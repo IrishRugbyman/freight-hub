@@ -4827,7 +4827,7 @@ def analytics_owner_intelligence(min_vessels: int = 2, min_risk: int = 0, limit:
         for _, r in live_df.iterrows():
             imo_val = r.get("imo")
             if imo_val and not pd.isna(imo_val):
-                live_map[int(imo_val)] = {"kind": r.get("kind"), "segment": r.get("segment")}
+                live_map[int(imo_val)] = {"kind": _str_or_none(r.get("kind")), "segment": _str_or_none(r.get("segment"))}
 
     owners: dict[str, dict] = {}
     for _, r in reg_df.iterrows():
@@ -4857,8 +4857,9 @@ def analytics_owner_intelligence(min_vessels: int = 2, min_risk: int = 0, limit:
             o["tanker_count"] += 1
         elif kind_val == "bulk":
             o["bulk_count"] += 1
-        if live_info.get("segment"):
-            o["segments"].append(live_info["segment"])
+        seg_val = _str_or_none(live_info.get("segment"))
+        if seg_val:
+            o["segments"].append(seg_val)
 
     rows = []
     for owner, o in owners.items():
