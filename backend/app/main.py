@@ -2031,7 +2031,7 @@ def analytics_cargo_transitions(days: int = 7, min_change: float = 2.0, segment:
     cand_df = db.query(
         "SELECT mmsi, MAX(draught) - MIN(draught) as draught_range "
         "FROM ais_snapshots "
-        f"WHERE snapshot_ts >= ? AND draught > 0 {seg_clause} "
+        f"WHERE snapshot_ts >= ? AND draught > 0 AND segment != 'Small' {seg_clause} "
         "GROUP BY mmsi "
         "HAVING COUNT(*) >= 6 AND MAX(draught) - MIN(draught) >= ? "
         "ORDER BY MAX(draught) - MIN(draught) DESC "
@@ -4704,7 +4704,7 @@ def analytics_destination_changes(hours: int = 72, kind: str = "", min_confidenc
         f"    LAG(destination) OVER (PARTITION BY mmsi ORDER BY snapshot_ts) AS prev_dest, "
         f"    LAG(snapshot_ts) OVER (PARTITION BY mmsi ORDER BY snapshot_ts) AS prev_ts "
         f"  FROM ais_snapshots "
-        f"  WHERE snapshot_ts >= ? {kind_clause}"
+        f"  WHERE snapshot_ts >= ? AND segment != 'Small' {kind_clause}"
         f") "
         f"SELECT mmsi, kind, segment, region, snapshot_ts AS changed_ts, "
         f"  prev_dest AS from_dest, destination AS to_dest "
