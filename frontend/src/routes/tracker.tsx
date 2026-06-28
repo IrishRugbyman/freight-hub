@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { Loader2 } from 'lucide-react'
 import { useMeta, useVessels, useVesselStream, useVesselTrack, type Vessel } from '@/lib/api'
@@ -28,7 +28,10 @@ function TrackerPage() {
   const [highlightPipelineId, setHighlightPipelineId] = useState<string | null>(null)
 
   const { data: rawVessels = [], isLoading, isError, dataUpdatedAt, isPlaceholderData } = useVessels(filters)
-  const vessels = layers.oceanOnly ? rawVessels.filter((v) => v.segment !== 'Small') : rawVessels
+  const vessels = useMemo(
+    () => layers.oceanOnly ? rawVessels.filter((v) => v.segment !== 'Small') : rawVessels,
+    [rawVessels, layers.oceanOnly],
+  )
   useVesselStream(filters, layers.deckgl)
   const { data: meta } = useMeta()
   const { data: trailPoints } = useVesselTrack(selected?.mmsi ?? null, trailHours)
