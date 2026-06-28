@@ -1752,7 +1752,7 @@ def analytics_transits(chokepoint: str = "suez", days: int = 30):
     cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=d)
     df = db.query(
         "SELECT entered_ts, direction, kind FROM transit_events "
-        "WHERE chokepoint = ? AND entered_ts >= ?",
+        "WHERE chokepoint = ? AND entered_ts >= ? AND segment != 'Small'",
         [chokepoint, cutoff],
         db=db.analytics_db_path(),
     )
@@ -1778,7 +1778,8 @@ def analytics_transit_risk(chokepoint: str = "hormuz", days: int = 30, min_risk:
 
     df = db.query(
         "SELECT mmsi, chokepoint, entered_ts, exited_ts, direction, kind, segment, laden "
-        "FROM transit_events WHERE chokepoint = ? AND entered_ts >= ? ORDER BY entered_ts DESC",
+        "FROM transit_events WHERE chokepoint = ? AND entered_ts >= ? AND segment != 'Small' "
+        "ORDER BY entered_ts DESC",
         [chokepoint, cutoff],
         db=db.analytics_db_path(),
     )
@@ -2283,7 +2284,8 @@ def analytics_transit_rate_timeline(hours: int = 72, chokepoints_csv: str = ""):
     h = max(6, min(hours, 336))
     cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=h)
     df = db.query(
-        "SELECT entered_ts, chokepoint, laden FROM transit_events WHERE entered_ts >= ? ORDER BY entered_ts",
+        "SELECT entered_ts, chokepoint, laden FROM transit_events "
+        "WHERE entered_ts >= ? AND segment != 'Small' ORDER BY entered_ts",
         [cutoff],
         db=db.analytics_db_path(),
     )
@@ -3320,7 +3322,7 @@ def analytics_market_summary():
             ev_counts[str(r["type"])] = int(r["cnt"])
 
     tr_df = db.query(
-        "SELECT COUNT(*) AS cnt FROM transit_events WHERE entered_ts >= ?",
+        "SELECT COUNT(*) AS cnt FROM transit_events WHERE entered_ts >= ? AND segment != 'Small'",
         [since_24h],
         db=db.analytics_db_path(),
     )
@@ -4367,7 +4369,7 @@ def analytics_chokepoint_heatmap(
     now_ts = datetime.now(UTC).replace(tzinfo=None)
     cutoff = now_ts - timedelta(days=days)
 
-    where_clauses = ["entered_ts >= ?"]
+    where_clauses = ["entered_ts >= ?", "segment != 'Small'"]
     params: list = [cutoff]
     if kind:
         where_clauses.append("kind = ?")
@@ -5062,7 +5064,7 @@ def analytics_chokepoint_anomaly(window_hours: int = 6, baseline_hours: int = 48
     recent_df = db.query(
         "SELECT chokepoint, count(*) AS cnt "
         "FROM transit_events "
-        "WHERE entered_ts >= ? "
+        "WHERE entered_ts >= ? AND segment != 'Small' "
         "GROUP BY chokepoint",
         [window_start],
         db=db.analytics_db_path(),
@@ -5074,7 +5076,7 @@ def analytics_chokepoint_anomaly(window_hours: int = 6, baseline_hours: int = 48
         "  DATE_TRUNC('hour', entered_ts) AS hr, "
         "  count(*) AS cnt "
         "FROM transit_events "
-        "WHERE entered_ts >= ? AND entered_ts < ? "
+        "WHERE entered_ts >= ? AND entered_ts < ? AND segment != 'Small' "
         "GROUP BY 1, 2",
         [baseline_start, window_start],
         db=db.analytics_db_path(),
@@ -5186,7 +5188,7 @@ def analytics_cargo_state_changes(days: int = 7, kind: str = "tanker", min_chang
         f"SELECT mmsi, zone, kind, segment, start_ts, end_ts "
         f"FROM anchored_episodes "
         f"WHERE start_ts >= ? {kind_clause}"
-        f"AND end_ts IS NOT NULL "
+        f"AND end_ts IS NOT NULL AND segment != 'Small' "
         f"ORDER BY start_ts DESC LIMIT 2000",
         params_an,
         db=db.analytics_db_path(),
@@ -5954,7 +5956,7 @@ def analytics_chokepoint_status():
     # 2. Transit statistics from analytics DB
     transit_df = db.query(
         "SELECT chokepoint, entered_ts, exited_ts, direction "
-        "FROM transit_events WHERE entered_ts >= ? ORDER BY entered_ts",
+        "FROM transit_events WHERE entered_ts >= ? AND segment != 'Small' ORDER BY entered_ts",
         [cutoff_7d],
         db=db.analytics_db_path(),
     )
