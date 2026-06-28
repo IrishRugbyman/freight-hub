@@ -1,5 +1,19 @@
 # Freight Hub Changelog
 
+## 2026-06-28 (session 6d) - Comprehensive Small-segment sweep completion + test coverage
+
+**Fix: Small filter applied to all remaining endpoints with live/analytics data:**
+- `high-risk-positions`: live_positions join now excludes Small
+- `anomaly-watchlist`: all four ais_events count queries exclude Small (docstring already promised this, SQL was missing the guard)
+- `sts-offenders`: ais_events query now excludes Small (docstring promised, SQL was missing)
+- `arrivals`: eta_arrivals aggregate excludes Small so river barge port-zone approaches don't rank as ship arrivals
+- `eta_serving._load_live()`: Small vessels excluded before ETA computation so they never appear in eta_predictions or eta-upcoming
+- `eta-upcoming`: additional defense-in-depth pre-filter via live AIS join; total reduced from ~2048 to ~820 ocean vessels only
+
+**Test: smoke tests added for all 22 previously-untested analytics endpoints:**
+Every analytics endpoint now has at least one test verifying 200 OK + correct top-level keys.
+Total tests: 442 -> 465.
+
 ## 2026-06-28 (session 6c) - Final Small-segment sweep: ais_events + ais_snapshots analytics
 
 **Fix: Small filter applied to remaining ais_events queries:**
