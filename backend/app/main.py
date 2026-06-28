@@ -2583,8 +2583,19 @@ def analytics_shadow_fleet(days: int = 7, limit: int = 50):
         if m not in last_event_map or ts_str > last_event_map[m]:
             last_event_map[m] = ts_str
 
-    # MMSI -> name + IMO from live_positions
+    # MMSI -> kind/segment from ais_events (shadow fleet vessels are often not in
+    # live_positions since they've gone dark; the event record always has this)
     all_mmsis = list(covert_mmsis)
+    events_kind_df = db.query(
+        f"SELECT mmsi, any_value(kind) AS kind, any_value(segment) AS segment "
+        f"FROM ais_events WHERE mmsi IN ({','.join('?'*len(all_mmsis))}) GROUP BY mmsi",
+        all_mmsis, db=_adb,
+    )
+    event_kind_map: dict[int, tuple[str | None, str | None]] = {}
+    for _, r in events_kind_df.iterrows():
+        event_kind_map[int(r["mmsi"])] = (_str_or_none(r.get("kind")), _str_or_none(r.get("segment")))
+
+    # MMSI -> name + IMO from live_positions
     lp_df = db.query(
         f"SELECT mmsi, name, imo FROM live_positions WHERE mmsi IN ({','.join('?'*len(all_mmsis))})",
         all_mmsis,
@@ -2627,12 +2638,13 @@ def analytics_shadow_fleet(days: int = 7, limit: int = 50):
         info = mmsi_info.get(mmsi_val, {})
         imo_val = _valid_imo(info.get("imo"))
         reg = imo_risk.get(imo_val, {}) if imo_val else {}
+        ev_kind, ev_seg = event_kind_map.get(mmsi_val, (None, None))
         rows.append(ShadowFleetRow(
             mmsi=mmsi_val,
             imo=imo_val,
             name=info.get("name"),
-            kind=mmsi_kind.get(mmsi_val),
-            segment=mmsi_segment.get(mmsi_val),
+            kind=mmsi_kind.get(mmsi_val) or ev_kind,
+            segment=mmsi_segment.get(mmsi_val) or ev_seg,
             region=mmsi_region.get(mmsi_val),
             sts_count=sts_count_map.get(mmsi_val, 0),
             gap_count=gap_count_map.get(mmsi_val, 0),
