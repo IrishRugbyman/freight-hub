@@ -339,13 +339,16 @@ def persist_predictions(conn: duckdb.DuckDBPyConnection, preds: pd.DataFrame) ->
     if preds.empty:
         log.info("no eta_predictions to persist (no live underway vessels?)")
         return 0
-    rows = list(preds[_PERSIST_COLS].itertuples(index=False, name=None))
-    conn.executemany(
-        "INSERT OR REPLACE INTO eta_predictions "
-        "(" + ", ".join(_PERSIST_COLS) + ") "
-        "VALUES (" + ", ".join("?" for _ in _PERSIST_COLS) + ")",
-        rows,
+    frame = preds[_PERSIST_COLS]
+    conn.register("_preds_frame", frame)
+    conn.execute(
+        "INSERT OR REPLACE INTO eta_predictions ("
+        + ", ".join(_PERSIST_COLS)
+        + ") SELECT "
+        + ", ".join(_PERSIST_COLS)
+        + " FROM _preds_frame"
     )
+    conn.unregister("_preds_frame")
     n = conn.execute("SELECT count(*) FROM eta_predictions").fetchone()[0]
     log.info("persisted %d eta_predictions across %d vessels", n, preds["mmsi"].nunique())
     return int(n)

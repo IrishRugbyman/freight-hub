@@ -408,18 +408,19 @@ def write_metrics_by_target(
 ) -> None:
     """Persist per-target metric rows into eta_metrics_by_target."""
     conn.execute(_TARGET_METRICS_SCHEMA)
-    for r in metrics:
-        conn.execute(
-            "INSERT OR REPLACE INTO eta_metrics_by_target "
-            "(run_ts, model, target_id, n, med_abs_err_h, bias_h, "
-            " mape, p90_abs_err_h, interval_coverage) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            [
-                r["run_ts"], r["model"], r["target_id"], r["n"],
-                r["med_abs_err_h"], r["bias_h"], r["mape"],
-                r["p90_abs_err_h"], r["interval_coverage"],
-            ],
-        )
+    rows = [
+        (r["run_ts"], r["model"], r["target_id"], r["n"],
+         r["med_abs_err_h"], r["bias_h"], r["mape"],
+         r["p90_abs_err_h"], r["interval_coverage"])
+        for r in metrics
+    ]
+    conn.executemany(
+        "INSERT OR REPLACE INTO eta_metrics_by_target "
+        "(run_ts, model, target_id, n, med_abs_err_h, bias_h, "
+        " mape, p90_abs_err_h, interval_coverage) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        rows,
+    )
 
 
 def score_vectorized(
