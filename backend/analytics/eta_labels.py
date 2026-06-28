@@ -259,13 +259,76 @@ def _curated_port_points() -> list[dict]:
     return points
 
 
+# Fleet-observed port targets derived from AIS destination-string analysis.
+# Each entry is (lat, lon, reach_nm). Coordinates are harbour entrance / anchorage
+# centroids, not city centroids. Added in priority order (highest-count first) so
+# the greedy de-dupe keeps the most-relevant target when two ports are within
+# _TARGET_DEDUPE_NM of each other.
+_LOCODE_PORT_TARGETS: dict[str, tuple[float, float, float]] = {
+    # UK / Ireland
+    "Fawley":           (50.83, -1.34, 15.0),   # Esso refinery, Southampton Water
+    "Tilbury":          (51.46,  0.35, 15.0),   # Thames/London gateway
+    "Liverpool":        (53.45, -3.02, 15.0),   # Mersey
+    "Dublin":           (53.35, -6.22, 15.0),   # Dublin Bay
+    # Scandinavia / Finland / Baltic
+    "Gothenburg":       (57.67, 11.95, 20.0),   # Swedish bulk/tanker port
+    "Helsinki":         (60.15, 25.00, 20.0),   # Vuosaari / Helsinki outer roads
+    "Naantali":         (60.47, 22.28, 15.0),   # Finnish oil terminal (Neste refinery)
+    "Hamina":           (60.57, 27.20, 15.0),   # Finnish bulk/LNG
+    "Kaliningrad":      (54.72, 20.56, 15.0),   # Russian Baltic enclave
+    # Russia - Gulf of Finland (oil export terminals)
+    "Primorsk":         (60.37, 28.63, 15.0),   # Primorsk crude export (CPC pipeline)
+    "Ust-Luga":         (59.68, 28.37, 15.0),   # Ust-Luga oil/bulk
+    "St. Petersburg":   (59.93, 29.72, 25.0),   # Kronstadt outer roads / Neva bay
+    # Black Sea - Romania / Bulgaria
+    "Constanta":        (44.17, 28.65, 15.0),   # Romanian crude/bulk
+    "Bourgas":          (42.49, 27.47, 15.0),   # Bulgarian Black Sea
+    # Black Sea - Russia
+    "Novorossiysk":     (44.73, 37.80, 15.0),   # Novorossiysk/CPC crude export
+    "Taman":            (45.21, 36.70, 15.0),   # Taman/Kavkaz, Kerch Strait area
+    # Turkey - Sea of Marmara
+    "Izmit Bay":        (40.77, 29.47, 25.0),   # Izmit/Dilovasi/Gemlik petrochemical cluster
+    "Ambarli":          (40.95, 28.70, 15.0),   # NW Istanbul container/bulk
+    # Mediterranean
+    "Valencia":         (39.45, -0.32, 15.0),   # Spanish east coast
+    # Levant / Israel
+    "Ashdod":           (31.82, 34.64, 15.0),   # Israeli crude/bulk terminal
+    # Africa
+    "Cape Town":        (-33.91, 18.43, 20.0),  # Cape STS / waypoint / Milnerton refinery
+    "Durban":           (-29.87, 31.03, 15.0),  # South African bulk / Richards Bay-adjacent
+    # Americas - US Gulf
+    "Houston":          (29.70, -94.97, 20.0),  # Houston ship channel / La Porte
+    "Beaumont":         (29.95, -93.92, 15.0),  # Sabine-Neches / Port Arthur
+    # Americas - US East / West
+    "New York":         (40.65, -74.06, 25.0),  # NY/NJ harbour, Kill Van Kull area
+    "Seattle/Tacoma":   (47.35, -122.42, 20.0), # Puget Sound
+    "Norfolk":          (36.95, -76.32, 20.0),  # Hampton Roads
+}
+
+
+def _locode_port_points() -> list[dict]:
+    """Return fleet-observed port targets derived from AIS destination analysis."""
+    return [
+        {
+            "target_id": f"port:{_slug(name)}",
+            "target_type": "port",
+            "name": name,
+            "lat": lat,
+            "lon": lon,
+            "reach_nm": reach_nm,
+            "is_canal": False,
+        }
+        for name, (lat, lon, reach_nm) in _LOCODE_PORT_TARGETS.items()
+    ]
+
+
 def build_targets() -> list[dict]:
     """Return the ETA target list (deterministic order).
 
     - All 9 chokepoints are kept unconditionally, anchored to their real transit
       GATE coordinate (not the basin-bbox centroid) with a uniform capture reach.
-    - Ports (anchorage zones, then curated point terminals) are de-duped *among
-      themselves* within _TARGET_DEDUPE_NM (e.g. zone-Rotterdam vs point-Rotterdam);
+    - Ports (anchorage zones, then curated point terminals, then fleet-observed
+      LOCODE ports) are de-duped among themselves within _TARGET_DEDUPE_NM;
       a port is never de-duped against a chokepoint.
     """
     chokepoints: list[dict] = []
@@ -298,6 +361,7 @@ def build_targets() -> list[dict]:
             }
         )
     port_candidates.extend(_curated_port_points())
+    port_candidates.extend(_locode_port_points())
 
     # Greedy de-dupe among ports only.
     ports: list[dict] = []
