@@ -131,7 +131,8 @@ export function MarketSummaryCard() {
 // ---------------------------------------------------------------------------
 export function RegionMomentumCard() {
   const [hoursBack, setHoursBack] = useState(24)
-  const { data, isLoading } = useRegionMomentum(hoursBack)
+  const [oceanOnly, setOceanOnly] = useState(true)
+  const { data, isLoading } = useRegionMomentum(hoursBack, oceanOnly)
   const rows = data?.rows ?? []
 
   const chartData = React.useMemo(
@@ -151,20 +152,30 @@ export function RegionMomentumCard() {
       <CardHeader>
         <CardTitle className="flex flex-wrap items-center justify-between gap-2">
           <span>Region Fleet Momentum</span>
-          <select
-            className="rounded border border-border bg-background px-2 py-1 text-xs font-normal"
-            value={hoursBack}
-            onChange={e => setHoursBack(Number(e.target.value))}
-          >
-            <option value={12}>vs 12h ago</option>
-            <option value={24}>vs 24h ago</option>
-            <option value={48}>vs 48h ago</option>
-            <option value={72}>vs 72h ago</option>
-          </select>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setOceanOnly(!oceanOnly)}
+              className={`rounded px-2 py-0.5 text-xs ${oceanOnly ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+              title="Exclude inland/coastal Small segment vessels"
+            >
+              Ocean
+            </button>
+            <select
+              className="rounded border border-border bg-background px-2 py-1 text-xs font-normal"
+              value={hoursBack}
+              onChange={e => setHoursBack(Number(e.target.value))}
+            >
+              <option value={12}>vs 12h ago</option>
+              <option value={24}>vs 24h ago</option>
+              <option value={48}>vs 48h ago</option>
+              <option value={72}>vs 72h ago</option>
+            </select>
+          </div>
         </CardTitle>
         {data && (
           <p className="text-xs text-muted-foreground">
             Net vessel count change per region. Green = fleet building, red = fleet clearing.
+            {oceanOnly && ' Ocean-going only (Small segment excluded).'}
           </p>
         )}
       </CardHeader>

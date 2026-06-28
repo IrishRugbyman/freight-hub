@@ -1553,14 +1553,17 @@ export interface RegionMomentumRow {
 export interface RegionMomentumResponse {
   as_of: string
   hours_back: number
+  ocean_only: boolean
   rows: RegionMomentumRow[]
 }
 
-export function useRegionMomentum(hoursBack = 24) {
+export function useRegionMomentum(hoursBack = 24, oceanOnly = true) {
   return useQuery({
-    queryKey: ['region-momentum', hoursBack],
+    queryKey: ['region-momentum', hoursBack, oceanOnly],
     queryFn: () =>
-      getJSON<RegionMomentumResponse>(`/api/analytics/region-momentum?hours_back=${hoursBack}`),
+      getJSON<RegionMomentumResponse>(
+        `/api/analytics/region-momentum?hours_back=${hoursBack}&ocean_only=${oceanOnly}`,
+      ),
     staleTime: 5 * 60 * 1000,
     refetchInterval: 5 * 60 * 1000,
   })

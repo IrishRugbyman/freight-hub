@@ -191,11 +191,7 @@ All new tables in `freight_analytics.duckdb`, written by the analytics batch job
 
 ---
 
-### Phase F - Frontend: ETA + interval + accuracy scoreboard [COMPLETE 2026-06-26]
-
-Remaining seam (not blocking): the tracker vessel-detail popup could show the
-nearest-target ETA + band (the `/api/analytics/eta?mmsi=` endpoint already serves
-it). The inbound/LNG cards and the accuracy scoreboard are done.
+### Phase F - Frontend: ETA + interval + accuracy scoreboard [COMPLETE 2026-06-27]
 
 ---
 

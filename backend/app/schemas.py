@@ -903,6 +903,7 @@ class RegionMomentumRow(BaseModel):
 class RegionMomentumResponse(BaseModel):
     as_of: str
     hours_back: int
+    ocean_only: bool = True
     rows: list[RegionMomentumRow]
 
 

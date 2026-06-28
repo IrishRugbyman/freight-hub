@@ -2347,19 +2347,24 @@ def analytics_event_rate_timeline(hours: int = 72):
 
 
 @app.get("/api/analytics/region-momentum", response_model=RegionMomentumResponse)
-def analytics_region_momentum(hours_back: int = 24):
+def analytics_region_momentum(hours_back: int = 24, ocean_only: bool = True):
     """Net change in vessel count per region vs hours_back hours ago.
 
     Reads fleet_density for the latest snapshot and the closest snapshot to
     hours_back hours prior. Returns per-region deltas sorted by absolute delta.
+
+    ocean_only (default True): exclude the 'Small' segment, which comprises
+    inland waterway vessels (river barges in ARA, etc.) that would otherwise
+    dominate the delta chart and obscure ocean-going fleet movements.
     """
     h = max(1, min(hours_back, 168))
     now_dt = datetime.now(UTC).replace(tzinfo=None)
     cutoff = now_dt - timedelta(hours=h + 1)
 
+    seg_filter = "AND segment != 'Small'" if ocean_only else ""
     df = db.query(
-        "SELECT ts, region, laden_count, ballast_count, unknown_count "
-        "FROM fleet_density WHERE ts >= ? ORDER BY ts DESC",
+        f"SELECT ts, region, laden_count, ballast_count, unknown_count "
+        f"FROM fleet_density WHERE ts >= ? {seg_filter} ORDER BY ts DESC",
         [cutoff],
         db=db.analytics_db_path(),
     )
@@ -2399,7 +2404,7 @@ def analytics_region_momentum(hours_back: int = 24):
         )
         for region, r in merged.iterrows()
     ]
-    return RegionMomentumResponse(as_of=as_of, hours_back=h, rows=rows)
+    return RegionMomentumResponse(as_of=as_of, hours_back=h, ocean_only=ocean_only, rows=rows)
 
 
 @app.get("/api/analytics/fleet-at-time", response_model=FleetHistoryResponse)
