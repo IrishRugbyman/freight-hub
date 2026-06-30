@@ -46,8 +46,28 @@ market-data/ais/collector.py  →  ais_positions.duckdb (live_positions, upsert 
 backend/app  →  GET /api/vessels|chokepoints|meta|health  →  frontend polls every 60s
 ```
 
-The collector (in market-data, NOT here) is the single aisstream consumer. This app
-never writes. Vessels older than `FREIGHT_STALE_HOURS` (3) are excluded everywhere.
+The collector (in market-data, NOT here) is the single aisstream consumer. The live
+read path never writes. Vessels older than `FREIGHT_STALE_HOURS` (3) are excluded everywhere.
+
+### Vessel enrichment crawlers (scheduled writers)
+
+Two daily crawlers enrich vessels from external sources into their own DuckDB files,
+read-only-served by the API. Both are deliberately slow/polite (rate-limited externals):
+
+```
+registry/crawl.py     → Equasis      → vessel_registry.duckdb + PG vessels  (04:30 daily)
+                        ownership, class society, P&I, PSC/MOU, risk, OFAC. Per-account
+                        quota: NEVER raise the cap/rate (locks the account 7 days).
+                        Served by GET /api/vessels/{imo}/equasis. See memory equasis-integration.
+
+registry/crawl_mst.py → MyShipTracking → mst.duckdb                          (05:00 daily)
+                        MOVEMENT data Equasis/AIS lack: voyage history (immutable trips:
+                        origin/dest/dates/distance/draught), port calls, live dest/ETA/draught.
+                        Page is server-rendered → httpx + BeautifulSoup (app/myshiptracking.py),
+                        no headless browser. Immutable trips persisted once, never re-scraped;
+                        only live state is overwritten. Served by GET /api/vessels/{mmsi}/myshiptracking.
+                        Anonymous scraping (no account), but IP-rate-limited: keep the cap modest.
+```
 
 ## Run / build / test
 

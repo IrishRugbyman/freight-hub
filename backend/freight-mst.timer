@@ -1,0 +1,11 @@
+[Unit]
+Description=Run MyShipTracking crawler once daily
+Requires=freight-mst.service
+
+[Timer]
+OnBootSec=20min
+OnCalendar=*-*-* 05:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

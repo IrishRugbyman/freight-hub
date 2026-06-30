@@ -24,6 +24,7 @@ import duckdb
 _DEFAULT_AIS_DB = "~/quant/shared/market-data/data/ais_positions.duckdb"
 _DEFAULT_ANALYTICS_DB = Path(__file__).resolve().parents[1] / "data" / "freight_analytics.duckdb"
 _DEFAULT_REGISTRY_DB = Path(__file__).resolve().parents[1] / "data" / "vessel_registry.duckdb"
+_DEFAULT_MST_DB = Path(__file__).resolve().parents[1] / "data" / "mst.duckdb"
 
 _PG_DSN = os.environ.get("DATABASE_URL", "postgresql:///market_data")
 
@@ -45,6 +46,15 @@ def analytics_db_path() -> Path:
 def registry_db_path() -> Path:
     """Path to the vessel registry DuckDB (overridable via REGISTRY_DB, kept for tests)."""
     return Path(os.environ.get("REGISTRY_DB", str(_DEFAULT_REGISTRY_DB)))
+
+
+def mst_db_path() -> Path:
+    """Path to the MyShipTracking DuckDB (overridable via MST_DB).
+
+    Written solely by registry/crawl_mst.py; read read-only here for the
+    /api/vessels/{mmsi}/myshiptracking endpoint.
+    """
+    return Path(os.environ.get("MST_DB", str(_DEFAULT_MST_DB)))
 
 
 def query(sql: str, params: list | None = None, retries: int = 30, db: Path | None = None):

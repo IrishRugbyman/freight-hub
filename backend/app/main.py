@@ -47,6 +47,9 @@ from .schemas import (
     EtaByTargetRow,
     EtaDriftAlert,
     EtaTrendPoint,
+    MstPortCall,
+    MstVesselData,
+    MstVoyage,
     EtaTrendResponse,
     EtaPrediction,
     EtaResponse,
@@ -1705,6 +1708,75 @@ def vessel_equasis(imo: int):
         else:
             result[col] = val
     return result
+
+
+@app.get("/api/vessels/{mmsi}/myshiptracking", response_model=MstVesselData)
+def vessel_myshiptracking(mmsi: int):
+    """MyShipTracking enrichment for a vessel by MMSI, served from mst.duckdb.
+
+    Read-only: the crawler (registry/crawl_mst.py via freight-mst.timer) is the sole
+    writer. No live scrape happens here - voyage/port-call history is immutable and
+    persisted, so once a vessel has been crawled it is served instantly from DuckDB.
+    """
+    from fastapi import HTTPException
+
+    _db = db.mst_db_path()
+    state = db.query("SELECT * FROM mst_vessel_state WHERE mmsi = ?", [mmsi], db=_db)
+    if state.empty:
+        raise HTTPException(status_code=404, detail="Not crawled by MyShipTracking yet")
+
+    import pandas as _pd
+
+    def _v(val):
+        return None if (val is None or _pd.isna(val)) else val
+
+    def _i(val):
+        v = _v(val)
+        return int(v) if v is not None else None
+
+    r = state.iloc[0]
+
+    voy_df = db.query(
+        "SELECT origin, departure, destination, arrival, distance_nm, duration, "
+        "draught_m, avg_speed_kn, max_speed_kn, stops FROM mst_voyages "
+        "WHERE mmsi = ? ORDER BY departure DESC",
+        [mmsi],
+        db=_db,
+    )
+    voyages = [
+        MstVoyage(
+            origin=_v(x["origin"]), departure=_v(x["departure"]),
+            destination=_v(x["destination"]), arrival=_v(x["arrival"]),
+            distance_nm=_v(x["distance_nm"]), duration=_v(x["duration"]),
+            draught_m=_v(x["draught_m"]), avg_speed_kn=_v(x["avg_speed_kn"]),
+            max_speed_kn=_v(x["max_speed_kn"]), stops=_i(x["stops"]),
+        )
+        for _, x in voy_df.iterrows()
+    ]
+
+    pc_df = db.query(
+        "SELECT port, arrival, departure FROM mst_port_calls "
+        "WHERE mmsi = ? ORDER BY arrival DESC",
+        [mmsi],
+        db=_db,
+    )
+    port_calls = [
+        MstPortCall(port=_v(x["port"]), arrival=_v(x["arrival"]), departure=_v(x["departure"]))
+        for _, x in pc_df.iterrows()
+    ]
+
+    return MstVesselData(
+        mmsi=mmsi,
+        imo=_i(r["imo"]), name=_v(r["name"]), flag=_v(r["flag"]),
+        call_sign=_v(r["call_sign"]), ship_type=_v(r["ship_type"]),
+        length_m=_v(r["length_m"]), beam_m=_v(r["beam_m"]),
+        gross_tonnage=_i(r["gross_tonnage"]), dwt=_i(r["dwt"]), year_built=_i(r["year_built"]),
+        status=_v(r["status"]), destination=_v(r["destination"]), eta=_v(r["eta"]),
+        draught_m=_v(r["draught_m"]), station=_v(r["station"]),
+        position_received_utc=_v(r["position_received_utc"]),
+        fetched_ts=_iso(r["fetched_ts"]),
+        voyages=voyages, port_calls=port_calls,
+    )
 
 
 @app.get("/api/chokepoints", response_model=list[ChokepointCount])

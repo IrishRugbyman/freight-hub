@@ -1512,3 +1512,58 @@ class ArrivalsResponse(BaseModel):
     total_vessels: int              # distinct vessels arriving anywhere in the window
     rows: list[ArrivalTarget]
 
+
+
+class MstVoyage(BaseModel):
+    """One completed trip from MyShipTracking (immutable history)."""
+
+    origin: str | None
+    departure: str | None
+    destination: str | None
+    arrival: str | None
+    distance_nm: float | None
+    duration: str | None
+    draught_m: float | None
+    avg_speed_kn: float | None
+    max_speed_kn: float | None
+    stops: int | None
+
+
+class MstPortCall(BaseModel):
+    """One port call from MyShipTracking."""
+
+    port: str | None
+    arrival: str | None
+    departure: str | None
+
+
+class MstVesselData(BaseModel):
+    """MyShipTracking enrichment for a vessel: particulars + latest live state + history.
+
+    Served read-only from mst.duckdb (written by registry/crawl_mst.py). Complements
+    Equasis (registry/compliance) and our own AIS analytics with movement data:
+    voyage history, port calls, destination/ETA/draught.
+    """
+
+    mmsi: int
+    imo: int | None = None
+    name: str | None = None
+    flag: str | None = None
+    call_sign: str | None = None
+    ship_type: str | None = None
+    length_m: float | None = None
+    beam_m: float | None = None
+    gross_tonnage: int | None = None
+    dwt: int | None = None
+    year_built: int | None = None
+    # latest live snapshot (volatile)
+    status: str | None = None
+    destination: str | None = None
+    eta: str | None = None
+    draught_m: float | None = None
+    station: str | None = None
+    position_received_utc: str | None = None
+    fetched_ts: str | None = None
+    # durable history
+    voyages: list[MstVoyage] = []
+    port_calls: list[MstPortCall] = []

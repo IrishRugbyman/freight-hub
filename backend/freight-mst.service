@@ -1,0 +1,15 @@
+[Unit]
+Description=Freight MyShipTracking crawler (voyage history + port calls enrichment)
+After=network.target
+
+[Service]
+Type=oneshot
+User=lbzgiu
+WorkingDirectory=/home/lbzgiu/quant/freight/backend
+ExecStart=/home/lbzgiu/quant/freight/backend/.venv/bin/python -m registry.crawl_mst
+EnvironmentFile=-/home/lbzgiu/quant/freight/backend/.env
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

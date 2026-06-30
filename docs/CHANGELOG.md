@@ -1,5 +1,43 @@
 # Freight Hub Changelog
 
+## 2026-06-30 (session 9) - MyShipTracking enrichment: persisted voyage history + port calls
+
+**New external enrichment source. myshiptracking.com vessel pages are fully
+server-side rendered** (the only XHR calls load ads + a "featured company" box), so a
+single `httpx.get` + BeautifulSoup parses them deterministically: no headless browser.
+This fills the *movement* gap that Equasis (registry/compliance) and our own
+AIS analytics (limited to covered basins, last 90d) both leave open.
+
+What the page yields, confirmed by parsing two live vessels + a saved fixture:
+- **Voyage history** ("Last Trips", up to 10, <=3 months): origin/dest ports, departure/
+  arrival timestamps, distance, duration, draught, avg/max speed, stop count. Carried in
+  rich `data-*` attrs on `td.tbl-ta-3m`. **Immutable once a trip completes.**
+- **Port calls**: port, arrival, departure.
+- **Current voyage**: destination + ETA (the `.myst-arrival-cont` block carrying the
+  `ETA*` label - there are two, origin + destination), nav status, draught.
+- **Particulars**: GT/DWT/build/type/flag/call-sign/size (th/td tables).
+- **Exact lat/lon**: the position table masks them as `---` for anonymous visitors, but
+  they leak in the embedded `contributorMap.php?lat=&lng=` ajax URL.
+
+Design (the user's call): persist by **volatility**, don't cache. Immutable
+voyages/port-calls are written once to `mst.duckdb` and never re-scraped (PK
+`(mmsi, vkey)` / `(mmsi, pkey)`, INSERT OR IGNORE); only the volatile live-state row is
+overwritten each visit. So once a vessel is crawled its history is served instantly from
+DuckDB - the original "why a long cache?" was only ever true for the live fields.
+
+- `app/myshiptracking.py`: scraper + pure `parse()` -> `VesselSnapshot` dataclass with
+  typed normalizers (`30,201 Tons` -> 30201, `11.1 m` -> 11.1, ETA `(UTC)` stripped).
+  `MyShipTrackingBlocked` raised only on a real bot-wall - the login recaptcha widget
+  present on every page must NOT read as a block (gated behind `looks_like_vessel_page`).
+- `registry/crawl_mst.py`: single writer of `mst.duckdb`. Discovers live MMSIs (filtered
+  to valid 9-digit ship MMSIs 2xx-7xx; base stations/AtoN/SAR skipped), priority =
+  never-scraped then >7d-stale, cap 80/run, 4-8s sleep. Aborts on a block, mirroring the
+  Equasis crawler discipline. `freight-mst.timer` runs it daily at 05:00 (30min after Equasis).
+- `GET /api/vessels/{mmsi}/myshiptracking` (read-only from `mst.duckdb`, like the Equasis
+  endpoint). 12 tests in `tests/test_myshiptracking.py` against a saved real fixture.
+- Note: AIS destination is crew free-text and arrives messy (e.g. `MOERDIIK===`); stored
+  faithfully rather than scrubbed.
+
 ## 2026-06-28 (session 8) - Dual-basis ETA accuracy scoreboard (expose the conditioning artifact)
 
 **Feature: the True ETA accuracy scoreboard now conditions per-bucket error on
