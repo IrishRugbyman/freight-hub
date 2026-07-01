@@ -18,6 +18,7 @@ dependencies = [
     "lightgbm>=4.0",
     "market-data",
     "quant-lib",
+    "rapidfuzz>=3.14.5",
 ]
 
 [project.optional-dependencies]
