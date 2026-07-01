@@ -158,32 +158,7 @@ All new tables in `freight_analytics.duckdb`, written by the analytics batch job
 
 ---
 
-### Phase D - ML ETA (LightGBM quantile) - GATED on history
-*Goal: a learned model that beats physics where data is dense, served only if it earns it on a leakage-free walk-forward test.*
-*Depends on: C and >= a minimum clean-history threshold (target: >= 8 weeks and >= N voyages/target). Until the gate passes, physics stays champion - this is a deliberate hold, not a blocker.*
-*Estimated effort: 2-3 sessions when unlocked.*
-
-**What's new.** Three LightGBM quantile regressors (alpha 0.1/0.5/0.9) on
-`eta_samples`, with champion/challenger promotion against physics.
-
-**Database changes.** None new; consumes `eta_samples`, writes `eta_model_metrics`.
-
-**Infrastructure.** Add `lightgbm` dep; model artifact under
-`backend/analytics/models/eta_lgbm_{quantile}.txt` (committed or rebuilt by timer).
-
-**Task checklist.**
-- Data Layer
-  - [ ] Feature matrix from `eta_samples`; document each feature; drop anything leaky (nothing derived from future fixes).
-- ML
-  - [ ] Train P10/P50/P90 LightGBM; **time-based split** with `voyage_id` grouping so no voyage crosses train/test.
-  - [ ] Champion/challenger: promote ML to `method='ml'` only per-segment/lead-bucket where it beats physics on held-out median |err| AND interval coverage stays in [0.75, 0.85].
-- Validation
-  - [ ] Walk-forward across the available weeks; feature importance sanity (route_dist, effective speed should dominate - if `destination`-ish junk leaks in, stop).
-  - [ ] Calibration plot data into `eta_model_metrics` (`interval_coverage`).
-- Testing & Polish
-  - [ ] pytest: training is deterministic on a seed; predictor loads artifact and returns monotone quantiles (P10<=P50<=P90).
-
-**Definition of done.** A documented, reproducible walk-forward shows ML beating physics on the dense targets without leakage; calibrated intervals; champion map persisted.
+### Phase D - ML ETA (LightGBM quantile) [COMPLETE 2026-07-01]
 
 ---
 
@@ -197,18 +172,24 @@ All new tables in `freight_analytics.duckdb`, written by the analytics batch job
 
 ### Phase G - Gated retrain + auto-promote (monitoring half COMPLETE 2026-06-27)
 *Goal: the model improves as history grows, automatically, without ever promoting a worse model.*
-*Depends on: D (ML). The refresh + drift-watch half shipped 2026-06-27; this remaining half is gated on the ML model existing.*
+*Depends on: D (ML), which shipped 2026-07-01. The refresh + drift-watch half shipped 2026-06-27.*
 
 The nightly-refresh + drift-watch deliverables are done: refresh already runs
 hourly via the existing `freight-analytics.timer` (no separate timer needed), and a
 champion drift watch (`analytics/eta_drift.py`, surfaced on the accuracy scoreboard)
 now flags coverage/median-error regressions every run. See CHANGELOG 2026-06-27.
 
-**What's left (ML-dependent).**
-- [ ] Weekly gated retrain: re-fit the LightGBM challenger on accumulated history and auto-promote per segment/lead-bucket *only* if it beats the champion on the latest leakage-free walk-forward (median |err| down, coverage stays in [0.75, 0.85]).
-- [ ] Dry-run the retrain path on current data; confirm no-promote when the challenger loses.
+The Phase-D training entrypoint (`python -m analytics.eta_ml`) already *is* the
+gated-promotion path: it trains the challenger on accumulated history, runs the
+leakage-free walk-forward, and rewrites `models/` + the champion map only for cells
+the challenger wins (median |err| down AND coverage in [0.75,0.85]). The hourly
+build reads the frozen artifact and never retrains. What remains is only to run it
+on a schedule.
 
-**Definition of done.** A retrain cycle runs end-to-end and correctly keeps the better model.
+**What's left.**
+- [ ] Add a weekly systemd timer (mirror `freight-analytics.timer`) that runs `python -m analytics.eta_ml` so the champion + champion map re-derive as history grows. It is already no-promote-safe (writes artifacts only for won cells; leaves physics champion otherwise).
+
+**Definition of done.** A weekly retrain cycle runs end-to-end unattended and correctly keeps the better model per cell.
 
 ---
 
@@ -219,7 +200,7 @@ now flags coverage/median-error regressions every run. See CHANGELOG 2026-06-27.
 | A | Ground truth + harness | eta_targets, eta_arrivals | 0 | 1-2 | - |
 | B | Sea-route distance | eta_route_cache, eta_samples | 0 | 1-2 | - |
 | C | Physics ETA v1 (ship it) | - | 0 | 2 | - |
-| D | ML quantile ETA | - | 0 | 2-3 | >=8wk history |
+| D | ML quantile ETA [DONE 2026-07-01] | - | 0 | 1 | - |
 | E | Serving + API | eta_predictions | +1 +3 wired | 1-2 | C |
 | F | Frontend + scoreboard | - | +1 metrics | 1-2 | E |
 | G | Retrain + monitor | eta_model_metrics (live) | 0 | 1 | D,E,F |

@@ -31,16 +31,14 @@ import logging
 
 import numpy as np
 import pandas as pd
-from quant_lib.freight import effective_speed, physics_eta, queue_wait
-from quant_lib.freight.eta import (
-    CANAL_STAGING_BAND_NM,
-    CANAL_STAGING_HOURS,
-    DEFAULT_CANAL_STAGING_HOURS,
-    _MAX_EFF_SPEED,
-    _MIN_EFF_SPEED,
-)
 
 from analytics.eta_backtest import _MIN_SOG_KN
+from quant_lib.freight import effective_speed, physics_eta, queue_wait
+from quant_lib.freight.eta import (
+    _MAX_EFF_SPEED,
+    _MIN_EFF_SPEED,
+    CANAL_STAGING_BAND_NM,
+)
 
 log = logging.getLogger(__name__)
 
@@ -100,10 +98,11 @@ def vectorized_physics_p50(samples: pd.DataFrame) -> np.ndarray:
     from ``segment`` and ``laden`` (same logic as ``_add_physics_features``).
     """
     from quant_lib.freight.eta import (
-        DEFAULT_SERVICE_SPEED,
-        SEGMENT_SERVICE_SPEED,
         _BALLAST_FACTOR,
         _LADEN_FACTOR,
+        DEFAULT_SERVICE_SPEED,
+        SEGMENT_SERVICE_SPEED,
+        canal_staging_hours,
     )
 
     sog = samples["sog"].to_numpy(dtype=float)
@@ -145,7 +144,7 @@ def vectorized_physics_p50(samples: pd.DataFrame) -> np.ndarray:
     is_canal = samples["is_canal"].fillna(False).to_numpy(dtype=bool)
     target_ids = samples["target_id"].to_numpy()
     staging = np.array(
-        [CANAL_STAGING_HOURS.get(str(tid), DEFAULT_CANAL_STAGING_HOURS) for tid in target_ids],
+        [canal_staging_hours(str(tid)) for tid in target_ids],
         dtype=float,
     )
     qw = np.where(is_canal & np.isfinite(dist) & (dist <= CANAL_STAGING_BAND_NM), staging, 0.0)

@@ -33,22 +33,20 @@ import duckdb
 import numpy as np
 import pandas as pd
 
+from analytics import eta_backtest as bt
+from analytics.eta_labels import ANALYTICS_DB, _default_ais_query, haversine_nm
+from analytics.eta_physics import IntervalModel
+from analytics.eta_routing import GRID_DEG as ROUTE_CACHE_GRID
+from analytics.eta_routing import ROUTE_CACHE_SCHEMA, RouteCache
 from quant_lib.freight import (
-    CANAL_STAGING_HOURS,
     DEFAULT_SERVICE_SPEED,
     SEGMENT_SERVICE_SPEED,
 )
 from quant_lib.freight.eta import (
-    CANAL_STAGING_BAND_NM,
-    DEFAULT_CANAL_STAGING_HOURS,
     _BALLAST_FACTOR,
     _LADEN_FACTOR,
+    CANAL_STAGING_BAND_NM,
 )
-
-from analytics import eta_backtest as bt
-from analytics.eta_labels import ANALYTICS_DB, _default_ais_query, haversine_nm
-from analytics.eta_physics import IntervalModel
-from analytics.eta_routing import GRID_DEG as ROUTE_CACHE_GRID, ROUTE_CACHE_SCHEMA, RouteCache
 
 log = logging.getLogger(__name__)
 
@@ -117,9 +115,22 @@ def _add_physics_features(out: pd.DataFrame) -> None:
     factor = factor.mask(laden == False, _BALLAST_FACTOR)  # noqa: E712
     out["service_speed"] = seg * factor
 
+    _apply_dest_queue(out)
+
+
+def _apply_dest_queue(out: pd.DataFrame) -> None:
+    """(Re)compute the ``dest_queue_h`` feature from the installed canal staging.
+
+    Reads `canal_staging_hours`, which returns the data-measured staging when
+    installed (via `set_measured_staging`) and the nominal constant otherwise, so
+    calling this after measurement refreshes the feature to the measured figure.
+    Proximity-gated to the staging band; non-canal / out-of-band -> 0.
+    """
+    from quant_lib.freight.eta import canal_staging_hours
+
     dist = out["route_dist_nm"].where(np.isfinite(out["route_dist_nm"]), out["gc_dist_nm"])
     canal = out["is_canal"].fillna(False).astype(bool) & (dist <= CANAL_STAGING_BAND_NM)
-    staging = out["target_id"].map(CANAL_STAGING_HOURS).fillna(DEFAULT_CANAL_STAGING_HOURS)
+    staging = out["target_id"].map(lambda t: canal_staging_hours(str(t)))
     out["dest_queue_h"] = np.where(canal, staging, 0.0)
 
 
@@ -324,7 +335,14 @@ def score_baselines(
         if tgt_metrics:
             bt.write_metrics_by_target(conn, tgt_metrics)
 
-    return pd.concat([naive, route, physics], ignore_index=True)
+    # Score the promoted ML champion (Phase D) on its own leakage-free time-based
+    # hold-out, sharing this run_ts so the scoreboard surfaces it beside physics.
+    # No-op when no ML artifact has been promoted (physics-only serving).
+    from analytics.eta_ml import score_and_write_ml
+
+    ml = score_and_write_ml(conn, samples, run_ts)
+
+    return pd.concat([naive, route, physics, ml], ignore_index=True)
 
 
 def _log_long_haul_improvement(conn: duckdb.DuckDBPyConnection, samples: pd.DataFrame) -> None:
@@ -365,6 +383,19 @@ def run_in_conn(
     samples = bt.build_samples(conn, ais_query)
     log.info("built %d approach samples", len(samples))
     samples = enrich_routes(conn, samples)
+
+    # Measure the real per-canal staging ("canal queue") from these freshly built
+    # transit tracks and install it process-wide, so the dest_queue_h feature, the
+    # physics queue term (scoring below), and live serving all read the measured
+    # figure instead of the nominal constant. Leakage-safe: mined from completed
+    # transits, never the fix being predicted.
+    from analytics import eta_canal_queue
+    from quant_lib.freight.eta import set_measured_staging
+
+    measured = eta_canal_queue.run_in_conn(conn, samples)
+    set_measured_staging(measured)
+    _apply_dest_queue(samples)  # refresh the feature with the installed staging
+
     persist_samples(conn, samples)
     metrics = score_baselines(conn, samples, export_csv=export_csv)
     _log_long_haul_improvement(conn, samples)

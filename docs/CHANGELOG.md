@@ -1,5 +1,102 @@
 # Freight Hub Changelog
 
+## 2026-07-01 (session 10b) - Measured canal staging (replaces the hardcoded queue constants)
+
+**The "canal queue" was two magic numbers; now it's measured from AIS.** The physics
+queue term used a hardcoded `CANAL_STAGING_HOURS` (Suez 6h, Panama 10h) applied inside
+a 60nm band. New `backend/analytics/eta_canal_queue.py` measures it from the transit
+tracks we already mine: for each completed canal transit, the observed staging =
+time spent loitering (SOG < 3kn) within the staging band before the gate crossing;
+the per-canal estimate is the **median** over recent transits (robust to the long
+anchorage tail), kept only when a canal has >= 20 transits.
+
+- **Measured vs nominal (live):** Suez **6h -> 10.0h** (the constant materially
+  underestimated it), Panama **10h -> 9.0h** (constant was about right). 91-96% of
+  transits show real waiting; n=122 (Suez) / 109 (Panama).
+- **Wiring without threading.** Rather than plumb a staging dict through ~10 physics
+  call sites, `quant_lib.freight.eta` gains a process-level override:
+  `set_measured_staging(map)` installs the measured values and `canal_staging_hours()`
+  resolves measured -> nominal constant -> default. The hourly build measures from the
+  freshly rebuilt `eta_samples`, installs it, refreshes the `dest_queue_h` feature, and
+  scores physics with it; serving loads it from the new `eta_canal_queue` table. Empty
+  map (fresh import / tests) falls back to the constants, so nothing else changes.
+- **Leakage-safe** (mined from completed transits, never the fix being predicted) and
+  **not built on the anchorage-dwell detector** (which has a flat ~6.8h artifact) - the
+  loiter time is timed directly off each transit's own track.
+- Tests: `tests/test_eta_canal_queue.py` (measurement, transit-count gate, non-canal
+  exclusion, persist/load round-trip, override precedence in `queue_wait`). Full suite
+  519 passing.
+
+## 2026-07-01 (session 10) - True ETA Phase D: LightGBM quantile ML challenger (blended champion)
+
+**Physics was structurally optimistic at long lead; ML fixes it, but only where it
+earns promotion.** The shipped physics model (`physics_v1`) is excellent at short
+range (0-6h median |err| ~1h) but the great-circle/effective-speed formula divides
+a small route distance by current speed for a vessel loitering near a target and
+reports near-arrival, so 24-48h+ forecasts carry a large negative (too-early) bias
+no position+speed model can remove. That residual is *learnable*, so Phase D adds a
+LightGBM quantile challenger and blends it with physics per lead bucket.
+
+**What was built** (`backend/analytics/eta_ml.py`, +`lightgbm` dep):
+- Three quantile boosters (alpha 0.05/0.50/0.95) on `eta_samples`. Features are all
+  serve-time-known: route/gc distance, sog, trailing-6h sog, service-speed prior,
+  draught, dest_queue_h, approach_bearing, and categoricals segment/target_id/
+  target_type/is_canal/laden. Importance is led by `target_id`, `approach_bearing`,
+  `route_dist_nm` - no `destination`-string leakage.
+- **Leakage-free time-based, voyage-grouped split** (`time_voyage_split`): voyages
+  ordered by arrival, split 60/15/25 into train/calib/test so the test window is
+  strictly *later* than train (a real walk-forward, not a shuffle) and no voyage
+  straddles a boundary.
+- **Split-conformal (CQR) intervals, per predicted-lead bucket, clamped >= 0**
+  (only ever widen). LightGBM's raw quantile heads are under-dispersed out-of-time
+  on ~3 weeks of history (a P10/P90 head realises only ~0.71 coverage on test), and
+  the calibration slice systematically *over*-covers relative to the strictly-later
+  test window - so trusting a negative conformal offset would shrink the band and
+  make it overconfident. The wider P05/P95 heads + non-negative CQR land realised
+  walk-forward coverage at **0.83 overall**, inside the honest [0.75,0.85] band.
+- **Champion/challenger, per (target_type, physics-predicted-lead) cell**
+  (`build_champion_map`): ML is promoted to `method='ml'` only where it beats
+  physics on held-out median |err| AND its realised P05-P95 coverage stays in
+  [0.75,0.85]. Everything else stays physics.
+
+**Walk-forward result** (leakage-free test half, by actual lead, target_type=all):
+
+| lead | physics \|err\| | ML \|err\| | physics bias | ML bias |
+|---|--:|--:|--:|--:|
+| 0-6h | 1.1h | 7.1h | +0.7 | +7.1 |
+| 6-12h | 2.4h | 6.1h | -0.1 | +5.9 |
+| 12-24h | 9.5h | **6.7h** | -8.5 | +3.0 |
+| 24-48h | 27.7h | **13.2h** | -27.6 | -12.2 |
+| 48h+ | 51.2h | **34.2h** | -51.1 | -34.2 |
+
+Physics owns short lead (kinematics win); ML roughly halves long-lead error and
+collapses the bias. Overall median bias -10.1h -> -0.9h. The **6 promoted cells**
+(by physics-predicted bucket): `chokepoint|12-24h`, `chokepoint|24-48h`,
+`port|0-6h`, `port|6-12h`, `port|12-24h`, `port|48h+`. The gate correctly
+*withheld* `chokepoint|48h+` (ML wins on |err| but coverage 0.72 < 0.75) and
+`port|24-48h` (coverage 0.86 > 0.85) - rigor working, not silently promoting
+overconfident cells. Ports promote broadly because anchorage/queue behaviour
+(which physics cannot model) inflates physics error to 13-18h across all buckets.
+
+**Serving + scoreboard.** `eta_serving.build_predictions` now loads the artifact
+(`ETAModel.load`, None -> physics-only serving, graceful), batch-predicts ML, and
+blends per the champion map keyed by the physics-predicted-lead bucket (physics is
+always computed, so the routing decision is serve-time deterministic). On the live
+snapshot this routed 1245/1676 predictions to `ml`. `score_and_write_ml` re-scores
+the frozen champion on its own leakage-free time-split each hourly build, sharing
+the run's `run_ts`, so the public accuracy scoreboard surfaces `ml` beside
+`naive`/`naive+route`/`physics_v1` like-for-like (physics is deterministic and
+split-invariant, so its random-split score stays a fair comparator).
+
+**Artifacts + retrain.** Models + champion map live under
+`backend/analytics/models/` (gitignored build artifacts; regenerated by
+`python -m analytics.eta_ml`). The hourly build only *reads* them - it never
+retrains - so it never mutates the champion mid-cycle. The weekly gated auto-retrain
+(Phase G) is the remaining follow-up. Tests: `tests/test_eta_ml.py` (10 cases -
+split ordering/disjointness, deterministic fit, monotone quantiles, non-negative
+CQR, champion-map gating, artifact round-trip, serving-blend routing + physics
+fallback). Full suite 512 passing.
+
 ## 2026-06-30 (session 9) - MyShipTracking enrichment: persisted voyage history + port calls
 
 **New external enrichment source. myshiptracking.com vessel pages are fully

@@ -6,11 +6,13 @@ targets it is plausibly heading toward, attaches the calibrated interval, and
 writes one snapshot row per (vessel, target) into `eta_predictions`. The API
 read layer (`app.runner_eta`) serves those rows straight to the frontend cards.
 
-Fallback chain (roadmap): **ml -> physics -> naive**. ML is gated on history
-(Phase D) so it is absent today; every underway vessel therefore gets the
-`physics` model, and the chain degrades to `naive` only if the physics estimate
-is unavailable (no valid effective speed). The method is recorded per row so the
-UI can show it honestly.
+Fallback chain (roadmap): **ml -> physics -> naive**. The Phase-D LightGBM
+quantile model is served per (target_type, physics-predicted-lead) cell where it
+was promoted on the leakage-free walk-forward (`ETAModel.champion_map`); every
+other underway vessel gets the `physics` model, and the chain degrades to `naive`
+only if the physics estimate is unavailable (no valid effective speed). When no
+promoted ML artifact is present the serving is physics-only, unchanged. The
+method is recorded per row so the UI can show it honestly.
 
 Target resolution is geometric, never destination-string based: a target counts
 as "resolvable" for a vessel when it sits ahead of the vessel's course (approach
@@ -42,9 +44,10 @@ from analytics.eta_labels import (
     haversine_nm,
     haversine_nm_vec,
 )
-from analytics.eta_physics import IntervalModel, physics_p50
+from analytics.eta_ml import ETAModel, serving_choice
+from analytics.eta_physics import IntervalModel, physics_p50, vectorized_physics_p50
 from analytics.eta_routing import RouteCache, snap_cell
-from quant_lib.freight import effective_speed, physics_eta, queue_wait
+from quant_lib.freight import effective_speed, physics_eta, queue_wait, service_speed
 from quant_lib.freight.eta import initial_bearing
 
 log = logging.getLogger(__name__)
@@ -267,6 +270,10 @@ def build_predictions(
         return pd.DataFrame(columns=_PERSIST_COLS)
 
     interval = _fit_interval(conn)
+    ml_model = ETAModel.load()  # None if no promoted artifact -> physics-only serving
+    if ml_model is not None:
+        log.info("build_predictions: loaded ETA ML model (%d promoted cells)",
+                 len(ml_model.champion_map))
     laden_by_mmsi = _laden_map(conn)
     trail_by_mmsi = _trailing_speed(ais_query, live["mmsi"].astype("int64").unique().tolist(), now)
     cache = RouteCache(conn)
@@ -300,8 +307,11 @@ def build_predictions(
     log.info("build_predictions: route cache pre-warm done (%d hits, %d misses)",
              cache.hits, cache.misses)
 
-    # Pass 2: build predictions using the warm in-memory cache (no searoute calls)
-    rows: list[dict] = []
+    # Pass 2: assemble a per-pair observation frame with the full feature set
+    # (route/gc distance, effective-speed inputs, and the Phase-C/-D features the
+    # physics and ML models consume), using the warm in-memory route cache.
+    obs_records: list[dict] = []
+    meta_records: list[dict] = []
     for vi, lat, lon, gc_fix, ti in pairs:
         v = live.iloc[vi]
         sog = float(v["sog"])
@@ -316,36 +326,75 @@ def build_predictions(
         gc_cell = haversine_nm(clat, clon, target["lat"], target["lon"])
         route_dist = max(cell_route - gc_cell + gc_fix, gc_fix)
 
-        obs = {
-            "sog": sog,
-            "sog_trail6h": trail,
-            "segment": seg,
-            "laden": laden,
-            "route_dist_nm": route_dist,
-            "gc_dist_nm": gc_fix,
-            "is_canal": bool(t["is_canal"]),
-            "target_id": t["target_id"],
-        }
-        p50, low, high, model = _predict(obs, interval)
-        if not np.isfinite(p50) or p50 > _MAX_PRED_ETA_H:
-            continue
-        rows.append(
+        is_canal = bool(t["is_canal"])
+        draught = float(v["draught"]) if pd.notna(getattr(v, "draught", None)) else None
+        obs_records.append(
+            {
+                "sog": sog,
+                "sog_trail6h": trail,
+                "segment": seg,
+                "laden": laden,
+                "route_dist_nm": route_dist,
+                "gc_dist_nm": gc_fix,
+                "is_canal": is_canal,
+                "target_id": str(t["target_id"]),
+                "target_type": str(t["target_type"]),
+                "draught": draught,
+                "service_speed": service_speed(seg, laden),
+                "dest_queue_h": queue_wait(is_canal, route_dist, str(t["target_id"])),
+                "approach_bearing": initial_bearing(lat, lon, float(t["lat"]), float(t["lon"])),
+            }
+        )
+        meta_records.append(
             {
                 "mmsi": int(v["mmsi"]),
+                "sog": sog,
+                "seg": seg,
+                "laden": laden,
+                "route_dist": route_dist,
+                "gc_fix": gc_fix,
+                "method": method,
+                "t": t,
+            }
+        )
+
+    if not obs_records:
+        return pd.DataFrame(columns=_PERSIST_COLS)
+
+    obsdf = pd.DataFrame(obs_records)
+    phys_p50 = vectorized_physics_p50(obsdf)
+    use_ml, ml_p50, ml_low, ml_high = serving_choice(ml_model, obsdf, phys_p50)
+
+    # Pass 3: blend ML (where the champion map assigns it) with the physics/naive
+    # fallback chain, and assemble the persisted rows.
+    rows: list[dict] = []
+    for i, meta in enumerate(meta_records):
+        obs = obs_records[i]
+        if use_ml[i]:
+            p50, low, high, model = float(ml_p50[i]), float(ml_low[i]), float(ml_high[i]), "ml"
+        else:
+            p50, low, high, model = _predict(obs, interval)
+        if not np.isfinite(p50) or p50 > _MAX_PRED_ETA_H:
+            continue
+        t = meta["t"]
+        sog = meta["sog"]
+        rows.append(
+            {
+                "mmsi": meta["mmsi"],
                 "target_id": t["target_id"],
                 "as_of": now,
                 "eta_p50_h": round(p50, 2),
                 "eta_low_h": round(low, 2),
                 "eta_high_h": round(high, 2),
-                "eta_naive_h": round(gc_fix / sog, 2),
+                "eta_naive_h": round(meta["gc_fix"] / sog, 2),
                 "method": model,
                 "eta_arrival_ts": now + timedelta(hours=p50),
-                "route_dist_nm": round(route_dist, 1),
-                "gc_dist_nm": round(gc_fix, 1),
-                "route_method": method,
+                "route_dist_nm": round(meta["route_dist"], 1),
+                "gc_dist_nm": round(meta["gc_fix"], 1),
+                "route_method": meta["method"],
                 "sog": round(sog, 1),
-                "segment": seg,
-                "laden": laden,
+                "segment": meta["seg"],
+                "laden": meta["laden"],
                 "target_type": t["target_type"],
                 "target_name": t["name"],
                 "target_lat": float(t["lat"]),
@@ -356,11 +405,12 @@ def build_predictions(
 
 
 def _predict(obs: dict, interval: IntervalModel) -> tuple[float, float, float, str]:
-    """Fallback chain ml -> physics -> naive. Returns (p50, low, high, method).
+    """Physics -> naive fallback for rows the champion map does not route to ML.
 
-    ML is gated (Phase D) so it is skipped today. Physics is the champion; if it
-    yields no estimate (no valid effective speed) we degrade to the naive
-    kinematic ETA with a zero-width band, labelled honestly.
+    ML selection happens upstream in `serving_choice` (it needs the batch ML
+    prediction + champion map); this handles the physics/naive tail. Physics is
+    the champion; if it yields no estimate (no valid effective speed) we degrade
+    to the naive kinematic ETA with a zero-width band, labelled honestly.
     """
     p50 = physics_p50(obs)
     if np.isfinite(p50):
@@ -405,6 +455,13 @@ def run_in_conn(conn: duckdb.DuckDBPyConnection, ais_query, now: datetime | None
     sample/physics phase, so the interval is fit on the freshest eta_samples.
     """
     conn.execute(ETA_PREDICTIONS_SCHEMA)
+    # Install the data-measured canal staging so the physics queue term + dest_queue_h
+    # match what the batch job measured (a no-op re-install when build.py already set
+    # it earlier this process; the source of truth for the standalone path).
+    from analytics.eta_canal_queue import load_canal_staging
+    from quant_lib.freight.eta import set_measured_staging
+
+    set_measured_staging(load_canal_staging(conn))
     preds = build_predictions(conn, ais_query, now=now)
     return persist_predictions(conn, preds)
 
