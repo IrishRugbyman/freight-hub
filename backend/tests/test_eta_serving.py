@@ -88,14 +88,15 @@ def _fake_ais_query():
     mem.execute(
         "CREATE TABLE live_positions (mmsi BIGINT, name VARCHAR, lat DOUBLE, lon DOUBLE, "
         "sog DOUBLE, cog DOUBLE, heading DOUBLE, kind VARCHAR, segment VARCHAR, "
-        "region VARCHAR, imo BIGINT, draught DOUBLE, updated_ts TIMESTAMP)"
+        "region VARCHAR, imo BIGINT, draught DOUBLE, updated_ts TIMESTAMP, destination VARCHAR)"
     )
     mem.execute("CREATE TABLE ais_snapshots (snapshot_ts TIMESTAMP, mmsi BIGINT, sog DOUBLE)")
     # 7001: VLCC ~90 nm south of Suez, steering due north (toward the gate).
     # 7002: anchored (sog 0.1) - must be excluded.
     # 7003: fast vessel pointing south (away from both targets) - bearing-gated out.
     mem.executemany(
-        "INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO live_positions (mmsi, name, lat, lon, sog, cog, heading, kind, "
+        "segment, region, imo, draught, updated_ts) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
         [
             (
                 7001,
@@ -178,6 +179,40 @@ def test_build_predictions_scores_underway_vessel_with_monotone_interval(tmp_pat
     assert suez["eta_p50_h"] >= suez["eta_naive_h"] - 1e-6
 
 
+def test_build_predictions_scores_resolved_destination(tmp_path):
+    """A vessel whose AIS destination resolves to a real port gets a dest ETA row."""
+    conn = duckdb.connect(str(tmp_path / "an.duckdb"))
+    _seed_targets(conn)
+    _seed_samples(conn)
+
+    mem = duckdb.connect(":memory:")
+    mem.execute(
+        "CREATE TABLE live_positions (mmsi BIGINT, name VARCHAR, lat DOUBLE, lon DOUBLE, "
+        "sog DOUBLE, cog DOUBLE, heading DOUBLE, kind VARCHAR, segment VARCHAR, region VARCHAR, "
+        "imo BIGINT, draught DOUBLE, updated_ts TIMESTAMP, destination VARCHAR)"
+    )
+    mem.execute("CREATE TABLE ais_snapshots (snapshot_ts TIMESTAMP, mmsi BIGINT, sog DOUBLE)")
+    # Vessel ~130 nm south of Port Said, steaming north; AIS destination "PORT SAID".
+    mem.execute(
+        "INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        [8001, "DEST SHIP", 29.0, 32.34, 12.0, 0.0, 1.0, "tanker", "VLCC", "suez",
+         9100001, 20.0, _NOW, "PORT SAID"],
+    )
+
+    def q(sql, params=None):
+        return mem.execute(sql, params or []).df()
+
+    preds = build_predictions(conn, q, now=_NOW)
+    dest = preds[preds["target_type"] == "destination"]
+    assert not dest.empty, "resolvable destination should yield a dest row"
+    row = dest.iloc[0]
+    assert row["target_id"].startswith("dest:")
+    assert "Said" in row["target_name"]           # Port Said
+    assert row["method"] in ("physics", "naive")  # ML not applied to destinations
+    assert row["eta_low_h"] <= row["eta_p50_h"] <= row["eta_high_h"]
+    assert row["eta_p50_h"] > 0 and row["eta_arrival_ts"] > _NOW
+
+
 def test_run_in_conn_persists_predictions(tmp_path):
     conn = duckdb.connect(str(tmp_path / "an.duckdb"))
     _seed_targets(conn)
@@ -197,13 +232,14 @@ def test_build_predictions_caps_absurd_long_eta(tmp_path):
     mem.execute(
         "CREATE TABLE live_positions (mmsi BIGINT, name VARCHAR, lat DOUBLE, lon DOUBLE, "
         "sog DOUBLE, cog DOUBLE, heading DOUBLE, kind VARCHAR, segment VARCHAR, "
-        "region VARCHAR, imo BIGINT, draught DOUBLE, updated_ts TIMESTAMP)"
+        "region VARCHAR, imo BIGINT, draught DOUBLE, updated_ts TIMESTAMP, destination VARCHAR)"
     )
     mem.execute("CREATE TABLE ais_snapshots (snapshot_ts TIMESTAMP, mmsi BIGINT, sog DOUBLE)")
     # ~1.2 kn, far south of Suez heading north: effective speed floors at 2 kn but
     # the sea-route distance over hundreds of nm still implies a >2-week ETA.
     mem.execute(
-        "INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO live_positions (mmsi, name, lat, lon, sog, cog, heading, kind, "
+        "segment, region, imo, draught, updated_ts) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (8001, "CRAWLER", 18.0, 40.0, 1.2, 330.0, 330.0, "tanker", "VLCC", "suez", 8000001, 20.0, _NOW),
     )
 

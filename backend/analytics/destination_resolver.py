@@ -140,7 +140,7 @@ def resolve(
     Returns None for empty/junk strings and for names below the fuzzy cutoff - a
     deliberate non-answer rather than a low-confidence guess.
     """
-    if not destination or not destination.strip():
+    if not isinstance(destination, str) or not destination.strip():
         return None
     g = _gazetteer()
 

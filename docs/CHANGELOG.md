@@ -1,5 +1,34 @@
 # Freight Hub Changelog
 
+## 2026-07-01 (session 10c) - ETA to the resolved AIS destination (UN/LOCODE resolver, wired into serving)
+
+**Now we show a computed ETA to where the ship *says* it's going - not by trusting
+the raw string, but by resolving it.** New `analytics/destination_resolver.py` turns
+the hand-typed AIS `destination` into a real seaport with coordinates via a cascade:
+UN/LOCODE exact ("NLRTM", "NL RTM") -> exact normalized name -> rapidfuzz WRatio
+(aliases/typos/terminal suffixes), same-name ports disambiguated by vessel proximity,
+junk ("FOR ORDERS") left unresolved. Backed by a committed 14,582-port gazetteer
+built from the free UN/LOCODE list (coordless major ports coord-filled from same-name
+ports); no runtime network dependency. Resolves **79% of live vessels' destinations**.
+The motivating case: **"MACAS" -> Casablanca** (MA+CAS is the LOCODE) - never garbage,
+just an un-decoded code.
+
+Wired into serving (`eta_serving._destination_rows`): each live vessel's resolved
+destination gets an ETA row (`target_type='destination'`, `target_id='dest:<locode>'`),
+routed to the port coords and scored by physics (the champion map has no 'destination'
+cell, so ML is not applied to arbitrary destinations - honest, since it was never
+validated there). Not bearing-gated: we trust the reported destination's direction.
+433 live vessels now carry a destination ETA. The vessel card shows it first and
+prominently ("Destination -> Casablanca, ETA ...") above the geometric waypoint ETAs -
+so the card finally answers "when does it reach where it's going", like the paid AIS
+products, but with our own validated model and an honest interval.
+
+- Adds `rapidfuzz`. Robust to NaN/non-string destination values from the DB.
+- Tests: `test_destination_resolver.py` (10) + destination-row coverage in
+  `test_eta_serving.py`. Full suite 530 passing.
+- Frontend card change (`VesselDetail.tsx`) built and live; the resolved-destination
+  ETA renders above the waypoint ETAs.
+
 ## 2026-07-01 (session 10b) - Measured canal staging (replaces the hardcoded queue constants)
 
 **The "canal queue" was two magic numbers; now it's measured from AIS.** The physics

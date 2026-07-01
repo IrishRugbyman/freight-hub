@@ -62,6 +62,15 @@ def test_proximity_disambiguates_same_name():
     assert r is not None and 51.0 < r.lat < 52.5 and 3.5 < r.lon < 5.0
 
 
+def test_non_string_input_is_none():
+    # AIS destination can arrive as a NaN float / None from the DB - must not crash.
+    import math
+
+    assert resolve(math.nan) is None
+    assert resolve(123) is None
+    assert resolve(None) is None
+
+
 def test_score_and_method_fields():
     r = resolve("NLRTM")
     assert r.score == 100.0 and r.method == "locode"

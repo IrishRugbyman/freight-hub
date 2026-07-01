@@ -37,6 +37,7 @@ import duckdb
 import numpy as np
 import pandas as pd
 
+from analytics.destination_resolver import resolve as resolve_destination
 from analytics.eta_backtest import _MIN_SOG_KN
 from analytics.eta_labels import (
     ANALYTICS_DB,
@@ -74,6 +75,10 @@ _MAX_PRED_ETA_H = 336.0
 # heads to one destination but may pass a chokepoint en route, so a few is plenty;
 # this bounds payload + routing cost.
 _MAX_TARGETS_PER_VESSEL = 3
+
+# Skip a resolved destination the vessel is effectively already at (or that resolved
+# to its current port) - no useful ETA, and the tiny distance is noise.
+_MIN_DEST_GC_NM = 10.0
 
 # Only consider live fixes refreshed within this window (mirrors the API's stale
 # cutoff). The collector keeps live_positions current; older rows are noise.
@@ -149,7 +154,7 @@ def _load_live(ais_query, now: datetime) -> pd.DataFrame:
     since = now - timedelta(hours=_LIVE_FRESH_H)
     live = ais_query(
         "SELECT mmsi, name, lat, lon, sog, cog, heading, kind, segment, "
-        "       region, imo, draught "
+        "       region, imo, draught, destination "
         "FROM live_positions WHERE updated_ts > ?",
         [since],
     )
@@ -248,6 +253,87 @@ def _candidate_pairs(
     return pairs
 
 
+def _destination_rows(
+    live: pd.DataFrame,
+    cache: RouteCache,
+    interval: IntervalModel,
+    laden_by_mmsi: dict,
+    trail_by_mmsi: dict,
+    now: datetime,
+) -> list[dict]:
+    """Compute an ETA to each vessel's *resolved* AIS destination.
+
+    Unlike the geometric targets, this trusts the (resolved) destination the crew
+    reported, so it is not bearing-gated - a vessel is presumed to be heading to
+    its stated destination. The free-text is resolved to a real seaport via
+    `destination_resolver` (UN/LOCODE + fuzzy); unresolvable/junk strings yield no
+    row. Persisted with ``target_type='destination'`` and ``target_id='dest:<locode>'``
+    so the card can show it distinctly next to the reported ETA. ETA is the physics
+    model (the champion map has no 'destination' cell, so ML is not applied here -
+    the model was never validated on arbitrary destinations).
+    """
+    rows: list[dict] = []
+    if live.empty or "destination" not in live.columns:
+        return rows
+    for v in live.itertuples():
+        dest_str = getattr(v, "destination", None)
+        if not isinstance(dest_str, str) or not dest_str.strip():
+            continue  # missing / NaN destination
+        lat, lon = float(v.lat), float(v.lon)
+        rp = resolve_destination(dest_str, lat, lon)
+        if rp is None:
+            continue
+        gc_fix = haversine_nm(lat, lon, rp.lat, rp.lon)
+        if gc_fix < _MIN_DEST_GC_NM:
+            continue  # already there / resolved to current port
+        sog = float(v.sog)
+        seg = str(v.segment) if pd.notna(v.segment) else None
+        laden = laden_by_mmsi.get(int(v.mmsi))
+        target = {"target_id": f"dest:{rp.locode}", "lat": rp.lat, "lon": rp.lon}
+        clat, clon = snap_cell(lat, lon)
+        cell_route, method = cache.distance(lat, lon, target)
+        gc_cell = haversine_nm(clat, clon, rp.lat, rp.lon)
+        route_dist = max(cell_route - gc_cell + gc_fix, gc_fix)
+
+        obs = {
+            "sog": sog,
+            "sog_trail6h": trail_by_mmsi.get(int(v.mmsi)),
+            "segment": seg,
+            "laden": laden,
+            "route_dist_nm": route_dist,
+            "gc_dist_nm": gc_fix,
+            "is_canal": False,
+            "target_id": target["target_id"],
+        }
+        p50, low, high, model = _predict(obs, interval)
+        if not np.isfinite(p50) or p50 > _MAX_PRED_ETA_H:
+            continue
+        rows.append(
+            {
+                "mmsi": int(v.mmsi),
+                "target_id": target["target_id"],
+                "as_of": now,
+                "eta_p50_h": round(p50, 2),
+                "eta_low_h": round(low, 2),
+                "eta_high_h": round(high, 2),
+                "eta_naive_h": round(gc_fix / sog, 2),
+                "method": model,
+                "eta_arrival_ts": now + timedelta(hours=p50),
+                "route_dist_nm": round(route_dist, 1),
+                "gc_dist_nm": round(gc_fix, 1),
+                "route_method": method,
+                "sog": round(sog, 1),
+                "segment": seg,
+                "laden": laden,
+                "target_type": "destination",
+                "target_name": rp.name,
+                "target_lat": rp.lat,
+                "target_lon": rp.lon,
+            }
+        )
+    return rows
+
+
 def build_predictions(
     conn: duckdb.DuckDBPyConnection,
     ais_query,
@@ -277,11 +363,6 @@ def build_predictions(
     laden_by_mmsi = _laden_map(conn)
     trail_by_mmsi = _trailing_speed(ais_query, live["mmsi"].astype("int64").unique().tolist(), now)
     cache = RouteCache(conn)
-
-    # Build O(1) target lookup dict by target_id
-    target_by_id = {
-        str(r["target_id"]): r for _, r in targets.iterrows()
-    }
 
     # Pass 1: collect candidates and pre-warm route cache for all unique pairs
     pairs = _candidate_pairs(live, targets)
@@ -401,6 +482,14 @@ def build_predictions(
                 "target_lon": float(t["lon"]),
             }
         )
+
+    # Append an ETA to each vessel's resolved AIS destination (physics, not
+    # bearing-gated - we trust the reported destination's direction).
+    dest_rows = _destination_rows(live, cache, interval, laden_by_mmsi, trail_by_mmsi, now)
+    if dest_rows:
+        cache.flush()  # persist any new (cell, dest) route distances
+        log.info("build_predictions: %d resolved-destination ETAs", len(dest_rows))
+        rows.extend(dest_rows)
     return pd.DataFrame(rows, columns=_PERSIST_COLS)
 
 
