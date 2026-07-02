@@ -22,7 +22,12 @@ labels (geometric closest-approach) and keeps the dirty `destination` text out o
 the ETA path.
 
 Sole writer of `eta_predictions` is the analytics job; the table is rewritten
-each run (a live snapshot, not history).
+each run (a live snapshot, not history). The resolved-AIS-destination row
+(`target_type='destination'`) is the one exception to "geometric, never
+destination-string based": it exists to show an ETA to what the crew actually
+reported, gated by a small persistent `eta_destination_state` table so a noisy
+destination-string flip doesn't discontinuously jump the served ETA - see
+`_committed_target`.
 
     python -m analytics.eta_serving     # score live vessels into eta_predictions
 """
@@ -80,6 +85,24 @@ _MAX_TARGETS_PER_VESSEL = 3
 # to its current port) - no useful ETA, and the tiny distance is noise.
 _MIN_DEST_GC_NM = 10.0
 
+# A resolved destination must win this many *consecutive* hourly builds before it
+# replaces the committed target. AIS destination free-text flaps constantly (median
+# observed spell length ~11h, but a large tail under an hour - terminal-suffix
+# noise, abbreviation swaps, near-port chatter); resolving to a different real port
+# on a single snapshot is not enough evidence of a genuine reroute. Measured on 3
+# weeks of history: ~half of tracked vessels have >=1 destination string change
+# that resolves to a genuinely different port while still >50nm out, with a median
+# ~800nm (52-72h at typical speed) jump in implied ETA target - exactly the
+# discontinuity this hysteresis exists to absorb. 3 consecutive hourly builds
+# (~2-3h) clears real reroutes quickly while filtering single-snapshot noise.
+_DEST_CONFIRM_STREAK = 3
+
+# Drop committed-destination state for a vessel not seen with a resolvable
+# destination in this long - it has presumably left AIS coverage or gone dark for
+# good; a fresh sighting should adopt its destination immediately rather than
+# inherit a stale commitment.
+_DEST_STATE_MAX_AGE_DAYS = 30
+
 # Only consider live fixes refreshed within this window (mirrors the API's stale
 # cutoff). The collector keeps live_positions current; older rows are noise.
 _LIVE_FRESH_H = 6.0
@@ -113,6 +136,32 @@ CREATE TABLE IF NOT EXISTS eta_predictions (
     PRIMARY KEY (mmsi, target_id)
 );
 """
+
+# Persists across builds (unlike `eta_predictions`, a full-rewrite snapshot) so the
+# destination-hysteresis streak survives from one hourly run to the next.
+ETA_DEST_STATE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS eta_destination_state (
+    mmsi              BIGINT PRIMARY KEY,
+    committed_locode  VARCHAR,
+    committed_name    VARCHAR,
+    committed_lat     DOUBLE,
+    committed_lon     DOUBLE,
+    candidate_locode  VARCHAR,          -- pending challenger, if any
+    candidate_streak  INTEGER,
+    updated_ts        TIMESTAMP
+);
+"""
+
+_DEST_STATE_COLS = [
+    "mmsi",
+    "committed_locode",
+    "committed_name",
+    "committed_lat",
+    "committed_lon",
+    "candidate_locode",
+    "candidate_streak",
+    "updated_ts",
+]
 
 _PERSIST_COLS = [
     "mmsi",
@@ -253,6 +302,115 @@ def _candidate_pairs(
     return pairs
 
 
+def _load_destination_state(conn: duckdb.DuckDBPyConnection, now: datetime) -> dict[int, dict]:
+    """Load the persisted per-vessel commitment state, GC'ing long-dead vessels.
+
+    A vessel not seen with a *resolvable* destination in `_DEST_STATE_MAX_AGE_DAYS`
+    is dropped so a later sighting adopts fresh rather than inheriting a stale
+    commitment.
+    """
+    conn.execute(ETA_DEST_STATE_SCHEMA)
+    cutoff = now - timedelta(days=_DEST_STATE_MAX_AGE_DAYS)
+    conn.execute("DELETE FROM eta_destination_state WHERE updated_ts < ?", [cutoff])
+    df = conn.execute("SELECT * FROM eta_destination_state").df()
+    return {int(r["mmsi"]): r for r in df.to_dict("records")}
+
+
+def _persist_destination_state(conn: duckdb.DuckDBPyConnection, state_rows: list[dict]) -> None:
+    conn.execute(ETA_DEST_STATE_SCHEMA)
+    if not state_rows:
+        return
+    frame = pd.DataFrame(state_rows)[_DEST_STATE_COLS]
+    conn.register("_dest_state_frame", frame)
+    conn.execute(
+        "INSERT OR REPLACE INTO eta_destination_state ("
+        + ", ".join(_DEST_STATE_COLS)
+        + ") SELECT "
+        + ", ".join(_DEST_STATE_COLS)
+        + " FROM _dest_state_frame"
+    )
+    conn.unregister("_dest_state_frame")
+
+
+def _committed_target(
+    mmsi: int, rp, prior: dict | None, now: datetime
+) -> tuple[str | None, str | None, float | None, float | None, dict | None]:
+    """Apply destination hysteresis and return the target to serve this run.
+
+    `rp` is this run's resolved destination candidate (`None` if the raw string
+    was missing/unresolvable). Returns `(locode, name, lat, lon, new_state_row)`;
+    `new_state_row` is `None` when nothing changed and there is no prior state to
+    refresh (a still-unresolvable vessel with no commitment yet). A brand-new
+    commitment is adopted immediately (nothing to be inconsistent with yet); a
+    *change* to an already-committed target requires `_DEST_CONFIRM_STREAK`
+    consecutive runs resolving to the same different port.
+    """
+    if rp is None:
+        if prior is None:
+            return None, None, None, None, None
+        # Stay on the committed target; don't touch `updated_ts` (no fresh
+        # resolvable sighting) so this vessel is still GC-eligible on schedule.
+        return (
+            prior["committed_locode"],
+            prior["committed_name"],
+            prior["committed_lat"],
+            prior["committed_lon"],
+            None,
+        )
+
+    if prior is None:
+        new_state = {
+            "mmsi": mmsi,
+            "committed_locode": rp.locode,
+            "committed_name": rp.name,
+            "committed_lat": rp.lat,
+            "committed_lon": rp.lon,
+            "candidate_locode": None,
+            "candidate_streak": 0,
+            "updated_ts": now,
+        }
+        return rp.locode, rp.name, rp.lat, rp.lon, new_state
+
+    if rp.locode == prior["committed_locode"]:
+        new_state = {**prior, "candidate_locode": None, "candidate_streak": 0, "updated_ts": now}
+        return (
+            prior["committed_locode"],
+            prior["committed_name"],
+            prior["committed_lat"],
+            prior["committed_lon"],
+            new_state,
+        )
+
+    streak = int(prior["candidate_streak"]) + 1 if prior["candidate_locode"] == rp.locode else 1
+    if streak >= _DEST_CONFIRM_STREAK:
+        new_state = {
+            "mmsi": mmsi,
+            "committed_locode": rp.locode,
+            "committed_name": rp.name,
+            "committed_lat": rp.lat,
+            "committed_lon": rp.lon,
+            "candidate_locode": None,
+            "candidate_streak": 0,
+            "updated_ts": now,
+        }
+        return rp.locode, rp.name, rp.lat, rp.lon, new_state
+
+    # Not yet confirmed: keep serving the still-committed target.
+    new_state = {
+        **prior,
+        "candidate_locode": rp.locode,
+        "candidate_streak": streak,
+        "updated_ts": now,
+    }
+    return (
+        prior["committed_locode"],
+        prior["committed_name"],
+        prior["committed_lat"],
+        prior["committed_lon"],
+        new_state,
+    )
+
+
 def _destination_rows(
     live: pd.DataFrame,
     cache: RouteCache,
@@ -260,44 +418,62 @@ def _destination_rows(
     laden_by_mmsi: dict,
     trail_by_mmsi: dict,
     now: datetime,
+    conn: duckdb.DuckDBPyConnection,
 ) -> list[dict]:
-    """Compute an ETA to each vessel's *resolved* AIS destination.
+    """Compute an ETA to each vessel's *committed* AIS destination.
 
     Unlike the geometric targets, this trusts the (resolved) destination the crew
     reported, so it is not bearing-gated - a vessel is presumed to be heading to
     its stated destination. The free-text is resolved to a real seaport via
-    `destination_resolver` (UN/LOCODE + fuzzy); unresolvable/junk strings yield no
-    row. Persisted with ``target_type='destination'`` and ``target_id='dest:<locode>'``
-    so the card can show it distinctly next to the reported ETA. ETA is the physics
-    model (the champion map has no 'destination' cell, so ML is not applied here -
-    the model was never validated on arbitrary destinations).
+    `destination_resolver` (UN/LOCODE + fuzzy); unresolvable/junk strings don't
+    displace an existing commitment. Persisted with ``target_type='destination'``
+    and ``target_id='dest:<locode>'`` so the card can show it distinctly next to
+    the reported ETA. ETA is the physics model (the champion map has no
+    'destination' cell, so ML is not applied here - the model was never validated
+    on arbitrary destinations).
+
+    Switching targets is gated by `_committed_target`'s hysteresis: on 3 weeks of
+    history, ~half of tracked vessels had a destination-string change that
+    resolved to a genuinely different port while still >50nm out, with a median
+    ~800nm (52-72h) implied ETA jump. Serving the raw resolved destination
+    unguarded reproduces that discontinuity on every hourly build; requiring the
+    same new port to resolve on several consecutive runs filters single-snapshot
+    noise while still adopting real reroutes within a few hours.
     """
     rows: list[dict] = []
     if live.empty or "destination" not in live.columns:
         return rows
+    state = _load_destination_state(conn, now)
+    state_updates: list[dict] = []
     for v in live.itertuples():
-        dest_str = getattr(v, "destination", None)
-        if not isinstance(dest_str, str) or not dest_str.strip():
-            continue  # missing / NaN destination
+        mmsi = int(v.mmsi)
         lat, lon = float(v.lat), float(v.lon)
-        rp = resolve_destination(dest_str, lat, lon)
-        if rp is None:
+        dest_str = getattr(v, "destination", None)
+        rp = None
+        if isinstance(dest_str, str) and dest_str.strip():
+            rp = resolve_destination(dest_str, lat, lon)
+
+        locode, name, tlat, tlon, new_state = _committed_target(mmsi, rp, state.get(mmsi), now)
+        if new_state is not None:
+            state_updates.append(new_state)
+        if locode is None:
             continue
-        gc_fix = haversine_nm(lat, lon, rp.lat, rp.lon)
+
+        gc_fix = haversine_nm(lat, lon, tlat, tlon)
         if gc_fix < _MIN_DEST_GC_NM:
             continue  # already there / resolved to current port
         sog = float(v.sog)
         seg = str(v.segment) if pd.notna(v.segment) else None
-        laden = laden_by_mmsi.get(int(v.mmsi))
-        target = {"target_id": f"dest:{rp.locode}", "lat": rp.lat, "lon": rp.lon}
+        laden = laden_by_mmsi.get(mmsi)
+        target = {"target_id": f"dest:{locode}", "lat": tlat, "lon": tlon}
         clat, clon = snap_cell(lat, lon)
         cell_route, method = cache.distance(lat, lon, target)
-        gc_cell = haversine_nm(clat, clon, rp.lat, rp.lon)
+        gc_cell = haversine_nm(clat, clon, tlat, tlon)
         route_dist = max(cell_route - gc_cell + gc_fix, gc_fix)
 
         obs = {
             "sog": sog,
-            "sog_trail6h": trail_by_mmsi.get(int(v.mmsi)),
+            "sog_trail6h": trail_by_mmsi.get(mmsi),
             "segment": seg,
             "laden": laden,
             "route_dist_nm": route_dist,
@@ -310,7 +486,7 @@ def _destination_rows(
             continue
         rows.append(
             {
-                "mmsi": int(v.mmsi),
+                "mmsi": mmsi,
                 "target_id": target["target_id"],
                 "as_of": now,
                 "eta_p50_h": round(p50, 2),
@@ -326,11 +502,12 @@ def _destination_rows(
                 "segment": seg,
                 "laden": laden,
                 "target_type": "destination",
-                "target_name": rp.name,
-                "target_lat": rp.lat,
-                "target_lon": rp.lon,
+                "target_name": name,
+                "target_lat": tlat,
+                "target_lon": tlon,
             }
         )
+    _persist_destination_state(conn, state_updates)
     return rows
 
 
@@ -485,7 +662,7 @@ def build_predictions(
 
     # Append an ETA to each vessel's resolved AIS destination (physics, not
     # bearing-gated - we trust the reported destination's direction).
-    dest_rows = _destination_rows(live, cache, interval, laden_by_mmsi, trail_by_mmsi, now)
+    dest_rows = _destination_rows(live, cache, interval, laden_by_mmsi, trail_by_mmsi, now, conn)
     if dest_rows:
         cache.flush()  # persist any new (cell, dest) route distances
         log.info("build_predictions: %d resolved-destination ETAs", len(dest_rows))

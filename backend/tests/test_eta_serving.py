@@ -213,6 +213,67 @@ def test_build_predictions_scores_resolved_destination(tmp_path):
     assert row["eta_p50_h"] > 0 and row["eta_arrival_ts"] > _NOW
 
 
+def test_destination_change_is_hysteresis_gated(tmp_path):
+    """A single noisy destination flip must not discontinuously jump the served ETA.
+
+    Regression test for the destination-churn finding: ~half of tracked vessels
+    have a destination-string change that resolves to a genuinely different real
+    port while still underway. The served target must only switch once the new
+    destination has won `_DEST_CONFIRM_STREAK` consecutive builds.
+    """
+    conn = duckdb.connect(str(tmp_path / "an.duckdb"))
+    _seed_targets(conn)
+    _seed_samples(conn)
+
+    mem = duckdb.connect(":memory:")
+    mem.execute(
+        "CREATE TABLE live_positions (mmsi BIGINT, name VARCHAR, lat DOUBLE, lon DOUBLE, "
+        "sog DOUBLE, cog DOUBLE, heading DOUBLE, kind VARCHAR, segment VARCHAR, region VARCHAR, "
+        "imo BIGINT, draught DOUBLE, updated_ts TIMESTAMP, destination VARCHAR)"
+    )
+    mem.execute("CREATE TABLE ais_snapshots (snapshot_ts TIMESTAMP, mmsi BIGINT, sog DOUBLE)")
+
+    def seed_dest(dest: str) -> None:
+        mem.execute("DELETE FROM live_positions")
+        mem.execute(
+            "INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            [8001, "DEST SHIP", 29.0, 32.34, 12.0, 0.0, 1.0, "tanker", "VLCC", "suez",
+             9100001, 20.0, _NOW, dest],
+        )
+
+    def q(sql, params=None):
+        return mem.execute(sql, params or []).df()
+
+    def dest_row(hour_offset: int):
+        preds = build_predictions(conn, q, now=_NOW + timedelta(hours=hour_offset))
+        dest = preds[preds["target_type"] == "destination"]
+        return dest.iloc[0] if not dest.empty else None
+
+    # Build 1: commits to Port Said immediately (nothing to be inconsistent with).
+    seed_dest("PORT SAID")
+    row = dest_row(0)
+    assert row is not None and "Said" in row["target_name"]
+
+    # Build 2: a new destination shows up but hasn't been confirmed yet -> still Port Said.
+    seed_dest("ROTTERDAM")
+    row = dest_row(1)
+    assert row is not None and "Said" in row["target_name"]
+
+    # Build 3: second consecutive Rotterdam reading -> still not confirmed.
+    row = dest_row(2)
+    assert row is not None and "Said" in row["target_name"]
+
+    # Build 4: third consecutive Rotterdam reading -> now switches.
+    row = dest_row(3)
+    assert row is not None and "Rotterdam" in row["target_name"]
+
+    # A single stray reading back to the old value doesn't immediately flip the
+    # now-committed target back either - it just starts a fresh candidate streak.
+    seed_dest("PORT SAID")
+    row = dest_row(4)
+    assert row is not None and "Rotterdam" in row["target_name"]
+
+
 def test_run_in_conn_persists_predictions(tmp_path):
     conn = duckdb.connect(str(tmp_path / "an.duckdb"))
     _seed_targets(conn)

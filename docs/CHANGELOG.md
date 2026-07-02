@@ -1,5 +1,37 @@
 # Freight Hub Changelog
 
+## 2026-07-02 (session 11) - Destination-change hysteresis (fixes ETA discontinuity from AIS destination churn)
+
+**Quantified how often destination changes actually break the resolved-destination
+ETA, then fixed it.** Pulled 24 days of `ais_snapshots` destination history
+(2026-06-09 to 2026-07-02): 82% of vessels observed >=5 days changed their raw
+destination string at least once, but most of that is cosmetic noise (median
+"spell" length ~11h; terminal suffixes, abbreviation swaps, near-port chatter).
+Re-resolving both sides through the app's real `destination_resolver` to filter
+noise from genuine reroutes: **46.6% of tracked vessels (5,042/10,831) had a
+destination-string change that resolved to a genuinely different real port while
+still >50nm from the previously-declared one** - a true mid-voyage redirect, not
+just "arrived, showing next voyage." Median great-circle jump between old and new
+port: 787nm, a **~52-72h discontinuity** in the served ETA at typical laden speed.
+The scored physics/ML ETA (geometric chokepoint/port targets, `eta_labels.py`)
+was never exposed to this - only the `target_type='destination'` row shipped
+2026-07-01, which re-resolved the live string fresh every hourly build with no
+memory of what it served last time.
+
+Fix: `eta_serving._committed_target` + a new persisted `eta_destination_state`
+table (survives across builds, unlike `eta_predictions` which is fully rewritten
+each run). A vessel's destination target only switches once the *same* newly
+resolved port wins `_DEST_CONFIRM_STREAK` (3) consecutive hourly builds; a brand
+new commitment (first sighting) is still adopted immediately since there's nothing
+to be inconsistent with yet. An unresolvable/missing destination string no longer
+drops the row - it just keeps serving the last committed target. State for a
+vessel not seen with a resolvable destination in 30 days is garbage-collected so a
+later sighting adopts fresh.
+
+- New test `test_destination_change_is_hysteresis_gated`: commits to Port Said,
+  confirms two Rotterdam readings don't switch it, the third does, and a single
+  stray reading back doesn't immediately flip it again. Full suite 531 passing.
+
 ## 2026-07-01 (session 10c) - ETA to the resolved AIS destination (UN/LOCODE resolver, wired into serving)
 
 **Now we show a computed ETA to where the ship *says* it's going - not by trusting
