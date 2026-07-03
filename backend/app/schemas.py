@@ -1459,6 +1459,29 @@ class EtaTrendResponse(BaseModel):
     points: list[EtaTrendPoint]     # chronological, one per distinct run
 
 
+# Destination predictor: candidate ports ranked by predicted probability
+class DestinationCandidate(BaseModel):
+    """One ranked candidate destination for a vessel."""
+
+    target_id: str
+    target_name: str | None
+    target_type: str | None        # 'chokepoint' | 'port' | 'destination'
+    target_lat: float | None
+    target_lon: float | None
+    prob: float | None             # predicted probability this is the true destination
+    method: str | None             # 'heuristic' | 'ml'
+    reported_match: bool           # True if this candidate matches the resolved AIS destination
+    gc_dist_nm: float | None
+
+
+class DestinationResponse(BaseModel):
+    mmsi: int
+    as_of: str
+    n: int                              # number of candidates scored
+    disagrees_with_reported: bool       # True if the top candidate is NOT the reported destination
+    candidates: list[DestinationCandidate]  # ranked most-likely-first
+
+
 class UpcomingVessel(BaseModel):
     """One vessel's predicted arrival at a specific target."""
 

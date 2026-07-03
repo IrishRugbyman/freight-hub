@@ -106,6 +106,7 @@ export interface Vessel {
   cog: number | null
   heading: number | null
   destination: string | null
+  origin: string | null
   kind: string
   segment: string | null
   region: string | null
@@ -2295,6 +2296,37 @@ export function useVesselEta(mmsi: number | null | undefined) {
   return useQuery({
     queryKey: ['vessel-eta', mmsi],
     queryFn: () => getJSON<VesselEtaResponse>(`/api/analytics/eta?mmsi=${mmsi}`),
+    enabled: mmsi != null,
+    staleTime: 4 * 60_000,
+    refetchInterval: 4 * 60_000,
+  })
+}
+
+// Destination predictor: ranked candidate ports + probability (vessel-detail popup)
+export interface DestinationCandidate {
+  target_id: string
+  target_name: string | null
+  target_type: string | null
+  target_lat: number | null
+  target_lon: number | null
+  prob: number | null
+  method: string | null
+  reported_match: boolean
+  gc_dist_nm: number | null
+}
+
+export interface VesselDestinationResponse {
+  mmsi: number
+  as_of: string
+  n: number
+  disagrees_with_reported: boolean
+  candidates: DestinationCandidate[]
+}
+
+export function useVesselDestination(mmsi: number | null | undefined) {
+  return useQuery({
+    queryKey: ['vessel-destination', mmsi],
+    queryFn: () => getJSON<VesselDestinationResponse>(`/api/analytics/destination?mmsi=${mmsi}`),
     enabled: mmsi != null,
     staleTime: 4 * 60_000,
     refetchInterval: 4 * 60_000,

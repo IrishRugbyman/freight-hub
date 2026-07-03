@@ -1,5 +1,5 @@
 import { X, Anchor, Navigation, ArrowLeftRight, TrendingUp, TrendingDown, Ship, AlertTriangle } from 'lucide-react'
-import { useEquasis, useVesselState, useVoyages, useVesselBehavioralRisk, useVesselEta } from '@/lib/api'
+import { useEquasis, useVesselState, useVoyages, useVesselBehavioralRisk, useVesselEta, useVesselDestination } from '@/lib/api'
 import type { Vessel, VoyageEvent } from '@/lib/api'
 import { EtaChip } from '@/components/EtaChip'
 import { colorFor } from '@/lib/segments'
@@ -184,6 +184,8 @@ export function VesselDetail({
   const { data: behavioralRisk } = useVesselBehavioralRisk(vessel.mmsi)
   const { data: etaData } = useVesselEta(vessel.mmsi)
   const etaPreds = etaData?.predictions ?? []
+  const { data: destData } = useVesselDestination(vessel.mmsi)
+  const destCandidates = destData?.candidates ?? []
 
   return (
     <div className="flex w-64 flex-col" style={{ maxHeight: 'calc(100svh - 7rem)' }}>
@@ -267,6 +269,7 @@ export function VesselDetail({
       {/* Voyage */}
       <Section>
         <div className="text-[11px] font-semibold text-muted-foreground mb-1">Voyage</div>
+        {vessel.origin && <Row label="Origin" value={vessel.origin} />}
         <Row label="Destination" value={vessel.destination} />
         <Row label="ETA (reported)" value={vessel.eta} />
         {etaPreds.length > 0 && (() => {
@@ -285,34 +288,85 @@ export function VesselDetail({
             })
             .filter(({ remainingH }) => remainingH == null || remainingH > -1)
           if (!live.length) return null
+          // The resolved AIS destination (if any) is shown first and prominently -
+          // it answers "when does it reach where it says it's going"; the geometric
+          // targets ahead (chokepoints/ports on its track) follow as waypoints.
+          const dest = live.filter(({ pred }) => pred.target_type === 'destination')
+          const waypoints = live.filter(({ pred }) => pred.target_type !== 'destination')
+          const renderRow = ({ pred, remainingH, deltaH }: typeof live[number], lead: React.ReactNode, band: boolean) => (
+            <div key={pred.target_id} className="flex items-baseline justify-between gap-2 py-0.5">
+              <span className="text-xs text-muted-foreground truncate min-w-0">
+                {lead}{' '}
+                <span className="text-muted-foreground/60 text-[10px]">
+                  to {pred.target_name ?? pred.target_id}
+                </span>
+              </span>
+              <EtaChip
+                vessel={{
+                  eta_true_h: remainingH,
+                  eta_low_h: pred.eta_low_h != null ? pred.eta_low_h + deltaH : null,
+                  eta_high_h: pred.eta_high_h != null ? pred.eta_high_h + deltaH : null,
+                  eta_naive_h: pred.eta_naive_h,
+                  eta_method: pred.method,
+                }}
+                fallbackH={pred.eta_naive_h}
+                showBand={band}
+              />
+            </div>
+          )
           return (
             <div className="mt-0.5 space-y-0.5">
-              {live.map(({ pred, remainingH, deltaH }, i) => (
-                <div key={pred.target_id} className="flex items-baseline justify-between gap-2 py-0.5">
-                  <span className="text-xs text-muted-foreground truncate min-w-0">
-                    {i === 0 ? 'True ETA' : ''}{' '}
-                    <span className="text-muted-foreground/60 text-[10px]">
-                      to {pred.target_name ?? pred.target_id}
-                    </span>
-                  </span>
-                  <EtaChip
-                    vessel={{
-                      eta_true_h: remainingH,
-                      eta_low_h: pred.eta_low_h != null ? pred.eta_low_h + deltaH : null,
-                      eta_high_h: pred.eta_high_h != null ? pred.eta_high_h + deltaH : null,
-                      eta_naive_h: pred.eta_naive_h,
-                      eta_method: pred.method,
-                    }}
-                    fallbackH={pred.eta_naive_h}
-                    showBand={i === 0}
-                  />
-                </div>
-              ))}
+              {dest.map(l => renderRow(l, <span className="font-medium text-foreground/80">Destination</span>, true))}
+              {waypoints.map((l, i) =>
+                renderRow(l, i === 0 ? (dest.length ? 'Waypoints' : 'True ETA') : '', dest.length === 0 && i === 0),
+              )}
             </div>
           )
         })()}
         <Row label="Draught" value={vessel.draught != null ? `${vessel.draught.toFixed(1)} m` : null} />
       </Section>
+
+      {/* Predicted destination - where the model thinks it's actually going,
+          contrasted against the free-text AIS destination the crew reported */}
+      {destCandidates.length > 0 && (
+        <Section>
+          <div className="text-[11px] font-semibold text-muted-foreground mb-1 flex items-center gap-1.5">
+            <span>Predicted destination</span>
+            {destData?.disagrees_with_reported && (
+              <span className="ml-auto flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-px text-[9px] font-medium text-amber-400">
+                <ArrowLeftRight size={9} />
+                reroute?
+              </span>
+            )}
+          </div>
+          <div className="space-y-1">
+            {destCandidates.map(c => (
+              <div key={c.target_id} className="space-y-0.5">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-xs truncate min-w-0">
+                    {c.target_name ?? c.target_id}
+                    {c.reported_match && (
+                      <span className="ml-1 text-[9px] text-muted-foreground/70">(reported)</span>
+                    )}
+                  </span>
+                  <span className="text-xs font-mono tabular-nums text-muted-foreground shrink-0">
+                    {c.prob != null ? `${Math.round(c.prob * 100)}%` : '—'}
+                  </span>
+                </div>
+                <div className="h-1 w-full rounded-full bg-muted overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-primary/70"
+                    style={{ width: `${Math.min(100, (c.prob ?? 0) * 100)}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-1 text-[9px] text-muted-foreground/60">
+            {destData?.candidates[0]?.method === 'ml' ? 'ML model' : 'Heuristic model'}
+          </div>
+        </Section>
+      )}
 
       {/* Voyage history (port calls, transits, reroutes) */}
       {voyages && voyages.events.length > 0 && (

@@ -530,6 +530,18 @@ def _run_inner(conn: duckdb.DuckDBPyConnection, reset: bool) -> None:
         log.warning("ETA label mining failed, skipping: %s", exc, exc_info=True)
 
     # ------------------------------------------------------------------
+    # 7b2. Destination predictor labels: the port-call transition graph +
+    # per-vessel visit frequency mined from the arrivals 7b just refreshed
+    # (destination predictor Phase 0). Pure read of eta_arrivals - no AIS access.
+    # ------------------------------------------------------------------
+    try:
+        from .destination_labels import run_in_conn as _dest_labels_run
+
+        _dest_labels_run(conn)
+    except Exception as exc:
+        log.warning("destination label mining failed, skipping: %s", exc, exc_info=True)
+
+    # ------------------------------------------------------------------
     # 7c. ETA samples + sea-route distance + physics ETA (True ETA Phase B/C):
     # build the per-observation training table (with kinematic/context features),
     # enrich with cached searoute distances, and score naive vs naive+route vs
@@ -558,6 +570,20 @@ def _run_inner(conn: duckdb.DuckDBPyConnection, reset: bool) -> None:
         log.info("7d eta_serving: %.1fs", time.perf_counter() - _t0)
     except Exception as exc:
         log.warning("ETA serving scorer failed, skipping: %s", exc, exc_info=True)
+
+    # ------------------------------------------------------------------
+    # 7f. Destination predictor serving: score every live underway vessel's
+    # candidate destinations (geometric + resolved reported dest) and persist the
+    # ranked top-k into destination_predictions. Depends on 7b2's fresh priors.
+    # ------------------------------------------------------------------
+    try:
+        from .destination_serving import run_in_conn as _dest_serving_run
+
+        _t0 = time.perf_counter()
+        _dest_serving_run(conn, _ais_query)
+        log.info("7f destination_serving: %.1fs", time.perf_counter() - _t0)
+    except Exception as exc:
+        log.warning("destination serving scorer failed, skipping: %s", exc, exc_info=True)
 
     # ------------------------------------------------------------------
     # 7e. ETA drift watch (True ETA Phase G): compare the champion's just-scored

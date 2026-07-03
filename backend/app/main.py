@@ -29,7 +29,7 @@ from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
-from . import db, feed as _feed, fleet as _fleet, runner_eta as _runner_eta
+from . import db, feed as _feed, fleet as _fleet, runner_destination as _runner_destination, runner_eta as _runner_eta
 from .runner_dispersion import run_dispersion_default
 from .runner_routes import run_routes_default
 from .schemas import (
@@ -41,6 +41,8 @@ from .schemas import (
     UpcomingArrivalsResponse,
     UpcomingVessel,
     ChokepointCount,
+    DestinationCandidate,
+    DestinationResponse,
     EtaAccuracyResponse,
     EtaAccuracyRow,
     EtaByTargetResponse,
@@ -6593,6 +6595,29 @@ def analytics_eta(mmsi: int):
         as_of=now_iso,
         n=len(preds),
         predictions=[EtaPrediction(**{k: p.get(k) for k in EtaPrediction.model_fields}) for p in preds],
+    )
+
+
+@app.get("/api/analytics/destination", response_model=DestinationResponse, tags=["analytics"])
+def analytics_destination(mmsi: int):
+    """Predicted destination for one vessel: ranked candidate ports + probability.
+
+    Serves the candidate shortlist the analytics job precomputed into
+    `destination_predictions` (heuristic geometry+history score, or the LightGBM
+    challenger where it has earned promotion over the heuristic on held-out
+    accuracy). The AIS-reported destination is one candidate among several, never
+    trusted blindly - `disagrees_with_reported` is True when the model's top pick
+    is a *different* real port than what the crew reported, the reroute signal.
+    """
+    cands = _runner_destination.vessel_destination(mmsi)
+    now_iso = datetime.now(UTC).replace(tzinfo=None, microsecond=0).isoformat()
+    disagrees = bool(cands) and not cands[0]["reported_match"] and any(c["reported_match"] for c in cands)
+    return DestinationResponse(
+        mmsi=int(mmsi),
+        as_of=now_iso,
+        n=len(cands),
+        disagrees_with_reported=disagrees,
+        candidates=[DestinationCandidate(**{k: c.get(k) for k in DestinationCandidate.model_fields}) for c in cands],
     )
 
 
