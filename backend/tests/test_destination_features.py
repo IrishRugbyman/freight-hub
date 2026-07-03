@@ -9,13 +9,24 @@ from __future__ import annotations
 
 import pandas as pd
 import pytest
-
 from analytics import destination_features as feat
 
 _TARGETS = pd.DataFrame(
     [
-        {"target_id": "cp:suez", "target_type": "chokepoint", "name": "suez", "lat": 30.50, "lon": 32.34},
-        {"target_id": "port:rotterdam", "target_type": "port", "name": "Rotterdam", "lat": 51.96, "lon": 4.10},
+        {
+            "target_id": "cp:suez",
+            "target_type": "chokepoint",
+            "name": "suez",
+            "lat": 30.50,
+            "lon": 32.34,
+        },
+        {
+            "target_id": "port:rotterdam",
+            "target_type": "port",
+            "name": "Rotterdam",
+            "lat": 51.96,
+            "lon": 4.10,
+        },
     ]
 )
 
@@ -76,7 +87,15 @@ def test_resolved_destination_matching_geometric_candidate_flags_not_duplicates(
     # must flag that existing row rather than add a duplicate.
     live = _live_row(lat=50.0, lon=4.10, destination="ROTTERDAM")
     targets = pd.DataFrame(
-        [{"target_id": "port:rotterdam", "target_type": "port", "name": "Rotterdam", "lat": 51.96, "lon": 4.10}]
+        [
+            {
+                "target_id": "port:rotterdam",
+                "target_type": "port",
+                "name": "Rotterdam",
+                "lat": 51.96,
+                "lon": 4.10,
+            }
+        ]
     )
     cands = feat.candidate_frame(live, targets)
     # Only one row (the geometric one), flagged as matching the reported dest.
@@ -132,7 +151,15 @@ def test_candidate_frame_flags_canal_backtrack_on_geometric_candidate():
     # again in reverse.
     live = _live_row(lat=31.5, lon=32.34, cog=180.0, heading=180.0)
     targets = pd.DataFrame(
-        [{"target_id": "port:south", "target_type": "port", "name": "South Port", "lat": 26.0, "lon": 32.34}]
+        [
+            {
+                "target_id": "port:south",
+                "target_type": "port",
+                "name": "South Port",
+                "lat": 26.0,
+                "lon": 32.34,
+            }
+        ]
     )
     cands = feat.candidate_frame(live, targets, recent_canal_transit={7001: "suez"})
     assert not cands.empty

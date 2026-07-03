@@ -14,10 +14,8 @@ import duckdb
 import numpy as np
 import pandas as pd
 import pytest
-
 from analytics import destination_predict as dp
 from analytics.eta_labels import ETA_SCHEMA
-
 
 # ---------------------------------------------------------------------------
 # Heuristic scorer
@@ -52,12 +50,10 @@ def test_heuristic_score_degrades_gracefully_on_missing_fields():
 
 
 def test_softmax_by_group_sums_to_one_per_vessel():
-    df = pd.DataFrame(
-        {"mmsi": [1, 1, 1, 2, 2], "score": [3.0, 1.0, 0.0, 5.0, 5.0]}
-    )
+    df = pd.DataFrame({"mmsi": [1, 1, 1, 2, 2], "score": [3.0, 1.0, 0.0, 5.0, 5.0]})
     probs = dp.softmax_by_group(df, "score", "mmsi")
     df = df.assign(prob=probs)
-    for mmsi, g in df.groupby("mmsi"):
+    for _mmsi, g in df.groupby("mmsi"):
         assert g["prob"].sum() == pytest.approx(1.0)
     # Vessel 1's highest raw score gets the highest probability.
     v1 = df[df["mmsi"] == 1].sort_values("prob", ascending=False)
@@ -67,8 +63,20 @@ def test_softmax_by_group_sums_to_one_per_vessel():
 def test_heuristic_score_candidates_end_to_end():
     candidates = pd.DataFrame(
         [
-            {"mmsi": 1, "target_id": "a", "gc_dist_nm": 20.0, "bearing_align": 1.0, "reported_match": True},
-            {"mmsi": 1, "target_id": "b", "gc_dist_nm": 900.0, "bearing_align": 0.1, "reported_match": False},
+            {
+                "mmsi": 1,
+                "target_id": "a",
+                "gc_dist_nm": 20.0,
+                "bearing_align": 1.0,
+                "reported_match": True,
+            },
+            {
+                "mmsi": 1,
+                "target_id": "b",
+                "gc_dist_nm": 900.0,
+                "bearing_align": 0.1,
+                "reported_match": False,
+            },
         ]
     )
     scored = dp.heuristic_score_candidates(candidates)
@@ -113,7 +121,9 @@ def _seed_voyage_db(conn: duckdb.DuckDBPyConnection) -> None:
     # the south (course points north, toward whichever port is the true one).
     for v in range(30):
         arrival = base + pd.Timedelta(hours=6 * v)
-        true_tid, true_lat, true_lon = (("port:a", 10.0, 10.0) if v % 2 == 0 else ("port:b", 10.0, 12.0))
+        true_tid, true_lat, true_lon = (
+            ("port:a", 10.0, 10.0) if v % 2 == 0 else ("port:b", 10.0, 12.0)
+        )
         mmsi = 1000 + v
         for k in range(5):
             remaining = float(5 - k) * 4.0 + 1.0  # 21,17,13,9,5 hours out
@@ -150,10 +160,28 @@ def _seed_voyage_db(conn: duckdb.DuckDBPyConnection) -> None:
     frame = pd.DataFrame(rows)
     conn.register("_f", frame)
     cols = [
-        "voyage_id", "mmsi", "target_id", "arrival_ts", "obs_ts", "obs_lat", "obs_lon",
-        "remaining_h", "route_dist_nm", "gc_dist_nm", "route_method", "sog", "sog_trail6h",
-        "service_speed", "draught", "dest_queue_h", "approach_bearing", "segment", "laden",
-        "target_type", "is_canal", "lead_bucket",
+        "voyage_id",
+        "mmsi",
+        "target_id",
+        "arrival_ts",
+        "obs_ts",
+        "obs_lat",
+        "obs_lon",
+        "remaining_h",
+        "route_dist_nm",
+        "gc_dist_nm",
+        "route_method",
+        "sog",
+        "sog_trail6h",
+        "service_speed",
+        "draught",
+        "dest_queue_h",
+        "approach_bearing",
+        "segment",
+        "laden",
+        "target_type",
+        "is_canal",
+        "lead_bucket",
     ]
     conn.execute(f"INSERT INTO eta_samples ({', '.join(cols)}) SELECT {', '.join(cols)} FROM _f")
     conn.unregister("_f")
@@ -285,8 +313,16 @@ def test_prepare_defaults_missing_canal_backtrack_to_zero():
     # test frame) may not carry canal_backtrack at all - _prepare must not
     # KeyError, and must treat it as 0 (no penalty).
     df = pd.DataFrame(
-        [{"gc_dist_nm": 10.0, "bearing_align": 1.0, "transition_prior": 0.5,
-          "visit_freq": 0.5, "target_type": "port", "segment": "VLCC"}]
+        [
+            {
+                "gc_dist_nm": 10.0,
+                "bearing_align": 1.0,
+                "transition_prior": 0.5,
+                "visit_freq": 0.5,
+                "target_type": "port",
+                "segment": "VLCC",
+            }
+        ]
     )
     out = dp._prepare(df)
     assert out["canal_backtrack"].iloc[0] == 0
@@ -325,7 +361,15 @@ def test_destination_model_load_returns_none_when_absent(tmp_path):
 
 def test_score_candidates_falls_back_to_heuristic_without_model():
     candidates = pd.DataFrame(
-        [{"mmsi": 1, "target_id": "a", "gc_dist_nm": 10.0, "bearing_align": 1.0, "reported_match": True}]
+        [
+            {
+                "mmsi": 1,
+                "target_id": "a",
+                "gc_dist_nm": 10.0,
+                "bearing_align": 1.0,
+                "reported_match": True,
+            }
+        ]
     )
     scored = dp.score_candidates(candidates, None)
     assert scored["method"].iloc[0] == "heuristic"
@@ -340,12 +384,24 @@ def test_score_candidates_uses_ml_when_promoted(tmp_path):
     candidates = pd.DataFrame(
         [
             {
-                "mmsi": 1, "target_id": "port:a", "target_type": "port", "segment": "VLCC",
-                "gc_dist_nm": 20.0, "bearing_align": 0.9, "transition_prior": 0.5, "visit_freq": 0.5,
+                "mmsi": 1,
+                "target_id": "port:a",
+                "target_type": "port",
+                "segment": "VLCC",
+                "gc_dist_nm": 20.0,
+                "bearing_align": 0.9,
+                "transition_prior": 0.5,
+                "visit_freq": 0.5,
             },
             {
-                "mmsi": 1, "target_id": "port:b", "target_type": "port", "segment": "VLCC",
-                "gc_dist_nm": 900.0, "bearing_align": 0.1, "transition_prior": 0.1, "visit_freq": 0.1,
+                "mmsi": 1,
+                "target_id": "port:b",
+                "target_type": "port",
+                "segment": "VLCC",
+                "gc_dist_nm": 900.0,
+                "bearing_align": 0.1,
+                "transition_prior": 0.1,
+                "visit_freq": 0.1,
             },
         ]
     )
@@ -360,10 +416,24 @@ def test_score_candidates_falls_back_to_heuristic_on_stale_model_feature_mismatc
     old_features = ["gc_dist_nm", "bearing_align", "transition_prior", "visit_freq"]
     train = pd.DataFrame(
         [
-            {"gc_dist_nm": 20.0, "bearing_align": 0.9, "transition_prior": 0.5, "visit_freq": 0.5,
-             "target_type": "port", "segment": "VLCC", "is_destination": 1},
-            {"gc_dist_nm": 900.0, "bearing_align": 0.1, "transition_prior": 0.1, "visit_freq": 0.1,
-             "target_type": "port", "segment": "VLCC", "is_destination": 0},
+            {
+                "gc_dist_nm": 20.0,
+                "bearing_align": 0.9,
+                "transition_prior": 0.5,
+                "visit_freq": 0.5,
+                "target_type": "port",
+                "segment": "VLCC",
+                "is_destination": 1,
+            },
+            {
+                "gc_dist_nm": 900.0,
+                "bearing_align": 0.1,
+                "transition_prior": 0.1,
+                "visit_freq": 0.1,
+                "target_type": "port",
+                "segment": "VLCC",
+                "is_destination": 0,
+            },
         ]
     )
     X = train[old_features].copy()
@@ -374,16 +444,28 @@ def test_score_candidates_falls_back_to_heuristic_on_stale_model_feature_mismatc
     import lightgbm as lgb
 
     dtrain = lgb.Dataset(
-        X, label=train["is_destination"].to_numpy(dtype=float),
-        categorical_feature=["target_type", "segment"], free_raw_data=False,
+        X,
+        label=train["is_destination"].to_numpy(dtype=float),
+        categorical_feature=["target_type", "segment"],
+        free_raw_data=False,
     )
     stale_booster = lgb.train({**dp.LGB_PARAMS, "objective": "binary"}, dtrain, num_boost_round=5)
     stale_model = dp.DestinationModel(stale_booster, promoted=True, metrics={})
 
     candidates = pd.DataFrame(
-        [{"mmsi": 1, "target_id": "port:a", "target_type": "port", "segment": "VLCC",
-          "gc_dist_nm": 20.0, "bearing_align": 0.9, "transition_prior": 0.5, "visit_freq": 0.5,
-          "canal_backtrack": 0}]
+        [
+            {
+                "mmsi": 1,
+                "target_id": "port:a",
+                "target_type": "port",
+                "segment": "VLCC",
+                "gc_dist_nm": 20.0,
+                "bearing_align": 0.9,
+                "transition_prior": 0.5,
+                "visit_freq": 0.5,
+                "canal_backtrack": 0,
+            }
+        ]
     )
     scored = dp.score_candidates(candidates, stale_model)
     assert scored["method"].iloc[0] == "heuristic"

@@ -98,9 +98,9 @@ def _recent_canal_transit_by_mmsi(conn: duckdb.DuckDBPyConnection, now: datetime
             "  SELECT mmsi, chokepoint, "
             "         row_number() OVER (PARTITION BY mmsi ORDER BY exited_ts DESC) AS rn "
             "  FROM transit_events "
-            "  WHERE chokepoint IN ('suez', 'panama') AND exited_ts >= ?"
+            "  WHERE chokepoint IN ('suez', 'panama') AND exited_ts >= ? AND exited_ts <= ?"
             ") WHERE rn = 1",
-            [cutoff],
+            [cutoff, now],
         ).df()
     except duckdb.CatalogException:
         return {}

@@ -12,12 +12,12 @@ from datetime import UTC, datetime, timedelta
 
 import duckdb
 import pytest
-from analytics.eta_labels import ETA_SCHEMA
 from analytics.destination_serving import (
     _recent_canal_transit_by_mmsi,
     build_destination_predictions,
     run_in_conn,
 )
+from analytics.eta_labels import ETA_SCHEMA
 from fastapi.testclient import TestClient
 
 _NOW = datetime.now(UTC).replace(tzinfo=None, microsecond=0)
@@ -74,8 +74,10 @@ def test_recent_canal_transit_by_mmsi_keeps_only_most_recent_per_vessel():
         "(7001, 'suez', ?, ?, 'northbound', 'tanker', 'VLCC', TRUE), "
         "(7001, 'panama', ?, ?, 'eastbound', 'tanker', 'VLCC', TRUE)",
         [
-            _NOW - timedelta(days=10), _NOW - timedelta(days=9),
-            _NOW - timedelta(days=3), _NOW - timedelta(days=2),
+            _NOW - timedelta(days=10),
+            _NOW - timedelta(days=9),
+            _NOW - timedelta(days=3),
+            _NOW - timedelta(days=2),
         ],
     )
     assert _recent_canal_transit_by_mmsi(conn, _NOW) == {7001: "panama"}
@@ -96,8 +98,22 @@ def _fake_ais_query(dest: str | None = None):
     mem.execute("CREATE TABLE ais_snapshots (snapshot_ts TIMESTAMP, mmsi BIGINT, sog DOUBLE)")
     mem.execute(
         "INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        [7001, "VLCC NORTH", 29.0, 32.34, 12.0, 0.0, 1.0, "tanker", "VLCC", "suez",
-         9000001, 20.0, _NOW, dest],
+        [
+            7001,
+            "VLCC NORTH",
+            29.0,
+            32.34,
+            12.0,
+            0.0,
+            1.0,
+            "tanker",
+            "VLCC",
+            "suez",
+            9000001,
+            20.0,
+            _NOW,
+            dest,
+        ],
     )
 
     def q(sql: str, params=None):
@@ -109,7 +125,10 @@ def _fake_ais_query(dest: str | None = None):
 def test_build_destination_predictions_scores_underway_vessel(tmp_path, monkeypatch):
     # Pin to heuristic-only regardless of whatever real model artifact a live
     # deploy may have left on disk (analytics/models/ is a real, shared path).
-    monkeypatch.setattr("analytics.destination_serving.DestinationModel.load", classmethod(lambda cls, model_dir=None: None))
+    monkeypatch.setattr(
+        "analytics.destination_serving.DestinationModel.load",
+        classmethod(lambda cls, model_dir=None: None),
+    )
     conn = duckdb.connect(str(tmp_path / "an.duckdb"))
     _seed_targets(conn)
     preds = build_destination_predictions(conn, _fake_ais_query(), now=_NOW)
@@ -149,7 +168,9 @@ def test_run_in_conn_persists_predictions(tmp_path):
     _seed_targets(conn)
     n = run_in_conn(conn, _fake_ais_query(), now=_NOW)
     assert n >= 1
-    got = conn.execute("SELECT count(*) FROM destination_predictions WHERE mmsi = 7001").fetchone()[0]
+    got = conn.execute("SELECT count(*) FROM destination_predictions WHERE mmsi = 7001").fetchone()[
+        0
+    ]
     assert got >= 1
 
 
@@ -167,8 +188,34 @@ CREATE TABLE destination_predictions (
 """
 
 _PRED_SEED = [
-    (1003, 1, "cp:hormuz", "hormuz", "chokepoint", 26.57, 56.25, 0.7, "heuristic", False, 112.0, _NOW),
-    (1003, 2, "dest:AEJEA", "Jebel Ali", "destination", 25.02, 55.06, 0.3, "heuristic", True, 250.0, _NOW),
+    (
+        1003,
+        1,
+        "cp:hormuz",
+        "hormuz",
+        "chokepoint",
+        26.57,
+        56.25,
+        0.7,
+        "heuristic",
+        False,
+        112.0,
+        _NOW,
+    ),
+    (
+        1003,
+        2,
+        "dest:AEJEA",
+        "Jebel Ali",
+        "destination",
+        25.02,
+        55.06,
+        0.3,
+        "heuristic",
+        True,
+        250.0,
+        _NOW,
+    ),
 ]
 
 
@@ -177,7 +224,9 @@ def dest_client(tmp_path, monkeypatch) -> TestClient:
     an_file = tmp_path / "freight_analytics.duckdb"
     conn = duckdb.connect(str(an_file))
     conn.execute(_PRED_SCHEMA)
-    conn.executemany("INSERT INTO destination_predictions VALUES (" + ",".join("?" * 12) + ")", _PRED_SEED)
+    conn.executemany(
+        "INSERT INTO destination_predictions VALUES (" + ",".join("?" * 12) + ")", _PRED_SEED
+    )
     conn.close()
     monkeypatch.setenv("ANALYTICS_DB", str(an_file))
     monkeypatch.setenv("AIS_POSITIONS_DB", str(tmp_path / "missing_ais.duckdb"))

@@ -48,7 +48,11 @@ import duckdb
 import numpy as np
 import pandas as pd
 
-from analytics.destination_features import CANAL_BACKTRACK_WINDOW_DAYS, bearing_alignment_vec, canal_backtrack
+from analytics.destination_features import (
+    CANAL_BACKTRACK_WINDOW_DAYS,
+    bearing_alignment_vec,
+    canal_backtrack,
+)
 from analytics.destination_labels import (
     TransitionPriors,
     VisitFrequency,
@@ -136,7 +140,13 @@ def heuristic_score_candidates(candidates: pd.DataFrame, group_col: str = "mmsi"
 # LightGBM reranker (Phase 2 - challenger)
 # ---------------------------------------------------------------------------
 
-NUMERIC_FEATURES = ["gc_dist_nm", "bearing_align", "transition_prior", "visit_freq", "canal_backtrack"]
+NUMERIC_FEATURES = [
+    "gc_dist_nm",
+    "bearing_align",
+    "transition_prior",
+    "visit_freq",
+    "canal_backtrack",
+]
 CATEGORICAL_FEATURES = ["target_type", "segment"]
 FEATURES = NUMERIC_FEATURES + CATEGORICAL_FEATURES
 LABEL = "is_destination"
@@ -282,7 +292,9 @@ def score_candidates(
             out["method"] = "ml"
             return out.drop(columns=["_raw"])
         except Exception as exc:  # noqa: BLE001 - serving must never crash on a stale artifact
-            log.warning("destination ML model rejected the current feature set (%s); falling back", exc)
+            log.warning(
+                "destination ML model rejected the current feature set (%s); falling back", exc
+            )
     return heuristic_score_candidates(candidates, group_col)
 
 
@@ -311,7 +323,9 @@ def _load_arrivals_with_prev(conn: duckdb.DuckDBPyConnection, before_ts=None) ->
     return df
 
 
-def _load_canal_transits(conn: duckdb.DuckDBPyConnection) -> dict[int, list[tuple]]:
+def _load_canal_transits(
+    conn: duckdb.DuckDBPyConnection,
+) -> dict[int, list[tuple[pd.Timestamp, str]]]:
     """Each vessel's Suez/Panama transit history, sorted by exited_ts ascending
     - `mmsi -> [(exited_ts, chokepoint), ...]`. Used to look up, for any
     historical training observation, the most recent qualifying transit
@@ -327,13 +341,15 @@ def _load_canal_transits(conn: duckdb.DuckDBPyConnection) -> dict[int, list[tupl
     if df.empty:
         return {}
     df["exited_ts"] = pd.to_datetime(df["exited_ts"])
-    out: dict[int, list[tuple]] = {}
+    out: dict[int, list[tuple[pd.Timestamp, str]]] = {}
     for mmsi, g in df.groupby("mmsi", sort=False):
-        out[int(mmsi)] = list(zip(g["exited_ts"], g["chokepoint"]))
+        out[int(mmsi)] = list(zip(g["exited_ts"], g["chokepoint"], strict=False))
     return out
 
 
-def _chokepoint_as_of(history: list[tuple], obs_ts, window_days: float) -> str | None:
+def _chokepoint_as_of(
+    history: list[tuple[pd.Timestamp, str]], obs_ts, window_days: float
+) -> str | None:
     """Most recent chokepoint transit at/before `obs_ts` within `window_days`,
     or None. `history` must be sorted by exited_ts ascending
     (`_load_canal_transits` already returns it that way)."""
