@@ -39,6 +39,12 @@ def test_heuristic_score_rewards_reported_match_and_history():
     assert dp.heuristic_raw_score(with_history) > plain
 
 
+def test_heuristic_score_penalizes_canal_backtrack():
+    base = {"gc_dist_nm": 200.0, "bearing_align": 0.5}
+    with_backtrack = {**base, "canal_backtrack": 1}
+    assert dp.heuristic_raw_score(with_backtrack) < dp.heuristic_raw_score(base)
+
+
 def test_heuristic_score_degrades_gracefully_on_missing_fields():
     # No KeyError even though optional columns (route_dist_nm, priors) are absent.
     score = dp.heuristic_raw_score({"gc_dist_nm": 100.0})
@@ -274,6 +280,18 @@ def test_build_training_candidates_empty_when_no_samples(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+def test_prepare_defaults_missing_canal_backtrack_to_zero():
+    # A candidate frame built before this feature existed (or a hand-built
+    # test frame) may not carry canal_backtrack at all - _prepare must not
+    # KeyError, and must treat it as 0 (no penalty).
+    df = pd.DataFrame(
+        [{"gc_dist_nm": 10.0, "bearing_align": 1.0, "transition_prior": 0.5,
+          "visit_freq": 0.5, "target_type": "port", "segment": "VLCC"}]
+    )
+    out = dp._prepare(df)
+    assert out["canal_backtrack"].iloc[0] == 0
+
+
 def test_train_and_evaluate_runs_and_reports_metrics(tmp_path):
     conn = duckdb.connect(str(tmp_path / "an.duckdb"))
     _seed_voyage_db(conn)
@@ -334,6 +352,41 @@ def test_score_candidates_uses_ml_when_promoted(tmp_path):
     scored = dp.score_candidates(candidates, model)
     assert (scored["method"] == "ml").all()
     assert scored["prob"].sum() == pytest.approx(1.0)
+
+
+def test_score_candidates_falls_back_to_heuristic_on_stale_model_feature_mismatch():
+    # Simulate a booster trained before canal_backtrack existed: it only knows
+    # 4 numeric features instead of the current 5.
+    old_features = ["gc_dist_nm", "bearing_align", "transition_prior", "visit_freq"]
+    train = pd.DataFrame(
+        [
+            {"gc_dist_nm": 20.0, "bearing_align": 0.9, "transition_prior": 0.5, "visit_freq": 0.5,
+             "target_type": "port", "segment": "VLCC", "is_destination": 1},
+            {"gc_dist_nm": 900.0, "bearing_align": 0.1, "transition_prior": 0.1, "visit_freq": 0.1,
+             "target_type": "port", "segment": "VLCC", "is_destination": 0},
+        ]
+    )
+    X = train[old_features].copy()
+    for c in old_features:
+        X[c] = pd.to_numeric(X[c])
+    X["target_type"] = train["target_type"].astype("category")
+    X["segment"] = train["segment"].astype("category")
+    import lightgbm as lgb
+
+    dtrain = lgb.Dataset(
+        X, label=train["is_destination"].to_numpy(dtype=float),
+        categorical_feature=["target_type", "segment"], free_raw_data=False,
+    )
+    stale_booster = lgb.train({**dp.LGB_PARAMS, "objective": "binary"}, dtrain, num_boost_round=5)
+    stale_model = dp.DestinationModel(stale_booster, promoted=True, metrics={})
+
+    candidates = pd.DataFrame(
+        [{"mmsi": 1, "target_id": "port:a", "target_type": "port", "segment": "VLCC",
+          "gc_dist_nm": 20.0, "bearing_align": 0.9, "transition_prior": 0.5, "visit_freq": 0.5,
+          "canal_backtrack": 0}]
+    )
+    scored = dp.score_candidates(candidates, stale_model)
+    assert scored["method"].iloc[0] == "heuristic"
 
 
 if __name__ == "__main__":

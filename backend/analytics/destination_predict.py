@@ -76,6 +76,7 @@ _HEURISTIC_WEIGHTS = {
     "reported_match": 2.5,
     "transition_prior": 1.5,
     "visit_freq": 1.0,
+    "canal_backtrack": -2.0,
 }
 _DIST_SCALE_NM = 500.0
 
@@ -83,10 +84,11 @@ _DIST_SCALE_NM = 500.0
 def heuristic_raw_score(row: dict) -> float:
     """Un-normalized plausibility score for one (vessel, candidate) row.
 
-    Missing optional fields (`route_dist_nm`, `reported_match`, priors) degrade
-    gracefully to their neutral value rather than raising - this lets the same
-    function score both the full live candidate frame and the training frame,
-    which does not carry `reported_match`/`resolver_score` (see module docstring).
+    Missing optional fields (`route_dist_nm`, `reported_match`, priors,
+    `canal_backtrack`) degrade gracefully to their neutral value rather than
+    raising - this lets the same function score both the full live candidate
+    frame and the training frame, which does not carry `reported_match`/
+    `resolver_score` (see module docstring).
     """
     dist = row.get("route_dist_nm")
     if dist is None or not np.isfinite(dist):
@@ -97,6 +99,7 @@ def heuristic_raw_score(row: dict) -> float:
     reported = 1.0 if row.get("reported_match") else 0.0
     transition = row.get("transition_prior") or 0.0
     visit = row.get("visit_freq") or 0.0
+    backtrack = 1.0 if row.get("canal_backtrack") else 0.0
     w = _HEURISTIC_WEIGHTS
     return (
         w["bearing_align"] * bearing
@@ -104,6 +107,7 @@ def heuristic_raw_score(row: dict) -> float:
         + w["reported_match"] * reported
         + w["transition_prior"] * transition
         + w["visit_freq"] * visit
+        + w["canal_backtrack"] * backtrack
     )
 
 
@@ -132,7 +136,7 @@ def heuristic_score_candidates(candidates: pd.DataFrame, group_col: str = "mmsi"
 # LightGBM reranker (Phase 2 - challenger)
 # ---------------------------------------------------------------------------
 
-NUMERIC_FEATURES = ["gc_dist_nm", "bearing_align", "transition_prior", "visit_freq"]
+NUMERIC_FEATURES = ["gc_dist_nm", "bearing_align", "transition_prior", "visit_freq", "canal_backtrack"]
 CATEGORICAL_FEATURES = ["target_type", "segment"]
 FEATURES = NUMERIC_FEATURES + CATEGORICAL_FEATURES
 LABEL = "is_destination"
@@ -180,7 +184,10 @@ CREATE TABLE IF NOT EXISTS destination_model_metrics (
 
 
 def _prepare(df: pd.DataFrame) -> pd.DataFrame:
-    out = df[FEATURES].copy()
+    out = df.copy()
+    if "canal_backtrack" not in out.columns:
+        out["canal_backtrack"] = 0
+    out = out[FEATURES].copy()
     for col in NUMERIC_FEATURES:
         out[col] = pd.to_numeric(out[col], errors="coerce")
     for col in CATEGORICAL_FEATURES:
@@ -257,19 +264,25 @@ def score_candidates(
     `candidates` must already carry `transition_prior`/`visit_freq` (attached by
     the caller from the persisted `dest_transitions`/`dest_port_visits` priors) in
     addition to the geometric columns `destination_features.candidate_frame`
-    produces. Falls back to the heuristic whenever no model is loaded or it was
-    not promoted - the same conservative default as True ETA's physics fallback.
+    produces. Falls back to the heuristic whenever no model is loaded, it was
+    not promoted, or the loaded booster's feature set doesn't match `_prepare`'s
+    current output (e.g. a model artifact trained before a feature was added,
+    the same conservative default as True ETA's physics fallback and
+    `DestinationModel.load`'s own artifact-corruption guard).
     """
     if candidates.empty:
         return candidates.assign(prob=pd.Series(dtype=float), method=pd.Series(dtype=str))
     if model is not None and model.fitted and model.promoted:
-        out = candidates.copy()
-        out["_raw"] = model.predict_proba(out)
-        sums = out.groupby(group_col)["_raw"].transform("sum")
-        sizes = out.groupby(group_col)["_raw"].transform("size")
-        out["prob"] = np.where(sums > 0, out["_raw"] / sums.replace(0, np.nan), 1.0 / sizes)
-        out["method"] = "ml"
-        return out.drop(columns=["_raw"])
+        try:
+            out = candidates.copy()
+            out["_raw"] = model.predict_proba(out)
+            sums = out.groupby(group_col)["_raw"].transform("sum")
+            sizes = out.groupby(group_col)["_raw"].transform("size")
+            out["prob"] = np.where(sums > 0, out["_raw"] / sums.replace(0, np.nan), 1.0 / sizes)
+            out["method"] = "ml"
+            return out.drop(columns=["_raw"])
+        except Exception as exc:  # noqa: BLE001 - serving must never crash on a stale artifact
+            log.warning("destination ML model rejected the current feature set (%s); falling back", exc)
     return heuristic_score_candidates(candidates, group_col)
 
 
