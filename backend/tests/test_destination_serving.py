@@ -8,12 +8,16 @@ endpoint) against a seeded `destination_predictions` snapshot.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import duckdb
 import pytest
 from analytics.eta_labels import ETA_SCHEMA
-from analytics.destination_serving import build_destination_predictions, run_in_conn
+from analytics.destination_serving import (
+    _recent_canal_transit_by_mmsi,
+    build_destination_predictions,
+    run_in_conn,
+)
 from fastapi.testclient import TestClient
 
 _NOW = datetime.now(UTC).replace(tzinfo=None, microsecond=0)
@@ -33,6 +37,53 @@ def _seed_targets(conn: duckdb.DuckDBPyConnection) -> None:
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
             list(t),
         )
+
+
+def _seed_transit_events(conn: duckdb.DuckDBPyConnection) -> None:
+    conn.execute(
+        "CREATE TABLE transit_events (mmsi BIGINT, chokepoint VARCHAR, entered_ts TIMESTAMP, "
+        "exited_ts TIMESTAMP, direction VARCHAR, kind VARCHAR, segment VARCHAR, laden BOOLEAN)"
+    )
+
+
+def test_recent_canal_transit_by_mmsi_reads_recent_suez_transit(tmp_path):
+    conn = duckdb.connect(str(tmp_path / "an.duckdb"))
+    _seed_transit_events(conn)
+    conn.execute(
+        "INSERT INTO transit_events VALUES (7001, 'suez', ?, ?, 'northbound', 'tanker', 'VLCC', TRUE)",
+        [_NOW - timedelta(days=2), _NOW - timedelta(days=1)],
+    )
+    assert _recent_canal_transit_by_mmsi(conn, _NOW) == {7001: "suez"}
+
+
+def test_recent_canal_transit_by_mmsi_ignores_stale_transit():
+    conn = duckdb.connect(":memory:")
+    _seed_transit_events(conn)
+    conn.execute(
+        "INSERT INTO transit_events VALUES (7001, 'suez', ?, ?, 'northbound', 'tanker', 'VLCC', TRUE)",
+        [_NOW - timedelta(days=40), _NOW - timedelta(days=39)],
+    )
+    assert _recent_canal_transit_by_mmsi(conn, _NOW) == {}
+
+
+def test_recent_canal_transit_by_mmsi_keeps_only_most_recent_per_vessel():
+    conn = duckdb.connect(":memory:")
+    _seed_transit_events(conn)
+    conn.execute(
+        "INSERT INTO transit_events VALUES "
+        "(7001, 'suez', ?, ?, 'northbound', 'tanker', 'VLCC', TRUE), "
+        "(7001, 'panama', ?, ?, 'eastbound', 'tanker', 'VLCC', TRUE)",
+        [
+            _NOW - timedelta(days=10), _NOW - timedelta(days=9),
+            _NOW - timedelta(days=3), _NOW - timedelta(days=2),
+        ],
+    )
+    assert _recent_canal_transit_by_mmsi(conn, _NOW) == {7001: "panama"}
+
+
+def test_recent_canal_transit_by_mmsi_empty_without_table():
+    conn = duckdb.connect(":memory:")
+    assert _recent_canal_transit_by_mmsi(conn, _NOW) == {}
 
 
 def _fake_ais_query(dest: str | None = None):

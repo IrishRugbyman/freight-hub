@@ -18,12 +18,12 @@ from __future__ import annotations
 
 import argparse
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import duckdb
 import pandas as pd
 
-from analytics.destination_features import candidate_frame
+from analytics.destination_features import CANAL_BACKTRACK_WINDOW_DAYS, candidate_frame
 from analytics.destination_labels import TransitionPriors, VisitFrequency
 from analytics.destination_predict import DestinationModel, score_candidates
 from analytics.eta_labels import ANALYTICS_DB, _default_ais_query
@@ -85,6 +85,28 @@ def _prev_target_by_mmsi(conn: duckdb.DuckDBPyConnection) -> dict[int, str]:
     return {int(r.mmsi): r.target_id for r in df.itertuples()}
 
 
+def _recent_canal_transit_by_mmsi(conn: duckdb.DuckDBPyConnection, now: datetime) -> dict[int, str]:
+    """Each vessel's most recent Suez/Panama transit within the backtrack
+    window, keyed by mmsi -> chokepoint. Empty dict (not an error) if
+    `transit_events` doesn't exist yet (e.g. a fresh analytics DB) -
+    `canal_backtrack` degrades to its neutral default in that case, same as
+    any other missing-signal case in this predictor."""
+    cutoff = now - timedelta(days=CANAL_BACKTRACK_WINDOW_DAYS)
+    try:
+        df = conn.execute(
+            "SELECT mmsi, chokepoint FROM ("
+            "  SELECT mmsi, chokepoint, "
+            "         row_number() OVER (PARTITION BY mmsi ORDER BY exited_ts DESC) AS rn "
+            "  FROM transit_events "
+            "  WHERE chokepoint IN ('suez', 'panama') AND exited_ts >= ?"
+            ") WHERE rn = 1",
+            [cutoff],
+        ).df()
+    except duckdb.CatalogException:
+        return {}
+    return {int(r.mmsi): r.chokepoint for r in df.itertuples()}
+
+
 def build_destination_predictions(
     conn: duckdb.DuckDBPyConnection,
     ais_query,
@@ -101,7 +123,9 @@ def build_destination_predictions(
     if targets.empty or live.empty:
         return pd.DataFrame(columns=_PERSIST_COLS)
 
-    candidates = candidate_frame(live, targets)
+    candidates = candidate_frame(
+        live, targets, recent_canal_transit=_recent_canal_transit_by_mmsi(conn, now)
+    )
     if candidates.empty:
         return pd.DataFrame(columns=_PERSIST_COLS)
 
