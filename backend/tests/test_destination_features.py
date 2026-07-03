@@ -96,8 +96,59 @@ def test_empty_inputs_return_empty_frame():
     assert feat.candidate_frame(_live_row(), pd.DataFrame()).empty
 
 
+def test_canal_backtrack_penalizes_wrong_side_of_suez():
+    # Vessel just north of the Suez gate (Med side); a Persian Gulf candidate
+    # (south of the gate) would require backtracking through Suez again.
+    assert feat.canal_backtrack(31.0, 32.34, 26.0, 50.0, "suez") == 1
+
+
+def test_canal_backtrack_allows_same_side_of_suez():
+    # A Rotterdam candidate is also north of the gate - no backtrack required.
+    assert feat.canal_backtrack(31.0, 32.34, 51.96, 4.10, "suez") == 0
+
+
+def test_canal_backtrack_penalizes_wrong_side_of_panama():
+    # Panama gate lon is -79.75. Vessel just east of it (Atlantic side); a
+    # Pacific-side candidate would require backtracking through Panama again.
+    assert feat.canal_backtrack(9.12, -70.0, 9.12, -90.0, "panama") == 1
+
+
+def test_canal_backtrack_neutral_without_recent_transit():
+    assert feat.canal_backtrack(31.0, 32.34, 26.0, 50.0, None) == 0
+
+
+def test_canal_backtrack_neutral_for_non_canal_chokepoint():
+    # Hormuz is a strait, not one of the two scoped canals - always neutral.
+    assert feat.canal_backtrack(1.2, 103.8, 26.0, 50.0, "hormuz") == 0
+
+
 def test_bearing_alignment_neutral_without_course():
     assert feat.bearing_alignment(29.0, 32.34, None, 30.50, 32.34) == 0.5
+
+
+def test_candidate_frame_flags_canal_backtrack_on_geometric_candidate():
+    # Vessel just north of the Suez gate (Med side), steaming due south toward
+    # a target also south of the gate - which would require transiting Suez
+    # again in reverse.
+    live = _live_row(lat=31.5, lon=32.34, cog=180.0, heading=180.0)
+    targets = pd.DataFrame(
+        [{"target_id": "port:south", "target_type": "port", "name": "South Port", "lat": 26.0, "lon": 32.34}]
+    )
+    cands = feat.candidate_frame(live, targets, recent_canal_transit={7001: "suez"})
+    assert not cands.empty
+    assert cands["canal_backtrack"].iloc[0] == 1
+
+    # Without a recent transit on record, the same candidate isn't penalized.
+    cands_no_transit = feat.candidate_frame(live, targets)
+    assert cands_no_transit["canal_backtrack"].iloc[0] == 0
+
+
+def test_candidate_frame_canal_backtrack_on_resolved_destination_row():
+    live = _live_row(lat=31.5, lon=32.34, destination="ROTTERDAM")
+    cands = feat.candidate_frame(live, _TARGETS, recent_canal_transit={7001: "suez"})
+    dest_row = cands[cands["target_type"] == "destination"].iloc[0]
+    # Rotterdam is north of the Suez gate - same side as the vessel, no backtrack.
+    assert dest_row["canal_backtrack"] == 0
 
 
 if __name__ == "__main__":

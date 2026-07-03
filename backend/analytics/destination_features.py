@@ -29,14 +29,26 @@ import numpy as np
 import pandas as pd
 
 from analytics.destination_resolver import resolve as resolve_destination
-from analytics.eta_labels import haversine_nm
+from analytics.eta_labels import _CHOKEPOINT_GATES, haversine_nm
 from analytics.eta_serving import _angle_diff, _candidate_pairs
+from analytics.zones import CHOKEPOINT_AXES
 from quant_lib.freight.eta import initial_bearing
 
 # Two targets within this of each other are "the same place" - a resolved
 # reported destination this close to a geometric candidate marks that candidate
 # as reported-matching rather than adding a duplicate row.
 _SAME_PORT_NM = 20.0
+
+# Suez/Panama only - the two `is_canal=True` targets where the alternate route
+# is a genuine ocean-scale diversion (Cape of Good Hope / Cape Horn). For
+# straits, "wrong side" mostly restates a low `bearing_align` and would be
+# redundant with that signal.
+_CANAL_CHOKEPOINTS = {"suez", "panama"}
+
+# A qualifying transit older than this no longer penalizes - stale rather than
+# permanent. 21 days comfortably covers a full Suez -> NW-Europe or
+# Panama -> Asia leg.
+CANAL_BACKTRACK_WINDOW_DAYS = 21.0
 
 _CANDIDATE_COLS = [
     "mmsi",
@@ -54,6 +66,7 @@ _CANDIDATE_COLS = [
     "gc_dist_nm",
     "bearing_align",
     "reported_match",
+    "canal_backtrack",
     "resolver_score",
 ]
 
@@ -69,6 +82,36 @@ def bearing_alignment(
         return 0.5
     bearing = initial_bearing(lat, lon, t_lat, t_lon)
     return 1.0 - (_angle_diff(bearing, course) / 180.0)
+
+
+def canal_backtrack(
+    lat: float, lon: float, t_lat: float, t_lon: float, chokepoint: str | None
+) -> int:
+    """1 if reaching (t_lat, t_lon) from (lat, lon) would require re-transiting
+    `chokepoint` (a recent Suez/Panama transit) in reverse; else 0.
+
+    `chokepoint` is None when the vessel has no qualifying recent transit -
+    absence of signal, not a penalty (mirrors `bearing_alignment`'s neutral
+    default when course is unknown). Side-of-gate is computed purely from the
+    chokepoint's axis (`CHOKEPOINT_AXES`) and gate coordinate
+    (`_CHOKEPOINT_GATES`) - both already production-validated by the transit
+    detector and True ETA - so this needs no independent geography check, and
+    it never looks at the transit's direction label, only which side of the
+    gate each point falls on.
+    """
+    if chokepoint is None or chokepoint not in _CANAL_CHOKEPOINTS:
+        return 0
+    axis, _, _ = CHOKEPOINT_AXES[chokepoint]
+    gate_lat, gate_lon = _CHOKEPOINT_GATES[chokepoint]
+    if axis == "lat":
+        vessel_side = lat - gate_lat
+        target_side = t_lat - gate_lat
+    else:
+        vessel_side = lon - gate_lon
+        target_side = t_lon - gate_lon
+    if vessel_side == 0 or target_side == 0:
+        return 0
+    return int((vessel_side > 0) != (target_side > 0))
 
 
 def _bearing_to_many(lat: float, lon: float, t_lats: np.ndarray, t_lons: np.ndarray) -> np.ndarray:
@@ -99,15 +142,25 @@ def bearing_alignment_vec(
     return 1.0 - diff / 180.0
 
 
-def candidate_frame(live: pd.DataFrame, targets: pd.DataFrame) -> pd.DataFrame:
+def candidate_frame(
+    live: pd.DataFrame,
+    targets: pd.DataFrame,
+    recent_canal_transit: dict[int, str] | None = None,
+) -> pd.DataFrame:
     """One row per (vessel, candidate target). Empty frame if no live/targets.
 
     `live` must already be underway-filtered (mirrors `eta_serving._load_live`);
     this module applies no speed/segment filtering of its own.
+
+    `recent_canal_transit` maps mmsi -> chokepoint ('suez' | 'panama') for
+    vessels with a qualifying recent canal transit on record (see
+    `canal_backtrack`); omit or pass `None`/`{}` when that lookup isn't
+    available - every candidate then gets the neutral `canal_backtrack=0`.
     """
     if live.empty or targets.empty:
         return pd.DataFrame(columns=_CANDIDATE_COLS)
 
+    recent_canal_transit = recent_canal_transit or {}
     pairs = _candidate_pairs(live, targets)
     by_vessel: dict[int, list[tuple[float, float, float, int]]] = {}
     for vi, lat, lon, gc, ti in pairs:
@@ -125,6 +178,7 @@ def candidate_frame(live: pd.DataFrame, targets: pd.DataFrame) -> pd.DataFrame:
             course = float(v.cog)
         elif pd.notna(getattr(v, "heading", None)):
             course = float(v.heading)
+        chokepoint = recent_canal_transit.get(mmsi)
 
         dest_str = getattr(v, "destination", None)
         rp = None
@@ -157,6 +211,7 @@ def candidate_frame(live: pd.DataFrame, targets: pd.DataFrame) -> pd.DataFrame:
                     "gc_dist_nm": float(gc),
                     "bearing_align": bearing_alignment(lat, lon, course, t_lat, t_lon),
                     "reported_match": reported_match,
+                    "canal_backtrack": canal_backtrack(lat, lon, t_lat, t_lon, chokepoint),
                     "resolver_score": float(rp.score) if reported_match else None,
                 }
             )
@@ -180,6 +235,7 @@ def candidate_frame(live: pd.DataFrame, targets: pd.DataFrame) -> pd.DataFrame:
                     "gc_dist_nm": gc_r,
                     "bearing_align": bearing_alignment(lat, lon, course, rp.lat, rp.lon),
                     "reported_match": True,
+                    "canal_backtrack": canal_backtrack(lat, lon, rp.lat, rp.lon, chokepoint),
                     "resolver_score": float(rp.score),
                 }
             )
