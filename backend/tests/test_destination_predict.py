@@ -160,6 +160,26 @@ def _seed_voyage_db(conn: duckdb.DuckDBPyConnection) -> None:
         )
 
 
+def test_chokepoint_as_of_returns_most_recent_within_window():
+    history = [(pd.Timestamp("2026-06-01"), "suez"), (pd.Timestamp("2026-06-10"), "panama")]
+    assert dp._chokepoint_as_of(history, pd.Timestamp("2026-06-15"), 21.0) == "panama"
+
+
+def test_chokepoint_as_of_ignores_future_transit():
+    # A transit dated after obs_ts must never be visible - the leakage guard.
+    history = [(pd.Timestamp("2026-06-20"), "suez")]
+    assert dp._chokepoint_as_of(history, pd.Timestamp("2026-06-15"), 21.0) is None
+
+
+def test_chokepoint_as_of_ignores_stale_transit():
+    history = [(pd.Timestamp("2026-05-01"), "suez")]
+    assert dp._chokepoint_as_of(history, pd.Timestamp("2026-06-15"), 21.0) is None
+
+
+def test_chokepoint_as_of_empty_history():
+    assert dp._chokepoint_as_of([], pd.Timestamp("2026-06-15"), 21.0) is None
+
+
 def test_build_training_candidates_labels_true_target_positive(tmp_path):
     conn = duckdb.connect(str(tmp_path / "an.duckdb"))
     _seed_voyage_db(conn)
@@ -183,6 +203,64 @@ def test_build_training_candidates_bearing_favours_true_target(tmp_path):
     true_align = cands[cands["is_destination"] == 1]["bearing_align"].mean()
     other_align = cands[cands["is_destination"] == 0]["bearing_align"].mean()
     assert true_align > other_align
+
+
+def test_build_training_candidates_populates_canal_backtrack(tmp_path):
+    conn = duckdb.connect(str(tmp_path / "an.duckdb"))
+    conn.execute(ETA_SCHEMA)
+    from analytics.eta_samples import ETA_SAMPLES_SCHEMA
+
+    conn.execute(ETA_SAMPLES_SCHEMA)
+    conn.execute(
+        "CREATE TABLE transit_events (mmsi BIGINT, chokepoint VARCHAR, entered_ts TIMESTAMP, "
+        "exited_ts TIMESTAMP, direction VARCHAR, kind VARCHAR, segment VARCHAR, laden BOOLEAN)"
+    )
+    # Two targets straddling the Suez gate (lat 30.50): one north (reachable
+    # without re-transiting), one south (would require backtracking through
+    # the gate the vessel just cleared).
+    for t in [
+        ("port:north", "port", "North Port", 45.0, 20.0, 15.0, False),
+        ("port:south", "port", "South Port", 20.0, 40.0, 15.0, False),
+    ]:
+        conn.execute(
+            "INSERT INTO eta_targets (target_id, target_type, name, lat, lon, reach_nm, is_canal) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            list(t),
+        )
+    arrival = pd.Timestamp("2026-06-10")
+    obs_ts = arrival - pd.Timedelta(hours=5)
+    conn.execute(
+        "INSERT INTO eta_samples (voyage_id, mmsi, target_id, arrival_ts, obs_ts, obs_lat, obs_lon, "
+        "remaining_h, segment, target_type) VALUES (0, 2000, 'port:north', ?, ?, 32.0, 30.0, 5.0, 'VLCC', 'port')",
+        [arrival, obs_ts],
+    )
+    conn.execute(
+        "INSERT INTO eta_arrivals (mmsi, target_id, arrival_ts, min_dist_nm, segment, laden, approach_start_ts) "
+        "VALUES (2000, 'port:north', ?, 1.0, 'VLCC', TRUE, ?)",
+        [arrival, arrival - pd.Timedelta(hours=5)],
+    )
+    # Vessel transited Suez northbound 1 day before this observation - well
+    # within the 21-day backtrack window.
+    conn.execute(
+        "INSERT INTO transit_events VALUES (2000, 'suez', ?, ?, 'northbound', 'tanker', 'VLCC', TRUE)",
+        [obs_ts - pd.Timedelta(days=2), obs_ts - pd.Timedelta(days=1)],
+    )
+    cands = dp.build_training_candidates(conn)
+    south = cands[cands["target_id"] == "port:south"]
+    north = cands[cands["target_id"] == "port:north"]
+    assert not south.empty and not north.empty
+    assert (south["canal_backtrack"] == 1).all()
+    assert (north["canal_backtrack"] == 0).all()
+
+
+def test_build_training_candidates_canal_backtrack_defaults_without_transit_events(tmp_path):
+    # No transit_events table at all (fresh DB) - must not crash, and the
+    # column must still exist with the neutral default.
+    conn = duckdb.connect(str(tmp_path / "an.duckdb"))
+    _seed_voyage_db(conn)
+    cands = dp.build_training_candidates(conn)
+    assert not cands.empty
+    assert (cands["canal_backtrack"] == 0).all()
 
 
 def test_build_training_candidates_empty_when_no_samples(tmp_path):

@@ -48,7 +48,7 @@ import duckdb
 import numpy as np
 import pandas as pd
 
-from analytics.destination_features import bearing_alignment_vec
+from analytics.destination_features import CANAL_BACKTRACK_WINDOW_DAYS, bearing_alignment_vec, canal_backtrack
 from analytics.destination_labels import (
     TransitionPriors,
     VisitFrequency,
@@ -298,6 +298,41 @@ def _load_arrivals_with_prev(conn: duckdb.DuckDBPyConnection, before_ts=None) ->
     return df
 
 
+def _load_canal_transits(conn: duckdb.DuckDBPyConnection) -> dict[int, list[tuple]]:
+    """Each vessel's Suez/Panama transit history, sorted by exited_ts ascending
+    - `mmsi -> [(exited_ts, chokepoint), ...]`. Used to look up, for any
+    historical training observation, the most recent qualifying transit
+    strictly before it (leakage-free: a transit dated after `obs_ts` must never
+    be visible - see `_chokepoint_as_of`)."""
+    try:
+        df = conn.execute(
+            "SELECT mmsi, chokepoint, exited_ts FROM transit_events "
+            "WHERE chokepoint IN ('suez', 'panama') ORDER BY mmsi, exited_ts"
+        ).df()
+    except duckdb.CatalogException:
+        return {}
+    if df.empty:
+        return {}
+    df["exited_ts"] = pd.to_datetime(df["exited_ts"])
+    out: dict[int, list[tuple]] = {}
+    for mmsi, g in df.groupby("mmsi", sort=False):
+        out[int(mmsi)] = list(zip(g["exited_ts"], g["chokepoint"]))
+    return out
+
+
+def _chokepoint_as_of(history: list[tuple], obs_ts, window_days: float) -> str | None:
+    """Most recent chokepoint transit at/before `obs_ts` within `window_days`,
+    or None. `history` must be sorted by exited_ts ascending
+    (`_load_canal_transits` already returns it that way)."""
+    best: str | None = None
+    for ts, cp in history:
+        if ts > obs_ts:
+            break
+        if (obs_ts - ts).total_seconds() / 86400.0 <= window_days:
+            best = cp
+    return best
+
+
 def build_training_candidates(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     """Reconstruct labeled (observation, candidate) rows from completed voyages.
 
@@ -330,6 +365,7 @@ def build_training_candidates(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     t_lon = targets["lon"].to_numpy(dtype=float)
     t_ids = targets["target_id"].to_numpy(dtype=object)
     t_types = targets["target_type"].to_numpy(dtype=object)
+    canal_transits = _load_canal_transits(conn)
 
     arrivals = _load_arrivals_with_prev(conn)
     prev_map = (
@@ -370,6 +406,10 @@ def build_training_candidates(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
         for i in idxs:
             lat, lon = float(lats[i]), float(lons[i])
             course = float(courses[i]) if np.isfinite(courses[i]) else None
+            obs_ts = grp["obs_ts"].iloc[i]
+            chokepoint = _chokepoint_as_of(
+                canal_transits.get(mmsi, []), obs_ts, CANAL_BACKTRACK_WINDOW_DAYS
+            )
             gc = haversine_nm_vec(t_lat, t_lon, lat, lon)
             align = bearing_alignment_vec(lat, lon, course, t_lat, t_lon)
 
@@ -385,7 +425,6 @@ def build_training_candidates(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
 
             seg_val = grp["segment"].iloc[i]
             seg = str(seg_val) if pd.notna(seg_val) else None
-            obs_ts = grp["obs_ts"].iloc[i]
             for j in chosen:
                 rows.append(
                     {
@@ -398,6 +437,9 @@ def build_training_candidates(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
                         "target_type": t_types[j],
                         "gc_dist_nm": float(gc[j]),
                         "bearing_align": float(align[j]),
+                        "canal_backtrack": canal_backtrack(
+                            lat, lon, float(t_lat[j]), float(t_lon[j]), chokepoint
+                        ),
                         "segment": seg,
                         "is_destination": int(t_ids[j] == true_target),
                         "prev_target_id": prev_target,
