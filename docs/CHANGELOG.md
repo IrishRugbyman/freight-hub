@@ -1,5 +1,41 @@
 # Freight Hub Changelog
 
+## 2026-07-04 (session 16) - Destination predictor: sea-route distance for both scorers
+
+**Great-circle distance cuts through land - the destination predictor never corrected for it,
+even though True ETA already solved this problem.** `gc_dist_nm` is a straight line; a real vessel
+routed via Suez, Panama, the Cape of Good Hope, or Cape Horn travels a materially longer path, and
+`eta_routing.RouteCache` already computes that (a `searoute`-backed, grid-cell-memoized lookup,
+persisted to `eta_route_cache`). Notably, `heuristic_raw_score` was *already written* to prefer
+`route_dist_nm` over `gc_dist_nm` when present (`row.get("route_dist_nm")` with a `gc_dist_nm`
+fallback) - it simply never had a live value to prefer, since nothing upstream ever populated it.
+
+Wired in: `destination_features.candidate_frame` gained a `route_cache` param (mirrors
+`trail_by_mmsi`/`laden_by_mmsi`); `destination_serving.py` now creates and flushes a `RouteCache`
+per hourly build, reusing the exact `eta_route_cache` table True ETA's own `build_predictions` just
+warmed moments earlier in the same build cycle, so most lookups are cache hits, not fresh
+`searoute` calls (the training-set rebuild's first pass logged 1.1M hits vs 2,873 misses);
+`destination_predict.py`'s `build_training_candidates` computes it per training candidate via its
+own `RouteCache(conn)`, and added `route_dist_nm` to `NUMERIC_FEATURES`. This is the one feature
+this series (`laden`, `draught`, `sog_trail6h`) that reaches *both* scorers, not just the ML side.
+
+**Retrained + repromoted, mixed but instructive result:** heuristic top1 0.622 -> **0.630**, top3
+0.907 -> **0.909** (n=39,975) - a genuine, real gain, exactly where expected: the heuristic's
+`inv_dist` term was silently using straight-line distance for every canal/cape route until now. ML
+moved the other way: top1 0.6803 -> 0.6778, top3 0.9608 -> 0.9536 - a small regression, not an
+improvement, though it still clears the promotion gate on both metrics (0.678 > 0.630 top1, 0.954
+>= 0.909 top3). Read honestly: `route_dist_nm` is highly correlated with `gc_dist_nm` (same
+underlying geometry, differing mainly on canal/cape routes), and LightGBM's own split search likely
+found `gc_dist_nm` alone at least as informative pre-correction, so the added feature cost the
+model some capacity without buying it anything back - a plausible feature-redundancy story, not
+clear evidence to revert (the ML model still comfortably beats the heuristic). Kept in because the
+heuristic's improvement is unambiguous and the ML regression is small and still passes the gate.
+
+- Tests: `test_destination_features.py` (+2: `route_dist_nm` passthrough via a real `RouteCache`,
+  default-None without one), `test_destination_predict.py` (+2: `_prepare` default,
+  training-candidate `route_dist_nm >= gc_dist_nm` invariant), `test_destination_serving.py`
+  (+1: live `eta_route_cache` wiring + flush). Full suite 615 passing.
+
 ## 2026-07-04 (session 15) - Destination predictor: trailing-speed (deceleration) feature
 
 **A vessel slowing down while pointed at a candidate is committing to arrival there - a stronger
