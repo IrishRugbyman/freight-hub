@@ -142,7 +142,15 @@ def heuristic_score_candidates(candidates: pd.DataFrame, group_col: str = "mmsi"
 # ---------------------------------------------------------------------------
 
 NUMERIC_FEATURES = [
-    "gc_dist_nm",
+    # gc_dist_nm deliberately excluded from the ML feature set: it's a straight
+    # line, route_dist_nm is the same distance sea-route-corrected, and the two
+    # are highly collinear. Feature-importance analysis showed LightGBM was
+    # splitting on gc_dist_nm (gain 608k) well ahead of the strictly-more-correct
+    # route_dist_nm (gain 162k); an ablation dropping gc_dist_nm confirmed it was
+    # actively costing accuracy, not just wasted capacity (top1 0.678->0.681,
+    # top3 0.954->0.957). gc_dist_nm itself is untouched everywhere else -
+    # candidate selection, canal_backtrack, and the heuristic's own distance
+    # fallback all still use it.
     "bearing_align",
     "transition_prior",
     "visit_freq",
