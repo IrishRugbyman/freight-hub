@@ -1,5 +1,32 @@
 # Freight Hub Changelog
 
+## 2026-07-04 (session 14) - Destination predictor: draught feature
+
+**A VLCC can't call at a shallow terminal, laden or not - a vessel-size/depth signal the ML
+challenger never saw, even though it was sitting right there.** `destination_features.
+candidate_frame` already carried raw `draught` on every candidate row (needed for nothing until
+now), and True ETA Phase C already mines it straight into `eta_samples.draught` per observation.
+Neither had reached `destination_predict`'s feature set: `NUMERIC_FEATURES` stopped at
+`canal_backtrack`, and `build_training_candidates`'s SQL never selected the column at all. Unlike
+`laden` (a coarse draught-ratio-derived boolean), raw draught is a continuous size/depth proxy -
+two laden VLCCs don't draw the same water, and a candidate port's practical reachability depends
+on the absolute number, not just laden/ballast state.
+
+Wired in by adding `"draught"` to `NUMERIC_FEATURES`, selecting `eta_samples.draught` in
+`build_training_candidates`'s SQL, and attaching it per training row alongside the existing
+`laden` extraction. Serving-side needed no change - `candidate_frame` was already populating it.
+ML-only (same rationale as `laden`: the heuristic has no hand-built notion of draught-vs-port
+compatibility to weight against it).
+
+**Retrained + repromoted:** ml top1 0.6803 / top3 0.9609 (n=39,850), up from 0.6796/0.9610 without
+`draught` earlier today - a small but real top1 gain, top3 flat within noise. Still clear of
+heuristic (0.622/0.908). Champion/challenger gate re-verified the challenger still wins on both
+top1 and top3; promoted.
+
+- Tests: `test_destination_predict.py` (+2: `_prepare` defaults missing `draught` to `NaN` not a
+  fabricated value; `build_training_candidates` carries `draught` through from `eta_samples`).
+  Full suite 605 passing.
+
 ## 2026-07-04 (session 13) - Destination predictor: laden/ballast feature
 
 **A laden crude tanker heads to a discharge port, a ballast one to a load port - a strong
