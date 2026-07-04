@@ -178,5 +178,31 @@ def test_candidate_frame_canal_backtrack_on_resolved_destination_row():
     assert dest_row["canal_backtrack"] == 0
 
 
+# ---------------------------------------------------------------------------
+# resolve_origin_target_id: cold-start "prev_target" substitute for the
+# transition prior, mined from a route-style AIS destination's origin leg.
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_origin_target_id_matches_curated_target():
+    # "NLRTM>EGPSD": origin leg NLRTM resolves near the port:rotterdam target.
+    assert feat.resolve_origin_target_id("NLRTM>EGPSD", _TARGETS) == "port:rotterdam"
+
+
+def test_resolve_origin_target_id_no_route_is_none():
+    # A plain single-port string has no origin leg to resolve.
+    assert feat.resolve_origin_target_id("ROTTERDAM", _TARGETS) is None
+
+
+def test_resolve_origin_target_id_far_from_any_target_is_none():
+    # BEANR (Antwerp) resolves fine but isn't near either curated target.
+    assert feat.resolve_origin_target_id("BEANR>EGPSD", _TARGETS) is None
+
+
+def test_resolve_origin_target_id_empty_inputs():
+    assert feat.resolve_origin_target_id(None, _TARGETS) is None
+    assert feat.resolve_origin_target_id("NLRTM>EGPSD", pd.DataFrame()) is None
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

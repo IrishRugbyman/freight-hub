@@ -11,8 +11,10 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import duckdb
+import pandas as pd
 import pytest
 from analytics.destination_serving import (
+    _origin_target_by_mmsi,
     _recent_canal_transit_by_mmsi,
     build_destination_predictions,
     run_in_conn,
@@ -120,6 +122,40 @@ def _fake_ais_query(dest: str | None = None):
         return mem.execute(sql, params or []).df()
 
     return q
+
+
+def _live_frame(**overrides) -> pd.DataFrame:
+    base = {"mmsi": 7001, "lat": 29.0, "lon": 32.34, "destination": None}
+    base.update(overrides)
+    return pd.DataFrame([base])
+
+
+_TARGETS_DF = pd.DataFrame(
+    [
+        {"target_id": t[0], "target_type": t[1], "name": t[2], "lat": t[3], "lon": t[4]}
+        for t in _TARGETS
+    ]
+)
+
+
+def test_origin_target_by_mmsi_resolves_cold_start_vessel():
+    live = _live_frame(destination="NLRTM>EGPSD")
+    out = _origin_target_by_mmsi(live, _TARGETS_DF, prev_by_mmsi={})
+    assert out == {7001: "port:rotterdam"}
+
+
+def test_origin_target_by_mmsi_skips_vessel_with_real_history():
+    # A vessel with a mined arrival on record uses that fact, not the AIS string -
+    # never resolved even though its destination string does encode a route.
+    live = _live_frame(destination="NLRTM>EGPSD")
+    out = _origin_target_by_mmsi(live, _TARGETS_DF, prev_by_mmsi={7001: "cp:suez"})
+    assert out == {}
+
+
+def test_origin_target_by_mmsi_no_route_string():
+    live = _live_frame(destination="ROTTERDAM")
+    out = _origin_target_by_mmsi(live, _TARGETS_DF, prev_by_mmsi={})
+    assert out == {}
 
 
 def test_build_destination_predictions_scores_underway_vessel(tmp_path, monkeypatch):

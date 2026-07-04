@@ -23,7 +23,11 @@ from datetime import UTC, datetime, timedelta
 import duckdb
 import pandas as pd
 
-from analytics.destination_features import CANAL_BACKTRACK_WINDOW_DAYS, candidate_frame
+from analytics.destination_features import (
+    CANAL_BACKTRACK_WINDOW_DAYS,
+    candidate_frame,
+    resolve_origin_target_id,
+)
 from analytics.destination_labels import TransitionPriors, VisitFrequency
 from analytics.destination_predict import DestinationModel, score_candidates
 from analytics.eta_labels import ANALYTICS_DB, _default_ais_query
@@ -85,6 +89,30 @@ def _prev_target_by_mmsi(conn: duckdb.DuckDBPyConnection) -> dict[int, str]:
     return {int(r.mmsi): r.target_id for r in df.itertuples()}
 
 
+def _origin_target_by_mmsi(
+    live: pd.DataFrame, targets: pd.DataFrame, prev_by_mmsi: dict[int, str]
+) -> dict[int, str]:
+    """Cold-start fallback for the transition prior's "prev" input.
+
+    Only resolved for vessels absent from `prev_by_mmsi` (no mined arrival
+    history yet, `eta_arrivals` has never seen them) - a vessel with real history
+    always uses that instead, since it's a geometrically-verified fact rather
+    than a hand-typed AIS string. See `destination_features.resolve_origin_target_id`.
+    """
+    out: dict[int, str] = {}
+    for r in live.itertuples():
+        mmsi = int(r.mmsi)
+        if mmsi in prev_by_mmsi:
+            continue
+        dest = getattr(r, "destination", None)
+        if not isinstance(dest, str) or not dest.strip():
+            continue
+        tid = resolve_origin_target_id(dest, targets, float(r.lat), float(r.lon))
+        if tid is not None:
+            out[mmsi] = tid
+    return out
+
+
 def _recent_canal_transit_by_mmsi(conn: duckdb.DuckDBPyConnection, now: datetime) -> dict[int, str]:
     """Each vessel's most recent Suez/Panama transit within the backtrack
     window, keyed by mmsi -> chokepoint. Empty dict (not an error) if
@@ -132,9 +160,14 @@ def build_destination_predictions(
     trans = TransitionPriors.load(conn)
     visits = VisitFrequency.load(conn)
     prev_by_mmsi = _prev_target_by_mmsi(conn)
+    origin_by_mmsi = _origin_target_by_mmsi(live, targets, prev_by_mmsi)
 
     candidates["transition_prior"] = [
-        trans.prior(prev_by_mmsi.get(int(r.mmsi)), r.target_id, r.segment)
+        trans.prior(
+            prev_by_mmsi.get(int(r.mmsi), origin_by_mmsi.get(int(r.mmsi))),
+            r.target_id,
+            r.segment,
+        )
         for r in candidates.itertuples()
     ]
     candidates["visit_freq"] = [

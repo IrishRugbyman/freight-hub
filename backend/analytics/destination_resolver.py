@@ -44,12 +44,43 @@ _FUZZY_CUTOFF = 86.0
 
 # Tokens that carry no destination signal - stripped before name matching so a
 # string that is *only* junk resolves to nothing.
-_JUNK = frozenset({
-    "FOR", "ORDERS", "ORDER", "ORDRES", "VIA", "TBN", "TBC", "TBA", "NIL", "NONE",
-    "UNKNOWN", "NA", "OFFSHORE", "ANCHORAGE", "ANCH", "ROADS", "ROAD", "OPL",
-    "BUNKERING", "BUNKER", "BUNKERS", "PILOT", "STATION", "OUTER", "INNER",
-    "TERMINAL", "BERTH", "JETTY", "DOCK", "PORT", "SEA", "HIGH", "WAITING",
-})
+_JUNK = frozenset(
+    {
+        "FOR",
+        "ORDERS",
+        "ORDER",
+        "ORDRES",
+        "VIA",
+        "TBN",
+        "TBC",
+        "TBA",
+        "NIL",
+        "NONE",
+        "UNKNOWN",
+        "NA",
+        "OFFSHORE",
+        "ANCHORAGE",
+        "ANCH",
+        "ROADS",
+        "ROAD",
+        "OPL",
+        "BUNKERING",
+        "BUNKER",
+        "BUNKERS",
+        "PILOT",
+        "STATION",
+        "OUTER",
+        "INNER",
+        "TERMINAL",
+        "BERTH",
+        "JETTY",
+        "DOCK",
+        "PORT",
+        "SEA",
+        "HIGH",
+        "WAITING",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -60,8 +91,8 @@ class ResolvedPort:
     name: str
     lat: float
     lon: float
-    score: float          # 100 for code/exact-name, WRatio score for fuzzy
-    method: str           # 'locode' | 'name-exact' | 'fuzzy'
+    score: float  # 100 for code/exact-name, WRatio score for fuzzy
+    method: str  # 'locode' | 'name-exact' | 'fuzzy'
 
 
 def _norm(s: str) -> str:
@@ -141,7 +172,12 @@ def _try_locode(s: str) -> str | None:
     toks = n.split()
     if toks and len(toks[0]) == 5 and toks[0] in g.by_locode:
         return toks[0]
-    if len(toks) >= 2 and len(toks[0]) == 2 and len(toks[1]) == 3 and (toks[0] + toks[1]) in g.by_locode:
+    if (
+        len(toks) >= 2
+        and len(toks[0]) == 2
+        and len(toks[1]) == 3
+        and (toks[0] + toks[1]) in g.by_locode
+    ):
         return toks[0] + toks[1]
     return None
 

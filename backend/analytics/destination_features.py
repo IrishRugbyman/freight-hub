@@ -29,7 +29,8 @@ import numpy as np
 import pandas as pd
 
 from analytics.destination_resolver import resolve as resolve_destination
-from analytics.eta_labels import _CHOKEPOINT_GATES, haversine_nm
+from analytics.destination_resolver import resolve_origin
+from analytics.eta_labels import _CHOKEPOINT_GATES, haversine_nm, haversine_nm_vec
 from analytics.eta_serving import _angle_diff, _candidate_pairs
 from analytics.zones import CHOKEPOINT_AXES
 from quant_lib.freight.eta import initial_bearing
@@ -112,6 +113,37 @@ def canal_backtrack(
     if vessel_side == 0 or target_side == 0:
         return 0
     return int((vessel_side > 0) != (target_side > 0))
+
+
+def resolve_origin_target_id(
+    dest_str: str | None,
+    targets: pd.DataFrame,
+    vessel_lat: float | None = None,
+    vessel_lon: float | None = None,
+) -> str | None:
+    """Resolve a route-style AIS destination's ORIGIN leg to a curated `eta_targets`
+    row, or None when there's no origin leg, it doesn't resolve to a real port, or
+    the resolved port isn't near any curated target.
+
+    Used as a cold-start substitute for `prev_target_id` in the transition prior
+    (`destination_labels.TransitionPriors`): a vessel with no mined arrival history
+    yet still often reports where it came from in its AIS string ("NLRTM>USORF"),
+    a real signal the marginal `__any__` fallback otherwise throws away. Reuses
+    `_SAME_PORT_NM` - the same "close enough to be the same place" threshold
+    `candidate_frame` already applies to the reported *destination* leg.
+    """
+    if not isinstance(dest_str, str) or not dest_str.strip() or targets.empty:
+        return None
+    rp = resolve_origin(dest_str, vessel_lat, vessel_lon)
+    if rp is None:
+        return None
+    dists = haversine_nm_vec(
+        targets["lat"].to_numpy(dtype=float), targets["lon"].to_numpy(dtype=float), rp.lat, rp.lon
+    )
+    best = int(np.argmin(dists))
+    if dists[best] > _SAME_PORT_NM:
+        return None
+    return str(targets["target_id"].iloc[best])
 
 
 def _bearing_to_many(lat: float, lon: float, t_lats: np.ndarray, t_lons: np.ndarray) -> np.ndarray:

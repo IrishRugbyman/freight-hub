@@ -8,7 +8,6 @@ headline case that motivated it: "MACAS" is the UN/LOCODE for Casablanca, not ju
 from __future__ import annotations
 
 import pytest
-
 from analytics.destination_resolver import resolve, resolve_origin
 
 
@@ -39,7 +38,7 @@ def test_exact_name_prefers_primary_over_terminal():
 
 
 def test_fuzzy_alias_and_terminal_suffix():
-    assert resolve("ANTWERP").locode == "BEANR"          # English alias
+    assert resolve("ANTWERP").locode == "BEANR"  # English alias
     assert resolve("ROTTERDAM 3E PETROHA").locode == "NLRTM"  # terminal suffix stripped
 
 
