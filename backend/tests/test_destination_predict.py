@@ -356,6 +356,31 @@ def test_build_training_candidates_carries_draught_from_eta_samples(tmp_path):
     assert (cands["draught"] == 15.0).all()
 
 
+def test_prepare_defaults_missing_sog_trail6h_to_none():
+    df = pd.DataFrame(
+        [
+            {
+                "gc_dist_nm": 10.0,
+                "bearing_align": 1.0,
+                "transition_prior": 0.5,
+                "visit_freq": 0.5,
+                "target_type": "port",
+                "segment": "VLCC",
+            }
+        ]
+    )
+    out = dp._prepare(df)
+    assert pd.isna(out["sog_trail6h"].iloc[0])
+
+
+def test_build_training_candidates_carries_sog_trail6h_from_eta_samples(tmp_path):
+    conn = duckdb.connect(str(tmp_path / "an.duckdb"))
+    _seed_voyage_db(conn)
+    cands = dp.build_training_candidates(conn)
+    assert not cands.empty
+    assert (cands["sog_trail6h"] == 12.0).all()
+
+
 def test_train_and_evaluate_runs_and_reports_metrics(tmp_path):
     conn = duckdb.connect(str(tmp_path / "an.duckdb"))
     _seed_voyage_db(conn)

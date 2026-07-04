@@ -31,7 +31,7 @@ from analytics.destination_features import (
 from analytics.destination_labels import TransitionPriors, VisitFrequency
 from analytics.destination_predict import DestinationModel, score_candidates
 from analytics.eta_labels import ANALYTICS_DB, _default_ais_query
-from analytics.eta_serving import _laden_map, _load_live, _load_targets
+from analytics.eta_serving import _laden_map, _load_live, _load_targets, _trailing_speed
 
 log = logging.getLogger(__name__)
 
@@ -151,11 +151,13 @@ def build_destination_predictions(
     if targets.empty or live.empty:
         return pd.DataFrame(columns=_PERSIST_COLS)
 
+    trail_by_mmsi = _trailing_speed(ais_query, live["mmsi"].astype("int64").unique().tolist(), now)
     candidates = candidate_frame(
         live,
         targets,
         recent_canal_transit=_recent_canal_transit_by_mmsi(conn, now),
         laden_by_mmsi=_laden_map(conn),
+        trail_by_mmsi=trail_by_mmsi,
     )
     if candidates.empty:
         return pd.DataFrame(columns=_PERSIST_COLS)

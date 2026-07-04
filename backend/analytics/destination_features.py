@@ -70,6 +70,7 @@ _CANDIDATE_COLS = [
     "canal_backtrack",
     "resolver_score",
     "laden",
+    "sog_trail6h",
 ]
 
 
@@ -180,6 +181,7 @@ def candidate_frame(
     targets: pd.DataFrame,
     recent_canal_transit: dict[int, str] | None = None,
     laden_by_mmsi: dict[int, bool | None] | None = None,
+    trail_by_mmsi: dict[int, float] | None = None,
 ) -> pd.DataFrame:
     """One row per (vessel, candidate target). Empty frame if no live/targets.
 
@@ -197,12 +199,19 @@ def candidate_frame(
     `laden` feature lines up with the same representation at train and serve
     time. Omit or pass `None`/`{}` when unavailable - every candidate then gets
     `laden=None` (absence of signal, not a guess).
+
+    `trail_by_mmsi` maps mmsi -> trailing 6h median SOG (`eta_serving.
+    _trailing_speed`/`eta_samples.sog_trail6h` - a denoised "is this vessel
+    decelerating on approach" signal, stronger than instantaneous `sog` alone).
+    Omit or pass `None`/`{}` when unavailable - every candidate then gets
+    `sog_trail6h=None`.
     """
     if live.empty or targets.empty:
         return pd.DataFrame(columns=_CANDIDATE_COLS)
 
     recent_canal_transit = recent_canal_transit or {}
     laden_by_mmsi = laden_by_mmsi or {}
+    trail_by_mmsi = trail_by_mmsi or {}
     pairs = _candidate_pairs(live, targets)
     by_vessel: dict[int, list[tuple[float, float, float, int]]] = {}
     for vi, lat, lon, gc, ti in pairs:
@@ -222,6 +231,7 @@ def candidate_frame(
             course = float(v.heading)
         chokepoint = recent_canal_transit.get(mmsi)
         laden = laden_by_mmsi.get(mmsi)
+        trail = trail_by_mmsi.get(mmsi)
 
         dest_str = getattr(v, "destination", None)
         rp = None
@@ -257,6 +267,7 @@ def candidate_frame(
                     "canal_backtrack": canal_backtrack(lat, lon, t_lat, t_lon, chokepoint),
                     "resolver_score": float(rp.score) if reported_match else None,
                     "laden": laden,
+                    "sog_trail6h": trail,
                 }
             )
 
@@ -282,6 +293,7 @@ def candidate_frame(
                     "canal_backtrack": canal_backtrack(lat, lon, rp.lat, rp.lon, chokepoint),
                     "resolver_score": float(rp.score),
                     "laden": laden,
+                    "sog_trail6h": trail,
                 }
             )
 

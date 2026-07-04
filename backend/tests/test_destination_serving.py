@@ -195,6 +195,22 @@ def test_build_destination_predictions_wires_live_laden_state(tmp_path, monkeypa
     assert not preds.empty  # ran to completion with a real vessel_state row present
 
 
+def test_build_destination_predictions_wires_live_trailing_speed(tmp_path, monkeypatch):
+    # ais_snapshots (read by eta_serving._trailing_speed) is the live source for
+    # the sog_trail6h feature - confirm it reaches candidate scoring without
+    # crashing when populated.
+    monkeypatch.setattr(
+        "analytics.destination_serving.DestinationModel.load",
+        classmethod(lambda cls, model_dir=None: None),
+    )
+    conn = duckdb.connect(str(tmp_path / "an.duckdb"))
+    _seed_targets(conn)
+    ais_query = _fake_ais_query()
+    ais_query("INSERT INTO ais_snapshots VALUES (?, 7001, 8.0)", [_NOW])
+    preds = build_destination_predictions(conn, ais_query, now=_NOW)
+    assert not preds.empty  # ran to completion with a real ais_snapshots row present
+
+
 def test_build_destination_predictions_adds_reported_destination_candidate(tmp_path):
     conn = duckdb.connect(str(tmp_path / "an.duckdb"))
     _seed_targets(conn)

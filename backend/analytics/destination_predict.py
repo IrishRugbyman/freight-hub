@@ -147,6 +147,7 @@ NUMERIC_FEATURES = [
     "visit_freq",
     "canal_backtrack",
     "draught",
+    "sog_trail6h",
 ]
 CATEGORICAL_FEATURES = ["target_type", "segment", "laden"]
 FEATURES = NUMERIC_FEATURES + CATEGORICAL_FEATURES
@@ -202,6 +203,8 @@ def _prepare(df: pd.DataFrame) -> pd.DataFrame:
         out["laden"] = None
     if "draught" not in out.columns:
         out["draught"] = None
+    if "sog_trail6h" not in out.columns:
+        out["sog_trail6h"] = None
     out = out[FEATURES].copy()
     for col in NUMERIC_FEATURES:
         out[col] = pd.to_numeric(out[col], errors="coerce")
@@ -382,7 +385,7 @@ def build_training_candidates(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     try:
         samples = conn.execute(
             "SELECT voyage_id, mmsi, target_id, target_type, arrival_ts, obs_ts, obs_lat, obs_lon, "
-            "       remaining_h, segment, laden, draught "
+            "       remaining_h, segment, laden, draught, sog_trail6h "
             "FROM eta_samples"
         ).df()
     except duckdb.CatalogException:
@@ -463,6 +466,8 @@ def build_training_candidates(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
             laden = bool(laden_val) if pd.notna(laden_val) else None
             draught_val = grp["draught"].iloc[i]
             draught = float(draught_val) if pd.notna(draught_val) else None
+            trail_val = grp["sog_trail6h"].iloc[i]
+            trail = float(trail_val) if pd.notna(trail_val) else None
             for j in chosen:
                 rows.append(
                     {
@@ -481,6 +486,7 @@ def build_training_candidates(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
                         "segment": seg,
                         "laden": laden,
                         "draught": draught,
+                        "sog_trail6h": trail,
                         "is_destination": int(t_ids[j] == true_target),
                         "prev_target_id": prev_target,
                     }

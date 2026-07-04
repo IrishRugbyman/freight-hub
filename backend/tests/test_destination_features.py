@@ -222,5 +222,22 @@ def test_candidate_frame_defaults_laden_to_none_when_unknown():
     assert cands["laden"].isna().all()
 
 
+# ---------------------------------------------------------------------------
+# sog_trail6h passthrough - mirrors the laden passthrough above.
+# ---------------------------------------------------------------------------
+
+
+def test_candidate_frame_carries_trailing_speed():
+    live = _live_row()
+    cands = feat.candidate_frame(live, _TARGETS, trail_by_mmsi={7001: 8.5})
+    assert (cands["sog_trail6h"] == 8.5).all()
+
+
+def test_candidate_frame_defaults_trailing_speed_to_none_when_unknown():
+    live = _live_row()
+    cands = feat.candidate_frame(live, _TARGETS)
+    assert cands["sog_trail6h"].isna().all()
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
