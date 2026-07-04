@@ -1,5 +1,48 @@
 # Freight Hub Changelog
 
+## 2026-07-04 (session 12) - Destination predictor: route-leg resolver bug fix + reported-origin cold-start prior
+
+**Found and fixed a real correctness bug in the destination predictor's reported-destination
+signal.** `destination_resolver.resolve()` is supposed to resolve the *destination* leg of a
+route-style AIS string ("NLRTM>USORF"), but `_try_locode`'s "first 5-char token" heuristic ran
+on the unsplit string and grabbed the *origin* leg's LOCODE instead - `resolve("NLRTM>USORF")`
+was returning Rotterdam, not Norfolk. This directly corrupted `reported_match`/`resolver_score`
+(the heuristic scorer's "the crew agrees with this candidate" signal) for every two-LOCODE route
+string in the live fleet. Fixed by splitting origin/destination legs first (same arrow/VIA/weak-
+separator cascade as `app/main.py`'s `_canonical_destination`, ported into the analytics layer
+to keep it dependency-free of `app`), then resolving only the relevant leg. Also fixed: "N/A"
+normalizing to "N A" and fuzzy-matching an unrelated port (single-character tokens are now
+dropped before the fuzzy pass), and the gazetteer's `USORF` row, which carried Tasmanian
+coordinates (-42.78, 147.07) instead of Norfolk, VA's (36.85, -76.29) - a coord-fill error
+silently misrouting every Norfolk-bound vessel's reported-destination ETA and candidate.
+
+**New signal: the reported origin as a cold-start transition prior.** A vessel with no mined
+arrival history yet (`eta_arrivals` has never seen it) fell back to the marginal `__any__`
+transition prior, discarding all route information - even though its live AIS string often
+already says where it came from ("NLRTM>USORF"). New `destination_resolver.resolve_origin()` +
+`destination_features.resolve_origin_target_id()` resolve that origin leg to a curated
+`eta_targets` row (within 20nm, the same threshold `reported_match` uses), and
+`destination_serving._origin_target_by_mmsi()` uses it as a substitute `prev_target_id` for the
+transition prior - but only for vessels lacking real arrival history; a vessel with mined history
+always uses that fact instead of a hand-typed string. Serving-only (mirrors how the heuristic
+already gets `reported_match`/`resolver_score` for free while ML's training set excludes them -
+no training-time leakage risk since `build_training_candidates` never touches this).
+
+**Retrained + repromoted:** ml top1 0.680 / top3 0.959 vs heuristic 0.623 / 0.907 (n=39,798 held-out
+observation-groups, up from 38,642 last training run 2026-07-03). Champion/challenger gate
+re-verified the challenger still wins on both top1 and top3; promoted.
+
+**Also:** `/api/vessels` now splits route-style destinations into `origin`/`destination` fields
+(`app/main.py` `_split_route`/`_canonical_origin`) instead of only folding onto the destination
+leg and discarding the origin - the frontend's `VesselDetail.tsx` "Origin" row already existed
+but had been silently rendering nothing since the destination-predictor commit, since the
+backend never actually populated `Vessel.origin` until now.
+
+- Tests: `test_destination_resolver.py` (+7 route-leg/regression cases), `test_destination_features.py`
+  (+4 `resolve_origin_target_id` cases), `test_destination_serving.py` (+3 `_origin_target_by_mmsi`
+  cases), `test_canonical_port.py` (+route-splitting/origin cases for the app-layer display path).
+  Full suite 600 passing.
+
 ## 2026-07-02 (session 11) - Destination-change hysteresis (fixes ETA discontinuity from AIS destination churn)
 
 **Quantified how often destination changes actually break the resolved-destination
