@@ -69,6 +69,7 @@ _CANDIDATE_COLS = [
     "reported_match",
     "canal_backtrack",
     "resolver_score",
+    "laden",
 ]
 
 
@@ -178,6 +179,7 @@ def candidate_frame(
     live: pd.DataFrame,
     targets: pd.DataFrame,
     recent_canal_transit: dict[int, str] | None = None,
+    laden_by_mmsi: dict[int, bool | None] | None = None,
 ) -> pd.DataFrame:
     """One row per (vessel, candidate target). Empty frame if no live/targets.
 
@@ -188,11 +190,19 @@ def candidate_frame(
     vessels with a qualifying recent canal transit on record (see
     `canal_backtrack`); omit or pass `None`/`{}` when that lookup isn't
     available - every candidate then gets the neutral `canal_backtrack=0`.
+
+    `laden_by_mmsi` maps mmsi -> True (laden) / False (ballast) / None (unknown),
+    the exact encoding `eta_serving._laden_map` and `eta_labels._laden_bool`
+    already use for True ETA - reused as-is so the destination predictor's
+    `laden` feature lines up with the same representation at train and serve
+    time. Omit or pass `None`/`{}` when unavailable - every candidate then gets
+    `laden=None` (absence of signal, not a guess).
     """
     if live.empty or targets.empty:
         return pd.DataFrame(columns=_CANDIDATE_COLS)
 
     recent_canal_transit = recent_canal_transit or {}
+    laden_by_mmsi = laden_by_mmsi or {}
     pairs = _candidate_pairs(live, targets)
     by_vessel: dict[int, list[tuple[float, float, float, int]]] = {}
     for vi, lat, lon, gc, ti in pairs:
@@ -211,6 +221,7 @@ def candidate_frame(
         elif pd.notna(getattr(v, "heading", None)):
             course = float(v.heading)
         chokepoint = recent_canal_transit.get(mmsi)
+        laden = laden_by_mmsi.get(mmsi)
 
         dest_str = getattr(v, "destination", None)
         rp = None
@@ -245,6 +256,7 @@ def candidate_frame(
                     "reported_match": reported_match,
                     "canal_backtrack": canal_backtrack(lat, lon, t_lat, t_lon, chokepoint),
                     "resolver_score": float(rp.score) if reported_match else None,
+                    "laden": laden,
                 }
             )
 
@@ -269,6 +281,7 @@ def candidate_frame(
                     "reported_match": True,
                     "canal_backtrack": canal_backtrack(lat, lon, rp.lat, rp.lon, chokepoint),
                     "resolver_score": float(rp.score),
+                    "laden": laden,
                 }
             )
 

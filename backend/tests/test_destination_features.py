@@ -204,5 +204,23 @@ def test_resolve_origin_target_id_empty_inputs():
     assert feat.resolve_origin_target_id("NLRTM>EGPSD", pd.DataFrame()) is None
 
 
+# ---------------------------------------------------------------------------
+# laden/ballast passthrough - candidate_frame carries the per-vessel laden
+# state (True ETA's own True/False/None encoding) onto every candidate row.
+# ---------------------------------------------------------------------------
+
+
+def test_candidate_frame_carries_laden_state():
+    live = _live_row()
+    cands = feat.candidate_frame(live, _TARGETS, laden_by_mmsi={7001: True})
+    assert (cands["laden"] == True).all()  # noqa: E712
+
+
+def test_candidate_frame_defaults_laden_to_none_when_unknown():
+    live = _live_row()
+    cands = feat.candidate_frame(live, _TARGETS)
+    assert cands["laden"].isna().all()
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

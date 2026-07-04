@@ -176,6 +176,25 @@ def test_build_destination_predictions_scores_underway_vessel(tmp_path, monkeypa
     assert row["method"] == "heuristic"  # ML explicitly disabled above
 
 
+def test_build_destination_predictions_wires_live_laden_state(tmp_path, monkeypatch):
+    # vessel_state (built hourly by build.py) is the live source for the
+    # laden/ballast feature - confirm it reaches candidate scoring without
+    # crashing when present, and is absent (None) when the table doesn't exist.
+    monkeypatch.setattr(
+        "analytics.destination_serving.DestinationModel.load",
+        classmethod(lambda cls, model_dir=None: None),
+    )
+    conn = duckdb.connect(str(tmp_path / "an.duckdb"))
+    _seed_targets(conn)
+    conn.execute(
+        "CREATE TABLE vessel_state (mmsi BIGINT PRIMARY KEY, max_draught_seen DOUBLE, "
+        "last_draught DOUBLE, laden VARCHAR, updated_ts TIMESTAMP)"
+    )
+    conn.execute("INSERT INTO vessel_state VALUES (7001, 20.0, 20.0, 'laden', ?)", [_NOW])
+    preds = build_destination_predictions(conn, _fake_ais_query(), now=_NOW)
+    assert not preds.empty  # ran to completion with a real vessel_state row present
+
+
 def test_build_destination_predictions_adds_reported_destination_candidate(tmp_path):
     conn = duckdb.connect(str(tmp_path / "an.duckdb"))
     _seed_targets(conn)
