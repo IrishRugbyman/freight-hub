@@ -1,5 +1,29 @@
 # Freight Hub Changelog
 
+## 2026-07-04 (session 13) - Destination predictor: laden/ballast feature
+
+**A laden crude tanker heads to a discharge port, a ballast one to a load port - a strong
+signal the destination predictor's ML challenger never saw.** True ETA already computes a
+leakage-free laden classification per observation (`eta_labels._laden_bool`, draught-ratio
+against the vessel's own historical max, `True`/`False`/`None`), persisted straight into
+`eta_samples.laden`; the live equivalent already exists too (`vessel_state.laden`, read via
+`eta_serving._laden_map`). Neither had ever been wired into the destination predictor, even
+though `destination_features.candidate_frame` already carried `draught` per candidate unused.
+
+Wired both sources through, reusing the exact `True`/`False`/`None` encoding at both ends so
+train and serve line up: `candidate_frame` gained a `laden_by_mmsi` param (sourced from
+`_laden_map` at serving time), and `destination_predict.build_training_candidates` now selects
+`eta_samples.laden` directly. `laden` joins `target_type`/`segment` in `CATEGORICAL_FEATURES` -
+ML-only, since the heuristic scorer has no hand-built model of which ports are load-only vs
+discharge-only to weight it against.
+
+**Retrained + repromoted:** ml top1 0.680 / top3 0.961 (n=39,850), up from 0.680/0.959 without
+`laden` two days ago at n=39,798, and still clear of heuristic (0.622/0.908). Champion/challenger
+gate re-verified the challenger still wins on both top1 and top3; promoted.
+
+- Tests: `test_destination_features.py` (+2 `laden` passthrough cases), `test_destination_serving.py`
+  (+1 `vessel_state` wiring case). Full suite 603 passing.
+
 ## 2026-07-04 (session 12) - Destination predictor: route-leg resolver bug fix + reported-origin cold-start prior
 
 **Found and fixed a real correctness bug in the destination predictor's reported-destination
