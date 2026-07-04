@@ -1,5 +1,33 @@
 # Freight Hub Changelog
 
+## 2026-07-04 (session 15) - Destination predictor: trailing-speed (deceleration) feature
+
+**A vessel slowing down while pointed at a candidate is committing to arrival there - a stronger
+signal than static bearing/distance, and True ETA already computes it.** `eta_serving.
+_trailing_speed` (live) and `eta_samples.sog_trail6h` (training) are a rolling 6-hour median SOG
+(`_TRAIL_H = 6.0`), a denoised deceleration-on-approach signal True ETA's own ML has used for
+some time. Neither had reached the destination predictor - unlike `draught` (already sitting
+unused in `candidate_frame`), this one needed real serving-side plumbing since
+`destination_serving.py` never touched the trailing-speed scan at all.
+
+Wired in the same shape as `laden`/`draught` before it: `destination_features.candidate_frame`
+gained a `trail_by_mmsi` param (mirrors `laden_by_mmsi`), `destination_serving.py` now calls
+`eta_serving._trailing_speed` directly - reusing True ETA's already-computed scan rather than a
+second independent pass over `ais_snapshots` - and `destination_predict.py` added `sog_trail6h`
+to `NUMERIC_FEATURES` plus the training SQL `SELECT` and per-row candidate construction. ML-only
+(same rationale as `laden`/`draught`).
+
+**Retrained + repromoted:** ml top1 0.6803 / top3 0.9608 (n=39,909), essentially flat against
+0.6803/0.9609 without `sog_trail6h` earlier today (n=39,850) - the signal didn't move accuracy at
+this training-set size, but it's cheap, already-computed, and physically well-motivated, so it
+stays in rather than being reverted; a fresh angle (kinematics rather than geometry/history) may
+pay off more as the training set grows. Still clear of heuristic (0.624/0.907). Champion/
+challenger gate re-verified the challenger still wins on both top1 and top3; promoted.
+
+- Tests: `test_destination_features.py` (+2: `sog_trail6h` passthrough/default-None cases),
+  `test_destination_predict.py` (+2: `_prepare` default, training-candidate carry-through),
+  `test_destination_serving.py` (+1: live `ais_snapshots` wiring case). Full suite 610 passing.
+
 ## 2026-07-04 (session 14) - Destination predictor: draught feature
 
 **A VLCC can't call at a shallow terminal, laden or not - a vessel-size/depth signal the ML
