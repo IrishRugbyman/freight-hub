@@ -211,6 +211,23 @@ def test_build_destination_predictions_wires_live_trailing_speed(tmp_path, monke
     assert not preds.empty  # ran to completion with a real ais_snapshots row present
 
 
+def test_build_destination_predictions_wires_route_cache(tmp_path, monkeypatch):
+    # eta_route_cache (shared with True ETA's own build_predictions) is the
+    # sea-route-distance source - confirm it reaches candidate scoring without
+    # crashing, and that a real eta_route_cache row was written back (the
+    # flush() side effect this function now has).
+    monkeypatch.setattr(
+        "analytics.destination_serving.DestinationModel.load",
+        classmethod(lambda cls, model_dir=None: None),
+    )
+    conn = duckdb.connect(str(tmp_path / "an.duckdb"))
+    _seed_targets(conn)
+    preds = build_destination_predictions(conn, _fake_ais_query(), now=_NOW)
+    assert not preds.empty
+    n_cached = conn.execute("SELECT count(*) FROM eta_route_cache").fetchone()[0]
+    assert n_cached > 0
+
+
 def test_build_destination_predictions_adds_reported_destination_candidate(tmp_path):
     conn = duckdb.connect(str(tmp_path / "an.duckdb"))
     _seed_targets(conn)

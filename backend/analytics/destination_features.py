@@ -31,6 +31,7 @@ import pandas as pd
 from analytics.destination_resolver import resolve as resolve_destination
 from analytics.destination_resolver import resolve_origin
 from analytics.eta_labels import _CHOKEPOINT_GATES, haversine_nm, haversine_nm_vec
+from analytics.eta_routing import RouteCache, snap_cell
 from analytics.eta_serving import _angle_diff, _candidate_pairs
 from analytics.zones import CHOKEPOINT_AXES
 from quant_lib.freight.eta import initial_bearing
@@ -71,7 +72,27 @@ _CANDIDATE_COLS = [
     "resolver_score",
     "laden",
     "sog_trail6h",
+    "route_dist_nm",
 ]
+
+
+def _route_dist(
+    cache: RouteCache | None, lat: float, lon: float, gc_fix: float, target: dict
+) -> float | None:
+    """Sea-route distance for one (fix, target) pair, or None if `cache` is absent.
+
+    Mirrors `eta_serving.build_predictions`'s own cell-to-fix correction: the
+    cache is keyed on the snapped grid cell (`RouteCache.distance`), so the
+    routed value is adjusted back to the vessel's exact position by the
+    cell-to-fix great-circle delta, floored at the fix's own great-circle
+    distance (a sea route can never be shorter than that).
+    """
+    if cache is None:
+        return None
+    clat, clon = snap_cell(lat, lon)
+    cell_route, _method = cache.distance(lat, lon, target)
+    gc_cell = haversine_nm(clat, clon, target["lat"], target["lon"])
+    return max(cell_route - gc_cell + gc_fix, gc_fix)
 
 
 def bearing_alignment(
@@ -182,6 +203,7 @@ def candidate_frame(
     recent_canal_transit: dict[int, str] | None = None,
     laden_by_mmsi: dict[int, bool | None] | None = None,
     trail_by_mmsi: dict[int, float] | None = None,
+    route_cache: RouteCache | None = None,
 ) -> pd.DataFrame:
     """One row per (vessel, candidate target). Empty frame if no live/targets.
 
@@ -205,6 +227,15 @@ def candidate_frame(
     decelerating on approach" signal, stronger than instantaneous `sog` alone).
     Omit or pass `None`/`{}` when unavailable - every candidate then gets
     `sog_trail6h=None`.
+
+    `route_cache` is an `eta_routing.RouteCache` (already loaded from
+    `eta_route_cache` by the caller, who also owns flushing it back) - reused
+    as-is so a sea-route distance costs a cache lookup, not a fresh `searoute`
+    call, whenever `eta_serving`'s own pass already routed the same (cell,
+    target) pair moments earlier in the same hourly build. Omit or pass `None`
+    when unavailable (e.g. in unit tests) - every candidate then gets
+    `route_dist_nm=None`, degrading to the caller's own `gc_dist_nm` fallback
+    (mirrors every other optional signal in this module).
     """
     if live.empty or targets.empty:
         return pd.DataFrame(columns=_CANDIDATE_COLS)
@@ -247,6 +278,7 @@ def candidate_frame(
             )
             if reported_match:
                 matched_reported = True
+            target_dict = {"target_id": str(t["target_id"]), "lat": t_lat, "lon": t_lon}
             rows.append(
                 {
                     "mmsi": mmsi,
@@ -268,11 +300,13 @@ def candidate_frame(
                     "resolver_score": float(rp.score) if reported_match else None,
                     "laden": laden,
                     "sog_trail6h": trail,
+                    "route_dist_nm": _route_dist(route_cache, lat, lon, float(gc), target_dict),
                 }
             )
 
         if rp is not None and not matched_reported:
             gc_r = haversine_nm(lat, lon, rp.lat, rp.lon)
+            dest_target = {"target_id": f"dest:{rp.locode}", "lat": rp.lat, "lon": rp.lon}
             rows.append(
                 {
                     "mmsi": mmsi,
@@ -294,6 +328,7 @@ def candidate_frame(
                     "resolver_score": float(rp.score),
                     "laden": laden,
                     "sog_trail6h": trail,
+                    "route_dist_nm": _route_dist(route_cache, lat, lon, gc_r, dest_target),
                 }
             )
 

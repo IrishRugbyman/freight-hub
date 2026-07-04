@@ -7,9 +7,11 @@ a geometric candidate that is already the same real place.
 
 from __future__ import annotations
 
+import duckdb
 import pandas as pd
 import pytest
 from analytics import destination_features as feat
+from analytics.eta_routing import RouteCache
 
 _TARGETS = pd.DataFrame(
     [
@@ -237,6 +239,27 @@ def test_candidate_frame_defaults_trailing_speed_to_none_when_unknown():
     live = _live_row()
     cands = feat.candidate_frame(live, _TARGETS)
     assert cands["sog_trail6h"].isna().all()
+
+
+# ---------------------------------------------------------------------------
+# route_dist_nm - sea-route-corrected distance via a shared eta_route_cache.
+# ---------------------------------------------------------------------------
+
+
+def test_candidate_frame_populates_route_dist_nm_when_cache_given(tmp_path):
+    conn = duckdb.connect(str(tmp_path / "an.duckdb"))
+    cache = RouteCache(conn)
+    live = _live_row()  # steaming due north, straight at the Suez gate
+    cands = feat.candidate_frame(live, _TARGETS, route_cache=cache)
+    suez = cands[cands["target_id"] == "cp:suez"].iloc[0]
+    # A sea route can never be shorter than the great-circle distance.
+    assert suez["route_dist_nm"] >= suez["gc_dist_nm"]
+
+
+def test_candidate_frame_defaults_route_dist_nm_to_none_without_cache():
+    live = _live_row()
+    cands = feat.candidate_frame(live, _TARGETS)
+    assert cands["route_dist_nm"].isna().all()
 
 
 if __name__ == "__main__":

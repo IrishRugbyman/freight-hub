@@ -59,8 +59,9 @@ from analytics.destination_labels import (
     build_transitions,
     build_visit_freq,
 )
-from analytics.eta_labels import ANALYTICS_DB, haversine_nm_vec
+from analytics.eta_labels import ANALYTICS_DB, haversine_nm, haversine_nm_vec
 from analytics.eta_ml import time_voyage_split
+from analytics.eta_routing import RouteCache, snap_cell
 from quant_lib.freight.eta import initial_bearing
 
 log = logging.getLogger(__name__)
@@ -148,6 +149,7 @@ NUMERIC_FEATURES = [
     "canal_backtrack",
     "draught",
     "sog_trail6h",
+    "route_dist_nm",
 ]
 CATEGORICAL_FEATURES = ["target_type", "segment", "laden"]
 FEATURES = NUMERIC_FEATURES + CATEGORICAL_FEATURES
@@ -205,6 +207,8 @@ def _prepare(df: pd.DataFrame) -> pd.DataFrame:
         out["draught"] = None
     if "sog_trail6h" not in out.columns:
         out["sog_trail6h"] = None
+    if "route_dist_nm" not in out.columns:
+        out["route_dist_nm"] = None
     out = out[FEATURES].copy()
     for col in NUMERIC_FEATURES:
         out[col] = pd.to_numeric(out[col], errors="coerce")
@@ -403,6 +407,10 @@ def build_training_candidates(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     t_ids = targets["target_id"].to_numpy(dtype=object)
     t_types = targets["target_type"].to_numpy(dtype=object)
     canal_transits = _load_canal_transits(conn)
+    # Shared with eta_serving/destination_serving's own RouteCache instances via
+    # the same on-disk eta_route_cache table - a (cell, target) pair routed by
+    # either the live build or a prior training run is a free hit here.
+    route_cache = RouteCache(conn)
 
     arrivals = _load_arrivals_with_prev(conn)
     prev_map = (
@@ -468,7 +476,16 @@ def build_training_candidates(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
             draught = float(draught_val) if pd.notna(draught_val) else None
             trail_val = grp["sog_trail6h"].iloc[i]
             trail = float(trail_val) if pd.notna(trail_val) else None
+            clat, clon = snap_cell(lat, lon)
             for j in chosen:
+                target_dict = {
+                    "target_id": str(t_ids[j]),
+                    "lat": float(t_lat[j]),
+                    "lon": float(t_lon[j]),
+                }
+                cell_route, _method = route_cache.distance(lat, lon, target_dict)
+                gc_cell = haversine_nm(clat, clon, target_dict["lat"], target_dict["lon"])
+                route_dist = max(cell_route - gc_cell + float(gc[j]), float(gc[j]))
                 rows.append(
                     {
                         "voyage_id": vid,
@@ -487,11 +504,13 @@ def build_training_candidates(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
                         "laden": laden,
                         "draught": draught,
                         "sog_trail6h": trail,
+                        "route_dist_nm": route_dist,
                         "is_destination": int(t_ids[j] == true_target),
                         "prev_target_id": prev_target,
                     }
                 )
 
+    route_cache.flush()
     return pd.DataFrame(rows)
 
 

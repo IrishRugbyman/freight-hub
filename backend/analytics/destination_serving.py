@@ -31,6 +31,7 @@ from analytics.destination_features import (
 from analytics.destination_labels import TransitionPriors, VisitFrequency
 from analytics.destination_predict import DestinationModel, score_candidates
 from analytics.eta_labels import ANALYTICS_DB, _default_ais_query
+from analytics.eta_routing import RouteCache
 from analytics.eta_serving import _laden_map, _load_live, _load_targets, _trailing_speed
 
 log = logging.getLogger(__name__)
@@ -143,7 +144,10 @@ def build_destination_predictions(
     """Score every live underway vessel's candidate destinations.
 
     Returns a frame ready for `persist_destination_predictions` (top `_TOP_K`
-    ranked rows per vessel). Pure read of the AIS DB via the injected `ais_query`.
+    ranked rows per vessel). Pure read of the AIS DB via the injected `ais_query`;
+    the one write is the route cache flush (`eta_route_cache`, shared with True
+    ETA - see `eta_routing.RouteCache`), the same side effect `eta_serving.
+    build_predictions` already has.
     """
     now = now or datetime.now(UTC).replace(tzinfo=None, microsecond=0)
     targets = _load_targets(conn)
@@ -152,13 +156,21 @@ def build_destination_predictions(
         return pd.DataFrame(columns=_PERSIST_COLS)
 
     trail_by_mmsi = _trailing_speed(ais_query, live["mmsi"].astype("int64").unique().tolist(), now)
+    # Same connection True ETA's own build_predictions just used moments earlier
+    # in this hourly build - most (cell, target) pairs are already warm cache
+    # hits, not fresh searoute calls. Flushed at the end so newly-routed cells
+    # (e.g. resolved AIS destinations outside the curated eta_targets universe)
+    # persist for the next hourly run and for destination_predict's training pass.
+    route_cache = RouteCache(conn)
     candidates = candidate_frame(
         live,
         targets,
         recent_canal_transit=_recent_canal_transit_by_mmsi(conn, now),
         laden_by_mmsi=_laden_map(conn),
         trail_by_mmsi=trail_by_mmsi,
+        route_cache=route_cache,
     )
+    route_cache.flush()
     if candidates.empty:
         return pd.DataFrame(columns=_PERSIST_COLS)
 
