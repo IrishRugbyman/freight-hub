@@ -328,6 +328,34 @@ def test_prepare_defaults_missing_canal_backtrack_to_zero():
     assert out["canal_backtrack"].iloc[0] == 0
 
 
+def test_prepare_defaults_missing_draught_to_none():
+    # Mirrors test_prepare_defaults_missing_canal_backtrack_to_zero: a hand-built
+    # test frame may not carry draught at all - _prepare must not KeyError, and
+    # must treat it as missing (NaN), not a fabricated value.
+    df = pd.DataFrame(
+        [
+            {
+                "gc_dist_nm": 10.0,
+                "bearing_align": 1.0,
+                "transition_prior": 0.5,
+                "visit_freq": 0.5,
+                "target_type": "port",
+                "segment": "VLCC",
+            }
+        ]
+    )
+    out = dp._prepare(df)
+    assert pd.isna(out["draught"].iloc[0])
+
+
+def test_build_training_candidates_carries_draught_from_eta_samples(tmp_path):
+    conn = duckdb.connect(str(tmp_path / "an.duckdb"))
+    _seed_voyage_db(conn)
+    cands = dp.build_training_candidates(conn)
+    assert not cands.empty
+    assert (cands["draught"] == 15.0).all()
+
+
 def test_train_and_evaluate_runs_and_reports_metrics(tmp_path):
     conn = duckdb.connect(str(tmp_path / "an.duckdb"))
     _seed_voyage_db(conn)
