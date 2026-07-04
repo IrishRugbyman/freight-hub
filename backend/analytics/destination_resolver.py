@@ -98,6 +98,39 @@ def _gazetteer() -> _Gazetteer:
     return _Gazetteer()
 
 
+# Route-style AIS destinations encode "ORIGIN>DESTINATION" (e.g. "NLRTM>USORF").
+# Arrow separators are trusted unconditionally; the weak ones ("/", " - ", " TO ")
+# only split when both legs look like a real port (>= 3 chars) so "N/A" is not
+# mistaken for a route. "VIA" is special: "DEST VIA WAYPOINT" - the leg before
+# VIA is the destination and there is no origin (the rest is a routing waypoint).
+_ROUTE_ARROW_SEPS = ("<>", ">>", "=>", "->", ">")
+_ROUTE_WEAK_SEPS = (" TO ", " - ", "/")
+
+
+def _split_route(raw: str) -> tuple[str | None, str]:
+    """Split a raw AIS destination into ``(origin_raw, dest_raw)``.
+
+    Returns ``(None, raw)`` when no route separator is present (a plain single
+    port, or a "DEST VIA WAYPOINT" string, which has a destination but no origin).
+    """
+    up = raw.strip().upper()
+    if " VIA " in up:
+        return None, up.split(" VIA ", 1)[0].strip()
+    for sep in _ROUTE_ARROW_SEPS:
+        if sep in up:
+            parts = [p.strip() for p in up.split(sep) if p.strip()]
+            if len(parts) >= 2:
+                return parts[0], parts[-1]
+            if len(parts) == 1:
+                return None, parts[0]
+    for sep in _ROUTE_WEAK_SEPS:
+        if sep in up:
+            parts = [p.strip() for p in up.split(sep) if len(p.strip()) >= 3]
+            if len(parts) >= 2:
+                return parts[0], parts[-1]
+    return None, up
+
+
 def _try_locode(s: str) -> str | None:
     """A valid 5-char UN/LOCODE embedded in the string ("NLRTM", "NL RTM", leading token)."""
     g = _gazetteer()
@@ -128,30 +161,24 @@ def _nearest(rows: list[tuple[str, str, float, float]], lat: float | None, lon: 
     return min(rows, key=lambda r: _haversine_nm(lat, lon, r[2], r[3]))
 
 
-def resolve(
-    destination: str | None,
-    vessel_lat: float | None = None,
-    vessel_lon: float | None = None,
-    fuzzy_cutoff: float = _FUZZY_CUTOFF,
+def _resolve_leg(
+    leg: str,
+    vessel_lat: float | None,
+    vessel_lon: float | None,
+    fuzzy_cutoff: float,
 ) -> ResolvedPort | None:
-    """Resolve an AIS destination string to a `ResolvedPort`, or None if unresolvable.
-
-    `vessel_lat`/`vessel_lon` (optional) disambiguate same-name ports by proximity.
-    Returns None for empty/junk strings and for names below the fuzzy cutoff - a
-    deliberate non-answer rather than a low-confidence guess.
-    """
-    if not isinstance(destination, str) or not destination.strip():
-        return None
+    """Resolve one already-split route leg (a plain port string, no route noise)."""
     g = _gazetteer()
 
-    lc = _try_locode(destination)
+    lc = _try_locode(leg)
     if lc:
         name, lat, lon = g.by_locode[lc]
         return ResolvedPort(lc, name, lat, lon, 100.0, "locode")
 
-    # Strip route noise: keep the leg after a route arrow, drop anything after VIA.
-    q = re.split(r"\bVIA\b", _norm(destination))[0].split(">")[-1].strip()
-    toks = [t for t in q.split() if t not in _JUNK]
+    # Single-char tokens carry no name signal (real port names are never one
+    # letter) - dropping them stops junk like "N/A" ("N A" once normalized)
+    # from fuzzy-matching some unrelated short port name.
+    toks = [t for t in _norm(leg).split() if t not in _JUNK and len(t) >= 2]
     if not toks:
         return None
     query = " ".join(toks)
@@ -167,3 +194,43 @@ def resolve(
     rows = [g._name_rows[c[2]] for c in cands if c[1] >= top - 1]
     locode, name, lat, lon = _nearest(rows, vessel_lat, vessel_lon)
     return ResolvedPort(locode, name, lat, lon, top, "fuzzy")
+
+
+def resolve(
+    destination: str | None,
+    vessel_lat: float | None = None,
+    vessel_lon: float | None = None,
+    fuzzy_cutoff: float = _FUZZY_CUTOFF,
+) -> ResolvedPort | None:
+    """Resolve an AIS destination string to a `ResolvedPort`, or None if unresolvable.
+
+    A route-style string ("ORIGIN>DESTINATION") resolves its *destination* leg
+    only - see `resolve_origin` for the other leg. `vessel_lat`/`vessel_lon`
+    (optional) disambiguate same-name ports by proximity. Returns None for
+    empty/junk strings and for names below the fuzzy cutoff - a deliberate
+    non-answer rather than a low-confidence guess.
+    """
+    if not isinstance(destination, str) or not destination.strip():
+        return None
+    _, dest_leg = _split_route(destination)
+    return _resolve_leg(dest_leg, vessel_lat, vessel_lon, fuzzy_cutoff)
+
+
+def resolve_origin(
+    destination: str | None,
+    vessel_lat: float | None = None,
+    vessel_lon: float | None = None,
+    fuzzy_cutoff: float = _FUZZY_CUTOFF,
+) -> ResolvedPort | None:
+    """Resolve the ORIGIN leg of a route-style AIS destination ("ORIGIN>DEST").
+
+    Returns None when the string encodes no origin (a plain single port, a
+    "DEST VIA WAYPOINT" string, or unresolvable junk) - a real absence of
+    signal, not a guess.
+    """
+    if not isinstance(destination, str) or not destination.strip():
+        return None
+    origin_leg, _ = _split_route(destination)
+    if origin_leg is None:
+        return None
+    return _resolve_leg(origin_leg, vessel_lat, vessel_lon, fuzzy_cutoff)

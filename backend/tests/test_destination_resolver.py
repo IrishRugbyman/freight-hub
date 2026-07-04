@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from analytics.destination_resolver import resolve
+from analytics.destination_resolver import resolve, resolve_origin
 
 
 def test_locode_exact():
@@ -76,6 +76,54 @@ def test_score_and_method_fields():
     assert r.score == 100.0 and r.method == "locode"
     fuzzy = resolve("ANTWERP")
     assert fuzzy.method == "fuzzy" and 86.0 <= fuzzy.score <= 100.0
+
+
+# ---------------------------------------------------------------------------
+# Route-style destinations ("ORIGIN>DESTINATION"): resolve() must resolve the
+# DESTINATION leg (a regression - it used to pick up the origin leg's LOCODE
+# via _try_locode's first-token heuristic), and resolve_origin() the other.
+# ---------------------------------------------------------------------------
+
+
+def test_route_resolves_destination_leg_not_origin():
+    r = resolve("NLRTM>USORF")
+    assert r is not None and r.locode == "USORF" and "Norfolk" in r.name
+
+
+def test_route_resolve_origin_leg():
+    r = resolve_origin("NLRTM>USORF")
+    assert r is not None and r.locode == "NLRTM" and "Rotterdam" in r.name
+
+
+def test_route_double_arrow_and_arrow_variants():
+    assert resolve("BEANR>>NLRTM").locode == "NLRTM"
+    assert resolve_origin("BEANR>>NLRTM").locode == "BEANR"
+    assert resolve("BEANR->NLRTM").locode == "NLRTM"
+
+
+def test_plain_port_has_no_origin():
+    assert resolve_origin("ROTTERDAM") is None
+    assert resolve_origin("NLRTM") is None
+    assert resolve_origin("FOR ORDERS") is None
+
+
+def test_via_waypoint_destination_leg_has_no_origin():
+    assert resolve("ROTTERDAM VIA DOVER").locode == "NLRTM"
+    assert resolve_origin("ROTTERDAM VIA DOVER") is None
+
+
+def test_weak_separator_na_stays_unresolved():
+    # "N/A" must not fuzzy-match some unrelated short port name.
+    assert resolve("N/A") is None
+    assert resolve_origin("N/A") is None
+
+
+def test_norfolk_locode_has_correct_coordinates():
+    # Regression: the gazetteer once carried USORF at Tasmanian coordinates
+    # (a coord-fill error), silently misrouting every Norfolk, VA-bound vessel.
+    r = resolve("USORF")
+    assert r is not None
+    assert 35.0 < r.lat < 38.0 and -78.0 < r.lon < -75.0
 
 
 if __name__ == "__main__":
