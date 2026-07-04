@@ -9,7 +9,9 @@ tests/test_canonical_port.py
 tests/test_detect.py
 tests/test_endpoints.py
 tests/test_eta.py
+tests/test_eta_canal_queue.py
 tests/test_eta_drift.py
+tests/test_eta_ml.py
 tests/test_eta_serving.py
 tests/test_flags.py
 tests/test_fleet.py

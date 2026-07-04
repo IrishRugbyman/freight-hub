@@ -72,3 +72,67 @@ def test_unknown_locode_does_not_false_match():
     # Spaced and unspaced forms of an uncurated LOCODE still merge, but no city
     # name is fabricated (stays the raw LOCODE, not "Shanghai").
     assert _canonical_port("CN SHA") == _canonical_port("CNSHA") == "CNSHA"
+
+
+# ---------------------------------------------------------------------------
+# Route-style destinations ("ORIGIN>DESTINATION") and origin extraction.
+# ---------------------------------------------------------------------------
+
+from app.main import _canonical_destination, _canonical_origin, _split_route
+
+
+@pytest.mark.parametrize(
+    "raw,dest",
+    [
+        ("NLRTM>USORF", "Norfolk"),
+        ("NL RTM > US ORF", "Norfolk"),
+        ("BEANR>NLRTM", "Rotterdam"),
+        ("US TXT>>BE ANR", "Antwerp"),
+        ("FR LEH>>NL RTM", "Rotterdam"),
+        ("NLRTM=>NOMON", None),            # NOMON uncurated -> title-cased, still a value
+        ("GBFXT->NLRTM", "Rotterdam"),
+        ("SGSIN > GBSOU", "Southampton"),
+        ("SOUTHAMPTON<>E-COWES", None),    # shuttle: dest leg E-COWES uncurated
+    ],
+)
+def test_route_destination_leg(raw, dest):
+    out = _canonical_destination(raw)
+    if dest is None:
+        # uncurated leg: must still produce a non-empty cleaned label, not crash
+        assert out is not None and out != ""
+    else:
+        assert out == dest
+
+
+@pytest.mark.parametrize(
+    "raw,origin",
+    [
+        ("NLRTM>USORF", "Rotterdam"),
+        ("BEANR>NLRTM", "Antwerp"),
+        ("FR LEH>>NL RTM", "Le Havre"),
+        ("SGSIN > GBSOU", "Singapore"),
+        ("ROTTERDAM", None),               # plain port: no origin
+        ("NLRTM", None),
+        ("FOR ORDERS", None),
+    ],
+)
+def test_route_origin_leg(raw, origin):
+    assert _canonical_origin(raw) == origin
+
+
+def test_via_waypoint_is_not_origin():
+    # "DEST VIA WAYPOINT": destination is the leg before VIA, no origin.
+    assert _canonical_destination("ROTTERDAM VIA DOVER") == "Rotterdam"
+    assert _canonical_origin("ROTTERDAM VIA DOVER") is None
+
+
+def test_weak_separator_guards_against_na():
+    # "/" with sub-3-char legs must NOT be parsed as a route ("N/A" -> junk).
+    assert _split_route("N/A") == (None, "N/A")
+    assert _canonical_destination("N/A") is None
+
+
+def test_plain_port_unchanged_through_route_layer():
+    assert _canonical_destination("NLRTM") == "Rotterdam"
+    assert _canonical_destination("ROTTERDAM 3E PETROHA") == "Rotterdam"
+    assert _canonical_origin("NLRTM") is None

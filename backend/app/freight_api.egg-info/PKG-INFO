@@ -13,6 +13,7 @@ Requires-Dist: searoute>=1.6.0
 Requires-Dist: lightgbm>=4.0
 Requires-Dist: market-data
 Requires-Dist: quant-lib
+Requires-Dist: rapidfuzz>=3.14.5
 Provides-Extra: dev
 Requires-Dist: pytest>=8.0; extra == "dev"
 Requires-Dist: pytest-cov>=5.0; extra == "dev"

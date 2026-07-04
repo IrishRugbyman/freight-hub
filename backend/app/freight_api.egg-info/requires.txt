@@ -9,6 +9,7 @@ searoute>=1.6.0
 lightgbm>=4.0
 market-data
 quant-lib
+rapidfuzz>=3.14.5
 
 [dev]
 pytest>=8.0

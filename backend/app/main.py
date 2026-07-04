@@ -400,6 +400,59 @@ def _canonical_port(raw: str | None) -> str | None:
     return norm.title()
 
 
+# Route-style AIS destinations encode "ORIGIN>DESTINATION" (e.g. "NLRTM>USORF").
+# Arrow separators are trusted unconditionally; the weak ones ("/", " - ", " TO ")
+# only split when both legs look like a real port (>= 3 chars) so "N/A" is not
+# mistaken for a route. "VIA" is special: "DEST VIA WAYPOINT" - the leg before
+# VIA is the destination and there is no origin (the rest is a routing waypoint).
+_ROUTE_ARROW_SEPS = ("<>", ">>", "=>", "->", ">")
+_ROUTE_WEAK_SEPS = (" TO ", " - ", "/")
+
+
+def _split_route(raw: str | None) -> tuple[str | None, str | None]:
+    """Split a raw AIS destination into ``(origin_raw, dest_raw)``.
+
+    Returns ``(None, raw)`` when no route separator is present (a plain single
+    port). Both legs are returned uppercased; canonicalisation is case-insensitive.
+    """
+    if not raw:
+        return None, raw
+    up = raw.strip().upper()
+    if " VIA " in up:
+        return None, up.split(" VIA ", 1)[0].strip()
+    for sep in _ROUTE_ARROW_SEPS:
+        if sep in up:
+            parts = [p.strip() for p in up.split(sep) if p.strip()]
+            if len(parts) >= 2:
+                return parts[0], parts[-1]
+            if len(parts) == 1:
+                return None, parts[0]
+    for sep in _ROUTE_WEAK_SEPS:
+        if sep in up:
+            parts = [p.strip() for p in up.split(sep) if len(p.strip()) >= 3]
+            if len(parts) >= 2:
+                return parts[0], parts[-1]
+    return None, up
+
+
+def _canonical_destination(raw: str | None) -> str | None:
+    """Harmonised arrival port for display/aggregation.
+
+    Parses any ``origin>destination`` route and canonicalises only the
+    destination leg, so "NLRTM>USORF" and "NL RTM > US ORF" both fold to
+    "Norfolk". Returns None for empty/junk (caller drops it).
+    """
+    _, dest = _split_route(raw)
+    return _canonical_port(dest)
+
+
+def _canonical_origin(raw: str | None) -> str | None:
+    """Harmonised origin port from a route string, or None when the destination
+    encodes no origin (plain single port, or a 'VIA' waypoint string)."""
+    origin, _ = _split_route(raw)
+    return _canonical_port(origin) if origin else None
+
+
 import threading as _threading
 
 # In-process cache for the full live_positions DataFrame.
@@ -645,7 +698,8 @@ def vessels(
             sog=r.sog,
             cog=r.cog,
             heading=r.heading,
-            destination=r.destination,
+            destination=_canonical_destination(r.destination),
+            origin=_canonical_origin(r.destination),
             kind=r.kind,
             segment=r.segment,
             region=r.region,
@@ -1111,7 +1165,7 @@ def analytics_ports(kind: str | None = None, top_n: int = 20):
     agg: dict[str, dict[str, int]] = {}
     if not df.empty:
         for _, r in df.iterrows():
-            canon = _canonical_port(str(r["dest"]))
+            canon = _canonical_destination(str(r["dest"]))
             if canon is None:
                 continue  # junk / "FOR ORDERS" / blank-after-normalise
             slot = agg.setdefault(canon, {"count": 0, "tankers": 0, "bulkers": 0})
@@ -3744,7 +3798,7 @@ def analytics_destination_flows(
 
     flow_agg: dict[tuple, int] = {}
     for _, r in flow_df.iterrows():
-        canon = _canonical_port(str(r["destination"]))
+        canon = _canonical_destination(str(r["destination"]))
         if canon is None:
             continue
         fkey = (
@@ -4399,7 +4453,7 @@ def analytics_anomaly_watchlist(
             lat=lat_f,
             lon=lon_f,
             sog=sog_f,
-            destination=_str_or_none(row.get("destination")),
+            destination=_canonical_destination(_str_or_none(row.get("destination"))),
             laden=laden_val,
             total_score=total,
             behavioral_score=behavioral,

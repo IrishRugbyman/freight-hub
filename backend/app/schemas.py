@@ -14,7 +14,8 @@ class Vessel(BaseModel):
     sog: float | None = None
     cog: float | None = None
     heading: float | None = None
-    destination: str | None = None
+    destination: str | None = None  # harmonised arrival port (route dest leg folded)
+    origin: str | None = None  # harmonised origin port when destination encodes a route
     kind: str
     segment: str | None = None
     region: str | None = None
