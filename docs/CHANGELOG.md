@@ -1,5 +1,44 @@
 # Freight Hub Changelog
 
+## 2026-07-04 (session 17) - Destination predictor: drop redundant gc_dist_nm from ML features
+
+**Two distance columns fighting for the same split budget - one of them strictly worse.**
+Feature-importance on the just-shipped `route_dist_nm` model showed LightGBM gain concentrated on
+`gc_dist_nm` (608k) well ahead of the sea-route-corrected `route_dist_nm` (162k), despite the
+latter being the more accurate signal by construction. The two are highly collinear (same
+distance, differing mainly on canal/cape-routed candidates), so `gc_dist_nm` was capturing split
+budget that should have gone to the better feature. Same discipline as every feature change this
+week: hypothesis first, then an ablation dry-run to confirm it before touching production - dropping
+`gc_dist_nm` from the training/eval feature set (dry-run, not persisted) moved ml top1 0.678 ->
+0.681 and top3 0.954 -> 0.957, confirming the redundancy cost real accuracy, not just wasted
+capacity.
+
+Removed `"gc_dist_nm"` from `destination_predict.py`'s `NUMERIC_FEATURES` only - it's untouched
+everywhere else: candidate selection (`np.argsort(gc)` in `build_training_candidates`),
+`canal_backtrack`, and `heuristic_raw_score`'s own `gc_dist_nm` fallback when `route_dist_nm` is
+absent all still use it. The heuristic scorer is unaffected by this change entirely (it doesn't
+read `NUMERIC_FEATURES`).
+
+**Retrained + repromoted:** ml top1 0.6778 -> 0.6778 (flat - the dry-run's 40k-voyage snapshot
+already sat close to this before the extra data the real run picked up), top3 0.9536 -> 0.9554
+(n=39,975 -> 40,030) - a smaller real-run gain than the dry-run ablation preview, muddied by ~55
+more voyages completing between the two runs, but still a genuine top3 improvement with no top1
+cost. Heuristic essentially unchanged (0.6299/0.9085 -> 0.6329/0.9085 - the top1 drift is from the
+extra voyages, not this change). Still clear of heuristic; champion/challenger gate re-verified;
+promoted.
+
+No new tests: this is a pure feature-set ablation, not a new signal - existing coverage in
+`test_destination_predict.py` already exercises `heuristic_raw_score`'s `gc_dist_nm` fallback and
+`candidate_frame`'s `gc_dist_nm` computation independently of what's in `NUMERIC_FEATURES`. Full
+suite 615 passing (unchanged).
+
+**Series recap (sessions 13-17, all this week):** `laden` -> `draught` -> `sog_trail6h` ->
+`route_dist_nm` -> drop `gc_dist_nm`. ml moved 0.680/0.959 -> 0.678/0.955 net (a small give-back
+from `route_dist_nm`'s redundancy with `gc_dist_nm` before this session's fix clawed most of it
+back), while the heuristic champion picked up a real, durable gain from sea-route correction
+(0.622/0.907 -> 0.633/0.909) that will keep paying off on every hourly build regardless of which
+scorer is promoted that day.
+
 ## 2026-07-04 (session 16) - Destination predictor: sea-route distance for both scorers
 
 **Great-circle distance cuts through land - the destination predictor never corrected for it,
