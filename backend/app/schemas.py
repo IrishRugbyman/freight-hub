@@ -1607,3 +1607,82 @@ class MstVesselData(BaseModel):
     # durable history
     voyages: list[MstVoyage] = []
     port_calls: list[MstPortCall] = []
+
+
+# ---- Freight cycle board ----
+
+
+class CycleSignal(BaseModel):
+    """One monitored signal: where it stands, what would change the read, what would break it.
+
+    `tier` carries the provenance and must be shown: 'live' is computed from ingested
+    data, 'registered' is a hand-recorded observation with a source and an as-of date,
+    'missing' is a published gap. `verified` is false when a registered number came
+    from a secondary summary and has not been checked against the primary source.
+    """
+
+    id: str
+    subsector: str
+    category: str
+    label: str
+    tier: str
+    unit: str
+    value: float | None = None
+    value_note: str = ""
+    as_of: str | None = None
+    state: str
+    threshold_value: float | None = None
+    threshold_label: str
+    direction: str
+    distance_pct: float | None = None
+    expected_lag: str
+    falsifier: str
+    source_label: str
+    source_url: str | None = None
+    stale: bool = False
+    review_interval_days: int | None = None
+    verified: bool = False
+    provenance: str = ""
+    caveat: str = ""
+    gap_reason: str = ""
+    spark: list[float] = []
+
+
+class CycleSignalsResponse(BaseModel):
+    """Every registry signal, resolved. Gaps are included, not filtered out."""
+
+    as_of: str
+    registry_updated: str | None = None
+    warn_band_pct: float
+    signals: list[CycleSignal]
+
+
+class CycleSubsector(BaseModel):
+    """One of the three clocks: stage, headline rate, orderbook, coverage caveat."""
+
+    id: str
+    name: str
+    stage: str
+    stage_note: str
+    coverage_note: str = ""
+    headline: CycleSignal | None = None
+    orderbook: CycleSignal | None = None
+
+
+class CycleSubsectorsResponse(BaseModel):
+    as_of: str
+    subsectors: list[CycleSubsector]
+
+
+class CycleSeriesPoint(BaseModel):
+    date: str
+    value: float
+
+
+class CycleSeriesResponse(BaseModel):
+    """One freight index history. Never spliced with another series server-side."""
+
+    series: str
+    label: str
+    source_label: str
+    points: list[CycleSeriesPoint]

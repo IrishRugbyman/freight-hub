@@ -1,5 +1,64 @@
 # Freight Hub Changelog
 
+## 2026-07-26 (session 18) - Freight Cycle board: three clocks, thresholds, falsifiers, and a published gap register
+
+**The premise: shipping is not one cycle.** Container, dry bulk and tanker run on different clocks
+and the variable that separates them is the orderbook, not the spot rate. The framing came from a
+Kimi Deep Research scrollytelling essay (2026-07-10 data), archived verbatim at
+`docs/reference/kimi-shipping-cycles-2026-07.md`. Its numbers were *not* adopted as data - only its
+structure was: the four-field signal contract (value / threshold / expected lag / falsifier), and
+the discipline of publishing a gap register instead of interpolating over one.
+
+**Data check came first, and it reshaped the design.** We had BWET (an ETF proxy, weekly, 169 rows)
+and a static 5TC FFA seed. No BDI, no BDTI, no SCFI, no orderbook. And the single most quotable
+figure in that genre - "Suez transits down x% vs 2023" - is uncomputable here: `transit_events`
+starts 2026-06-09 and AIS history cannot be backfilled by definition. So the board is tiered by
+provenance rather than pretending to uniform coverage:
+
+- `live` - computed from a series we ingest (5 signals)
+- `registered` - a disclosed observation typed in by hand, with source and as-of, that goes visibly
+  stale on a stated cadence (4 signals)
+- `missing` - no acceptable source; the tile renders anyway, carrying the reason (2 signals)
+
+Registered numbers additionally carry `verified: false` plus a provenance line while they remain
+unchecked against the primary source, and the UI says so on the tile. Nothing is interpolated,
+nothing is carried forward silently.
+
+**C1 - Baltic indices ingestion (market-data).** New `fetchers/baltic_indices.py` pulling BDI, BCI,
+BPI, BDTI and BCTI from akshare into a new series-keyed `baltic_indices` table (35,031 rows; BDI
+back to 1988-10-19, the tanker pair to 2001-12). akshare re-serves the daily fixings that Chinese
+portals publish free - the only free machine-readable source with real history, since yfinance's
+`^BDIY` is a 404. Loaders `load_baltic_index` / `load_baltic_indices` added, vintaging enabled, 8
+unit tests on the normaliser (Chinese column headers, repeated fixing dates, null tails, upstream
+schema change must raise rather than silently empty the table).
+
+Diagnosed the stale `freight_5tc_ffa` (ends 2025-12-16) while there: it is not a broken fetcher,
+it is a static case-study seed from freight-dispersion. Left as-is, not surfaced as a tile.
+
+**C2 - signal registry.** `backend/app/cycle_signals.yaml` holds 11 signals and the three subsector
+cards; `backend/app/cycle.py` loads, validates and resolves it. Validation is strict on purpose - a
+signal with no falsifier, no expected lag or no threshold label is a startup error, not a blank
+tile. Threshold state (`breached` / `approaching` / `holding` / `unknown`) and staleness are pure
+functions with boundary tests: equality does not count as a crossing, an observation with no as-of
+date is stale by definition, and a qualitative signal never asserts a read with no observation
+behind it. 40 unit tests.
+
+**C3 - API.** `GET /api/cycle/signals`, `/api/cycle/subsectors`, `/api/cycle/series`, 5-minute
+in-process cache, 10 endpoint tests against a fixture registry with stubbed resolvers - including
+that a dead PostgreSQL yields an empty series rather than a 500, and that gaps are returned rather
+than filtered out.
+
+**C4 - `/cycle` page.** Three subsector cards, a Baltic series chart with the threshold drawn on
+it, a signal grid sorted by proximity to changing the read (breached first, gaps last), and a
+closing "what this board cannot tell you" block that enumerates every gap and every unverified
+observation. Provenance badges are visually distinct so a hand-recorded number can never be
+mistaken for a live one. 23 vitest cases on the pure presentation logic.
+
+Backend 672 passing, frontend 50 passing. Current read as of 2026-07-24 fixings: BDI 2,743
+(+21% YoY), BDTI 2,532 (+186% YoY), BCTI 1,352, Capesize/Panamax 2.12 - all holding well clear of
+their thresholds; Suez ~109 transits/day of tankers and bulkers on our own count; Hormuz a
+permanent gap (no terrestrial receiver coverage in the Gulf).
+
 ## 2026-07-04 (session 17) - Destination predictor: drop redundant gc_dist_nm from ML features
 
 **Two distance columns fighting for the same split budget - one of them strictly worse.**

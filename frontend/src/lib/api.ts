@@ -2454,3 +2454,92 @@ export function useUpcomingArrivals(horizonH = 96, targetId?: string, targetType
     refetchInterval: 5 * 60_000,
   })
 }
+
+// ---- Freight cycle board ----
+
+export interface CycleSignal {
+  id: string
+  subsector: string
+  category: string
+  label: string
+  tier: 'live' | 'registered' | 'missing'
+  unit: string
+  value: number | null
+  value_note: string
+  as_of: string | null
+  state: 'breached' | 'approaching' | 'holding' | 'unknown'
+  threshold_value: number | null
+  threshold_label: string
+  direction: string
+  distance_pct: number | null
+  expected_lag: string
+  falsifier: string
+  source_label: string
+  source_url: string | null
+  stale: boolean
+  review_interval_days: number | null
+  verified: boolean
+  provenance: string
+  caveat: string
+  gap_reason: string
+  spark: number[]
+}
+
+export interface CycleSignalsResponse {
+  as_of: string
+  registry_updated: string | null
+  warn_band_pct: number
+  signals: CycleSignal[]
+}
+
+export interface CycleSubsector {
+  id: string
+  name: string
+  stage: string
+  stage_note: string
+  coverage_note: string
+  headline: CycleSignal | null
+  orderbook: CycleSignal | null
+}
+
+export interface CycleSubsectorsResponse {
+  as_of: string
+  subsectors: CycleSubsector[]
+}
+
+export interface CycleSeriesResponse {
+  series: string
+  label: string
+  source_label: string
+  points: { date: string; value: number }[]
+}
+
+// Baltic fixings land once a day; nothing here justifies the 60s tracker cadence.
+const CYCLE_REFETCH_MS = 15 * 60_000
+
+export function useCycleSignals() {
+  return useQuery({
+    queryKey: ['cycle-signals'],
+    queryFn: () => getJSON<CycleSignalsResponse>('/api/cycle/signals'),
+    staleTime: CYCLE_REFETCH_MS,
+    refetchInterval: CYCLE_REFETCH_MS,
+  })
+}
+
+export function useCycleSubsectors() {
+  return useQuery({
+    queryKey: ['cycle-subsectors'],
+    queryFn: () => getJSON<CycleSubsectorsResponse>('/api/cycle/subsectors'),
+    staleTime: CYCLE_REFETCH_MS,
+    refetchInterval: CYCLE_REFETCH_MS,
+  })
+}
+
+export function useCycleSeries(series: string, years = 5) {
+  return useQuery({
+    queryKey: ['cycle-series', series, years],
+    queryFn: () =>
+      getJSON<CycleSeriesResponse>(`/api/cycle/series?series=${series}&years=${years}`),
+    staleTime: CYCLE_REFETCH_MS,
+  })
+}

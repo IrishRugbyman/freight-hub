@@ -18,6 +18,26 @@ bulk carriers from AIS). The nav has disabled "Routes"/"Dispersion" seams for th
 freight-domain research projects now living in `research/` (see below). Separate from
 quant-portfolio because it is a *live* app, not the static precompute showcase.
 
+## Freight Cycle board (`/cycle`)
+
+A monitoring board on one claim: shipping is not one cycle, and the orderbook is what separates
+the three subsectors. See [`docs/ROADMAP_CYCLE.md`](docs/ROADMAP_CYCLE.md) for what remains and
+[`docs/reference/kimi-shipping-cycles-2026-07.md`](docs/reference/kimi-shipping-cycles-2026-07.md)
+for the archived essay the framing came from (reference only, never a data source).
+
+- **Registry:** `backend/app/cycle_signals.yaml` is the single source of truth - what is watched,
+  the threshold, the expected lag, the falsifier, the source. Edited by commit, never from the app.
+- **Resolver:** `backend/app/cycle.py` validates it at load (a signal with no falsifier is a
+  startup error) and resolves `live` signals through the market-data loaders and `transit_events`.
+- **Provenance tiering is the whole point.** `live` = computed from an ingested series;
+  `registered` = a hand-recorded disclosed observation with an as-of date that goes visibly stale;
+  `missing` = a published gap carrying the reason. Never interpolate, never carry forward silently,
+  and keep `verified: false` on any registered number nobody has checked against the primary.
+- **Baltic indices** (BDI/BCI/BPI/BDTI/BCTI) come from `market_data.baltic_indices`, ingested by
+  market-data's `ingest.py baltic-indices` (akshare). Prefer these over the BWET ETF proxy.
+- Hormuz has no AIS coverage and Suez transits have no pre-2026-06-09 baseline. Both are stated on
+  the page. Do not paper over either.
+
 ## Research subprojects (`research/`)
 
 Freight-domain backtests co-located here for eventual wiring into the Routes/Dispersion tabs.

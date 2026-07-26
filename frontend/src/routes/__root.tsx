@@ -51,6 +51,7 @@ function RootLayout() {
               )}
             </span>
           </NavItem>
+          <NavItem to="/cycle">Cycle</NavItem>
           <span className="mx-1.5 h-3.5 w-px bg-border" />
           <NavItem to="/routes">Routes</NavItem>
           <NavItem to="/dispersion">Dispersion</NavItem>

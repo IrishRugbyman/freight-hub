@@ -1,0 +1,303 @@
+# Freight cycle board - signal registry.
+#
+# One entry per monitored signal. This file is the single source of truth for the
+# /cycle page: the API resolves values against it, it is never edited from the app,
+# and every change is a commit.
+#
+# Contract, enforced at load time by app/cycle.py (a violation is a startup error,
+# not a blank tile):
+#   - every signal has a threshold, an expected_lag and a falsifier
+#   - every signal has a source_label; `live` signals also name a resolver
+#   - `registered` signals carry as_of + review_interval_days and go stale visibly
+#
+# tier:
+#   live       resolved from data this repo ingests (market_data / freight_analytics)
+#   registered a disclosed observation recorded by hand; never interpolated, never
+#              carried forward silently
+#   missing    no acceptable source; the tile renders as a published gap
+#
+# verified:
+#   false      the number came from a secondary summary and has NOT been checked
+#              against the primary source. Rendered with a warning.
+#   true       someone read the primary source and confirmed it. Put the date and
+#              who in `verified_note`.
+#
+# direction: which side of the threshold breaks the current read.
+#   below      breached when value < threshold_value
+#   above      breached when value > threshold_value
+#   none       qualitative threshold; state comes from `manual_state`
+
+meta:
+  updated: 2026-07-26
+  warn_band_pct: 15.0   # within this % of the threshold -> "approaching"
+
+subsectors:
+  - id: container
+    name: Container
+    stage: Event-driven tightness
+    stage_note: >-
+      Premium persists, delivery wave has not arrived. A 38-39% orderbook with
+      deliveries peaking in 2029 sits under event-driven rates.
+    headline_signal: container_rates
+    orderbook_signal: container_orderbook
+    coverage_note: >-
+      We track tankers and bulk carriers only. Nothing on this card comes from our
+      own AIS - the container read is entirely registered observations.
+
+  - id: drybulk
+    name: Dry bulk
+    stage: Early upcycle (tentative)
+    stage_note: >-
+      A ~7% orderbook, the lowest in years, meeting rerouting-driven ton-miles.
+      Demand is only part of the driver mix.
+    headline_signal: bdi
+    orderbook_signal: drybulk_orderbook
+    coverage_note: >-
+      BDI/BCI/BPI are live daily fixings. The orderbook is a registered observation.
+
+  - id: tanker
+    name: Tanker
+    stage: Renewed expansion (tentative)
+    stage_note: >-
+      Earnings at multi-month highs while scrapping sits near zero and the fleet
+      ages. The open questions are the orderbook and when scrapping restarts.
+    headline_signal: bdti
+    orderbook_signal: tanker_orderbook
+    coverage_note: >-
+      BDTI/BCTI are live daily fixings. Gulf transits are a published gap - the AIS
+      feed has no receiver coverage inside Hormuz.
+
+signals:
+  # ---------------------------------------------------------------- container
+  - id: container_rates
+    subsector: container
+    category: price
+    label: Container freight (SCFI / CCFI)
+    tier: registered
+    unit: index
+    value: 3184.83
+    value_note: SCFI composite; CCFI stood at 1873.15 the same day
+    threshold_value: 900.0
+    threshold_label: CCFI back to the 2019 hub (< 900) = event premium cleared
+    direction: below
+    expected_lag: Leads container-line earnings by 1-4 quarters
+    falsifier: >-
+      Rates stay elevated after rerouting ends, with cargo volumes confirming real
+      demand rather than a routing premium.
+    source_label: Shanghai Shipping Exchange (2026-07-10)
+    source_url: https://www.sse.net.cn/index/singleIndex?indexType=scfi
+    as_of: 2026-07-10
+    review_interval_days: 14
+    verified: false
+    provenance: >-
+      Secondary, via docs/reference/kimi-shipping-cycles-2026-07.md. The weekly SSE
+      series is subscription-only, so this stays a hand-recorded observation.
+
+  - id: container_orderbook
+    subsector: container
+    category: capacity
+    label: Container orderbook, % of fleet
+    tier: registered
+    unit: pct
+    value: 38.7
+    value_note: 38.3-39% depending on the counter; 12.98-13.28m TEU
+    threshold_value: 25.0
+    threshold_label: Back under 25% of fleet = the delivery overhang has cleared
+    direction: below
+    expected_lag: Rates fall 1-2 quarters after a delivery wave lands
+    falsifier: Mass cancellation or postponement of the 2027-2029 orderbook.
+    source_label: Alphaliner / Linerlytica (2026-06-24)
+    source_url: null
+    as_of: 2026-06-24
+    review_interval_days: 90
+    verified: false
+    provenance: >-
+      Secondary, via docs/reference/kimi-shipping-cycles-2026-07.md. Clarksons and
+      Alphaliner sell the primary; no free machine-readable feed exists.
+
+  # ----------------------------------------------------------------- dry bulk
+  - id: bdi
+    subsector: drybulk
+    category: price
+    label: Baltic Dry Index
+    tier: live
+    unit: index
+    resolver: baltic:BDI
+    threshold_value: 1500.0
+    threshold_label: Sustained below 1500 = the dry-bulk uptrend is over
+    direction: below
+    expected_lag: Leads owner earnings by 1-2 quarters
+    falsifier: >-
+      Iron ore and coal cargo volumes fall while the index holds, which would make
+      this a ton-mile artefact rather than demand.
+    source_label: Baltic Exchange daily fixing via akshare
+    source_url: null
+    review_interval_days: 3
+
+  - id: capesize_premium
+    subsector: drybulk
+    category: price
+    label: Capesize premium (BCI / BPI)
+    tier: live
+    unit: ratio
+    resolver: baltic:BCI_OVER_BPI
+    threshold_value: 1.0
+    threshold_label: Below 1.0 = the rally is no longer led by the large vessels
+    direction: below
+    expected_lag: Coincident
+    falsifier: >-
+      A broad-based rally with BPI leading would mean the strength is general cargo
+      demand, not the iron-ore and bauxite ton-mile story.
+    source_label: Derived from BCI and BPI daily fixings
+    source_url: null
+    review_interval_days: 7
+
+  - id: drybulk_orderbook
+    subsector: drybulk
+    category: capacity
+    label: Dry-bulk orderbook, % of fleet
+    tier: registered
+    unit: pct
+    value: 7.0
+    value_note: Multi-year low
+    threshold_value: 15.0
+    threshold_label: Rising to 15%+ = supply discipline has broken
+    direction: above
+    expected_lag: Deliveries land 2-3 years after ordering
+    falsifier: A dry-bulk ordering wave triggered by the current earnings level.
+    source_label: Clarksons via Benzinga (2026-02-16)
+    source_url: null
+    as_of: 2026-02-16
+    review_interval_days: 90
+    verified: false
+    provenance: >-
+      Secondary, via docs/reference/kimi-shipping-cycles-2026-07.md. Five months old
+      at the time of writing - treat as directional, not current.
+
+  # ------------------------------------------------------------------- tanker
+  - id: bdti
+    subsector: tanker
+    category: price
+    label: Baltic Dirty Tanker Index
+    tier: live
+    unit: index
+    resolver: baltic:BDTI
+    threshold_value: 1000.0
+    threshold_label: Back to the long-run mean (~1000) = the crude-tanker boom is done
+    direction: below
+    expected_lag: Spot earnings flow straight into current-quarter profit
+    falsifier: >-
+      Sanctions ease and OPEC output rises together, collapsing the tonne-mile
+      premium that rerouting created.
+    source_label: Baltic Exchange daily fixing via akshare
+    source_url: null
+    review_interval_days: 3
+
+  - id: bcti
+    subsector: tanker
+    category: price
+    label: Baltic Clean Tanker Index
+    tier: live
+    unit: index
+    resolver: baltic:BCTI
+    threshold_value: 800.0
+    threshold_label: Back to the long-run mean (~800) = the product-tanker boom is done
+    direction: below
+    expected_lag: Spot earnings flow straight into current-quarter profit
+    falsifier: >-
+      Refinery runs normalise east of Suez and product flows shorten, ending the
+      long-haul premium without any change in crude.
+    source_label: Baltic Exchange daily fixing via akshare
+    source_url: null
+    review_interval_days: 3
+
+  - id: tanker_orderbook
+    subsector: tanker
+    category: capacity
+    label: Tanker orderbook, % of fleet
+    tier: registered
+    unit: pct
+    value: 14.7
+    value_note: Up from ~7% at the 2022 trough
+    threshold_value: 20.0
+    threshold_label: Above 20% = the ordering response has overshot the cycle
+    direction: above
+    expected_lag: Deliveries land 2-3 years after ordering
+    falsifier: Ordering stalls on yard slot scarcity and fuel-technology uncertainty.
+    source_label: Riviera / Clarksons (2025-11-10)
+    source_url: null
+    as_of: 2025-11-10
+    review_interval_days: 90
+    verified: false
+    provenance: >-
+      Secondary, via docs/reference/kimi-shipping-cycles-2026-07.md. Eight months old
+      at the time of writing; the direction matters more than the level.
+
+  - id: tanker_scrapping
+    subsector: tanker
+    category: capacity
+    label: Tanker scrapping
+    tier: missing
+    unit: vessels
+    threshold_value: null
+    threshold_label: A surge in 20-year-plus demolition would confirm the late cycle
+    direction: none
+    manual_state: unknown
+    expected_lag: Coincident with, or just after, the freight-rate peak
+    falsifier: >-
+      The dark fleet absorbs the old tonnage, so the compliant fleet never scraps and
+      the age profile stops signalling anything.
+    source_label: No free feed; Clarksons demolition data is subscription-only
+    source_url: null
+    gap_reason: >-
+      Demolition counts are sold, not published. The last figure we saw second-hand
+      was ~36 vessels in the first nine months of 2025, which we will not put on a
+      tile as if it were current.
+
+  # -------------------------------------------------------------------- event
+  - id: suez_transits
+    subsector: container
+    category: event
+    label: Suez transits (tankers + bulkers)
+    tier: live
+    unit: per_day
+    resolver: transits:suez
+    threshold_value: null
+    threshold_label: >-
+      No absolute threshold is honest here - we have no pre-crisis baseline. Watch the
+      trend against our own collection start.
+    direction: none
+    manual_state: holding
+    expected_lag: Freight rates lag transit volumes by 2-6 weeks
+    falsifier: >-
+      A sustained low-transit regime becomes the new normal and resets the rate floor
+      rather than signalling anything cyclical.
+    source_label: Own AIS, transit_events (collection began 2026-06-09)
+    source_url: null
+    review_interval_days: 2
+    caveat: >-
+      Our own count, tankers and bulk carriers only - no container ships, and no
+      history before 2026-06-09. It cannot be compared to a 2023 baseline and is not
+      the same measure as the widely quoted "Suez transits down x% vs 2023".
+
+  - id: hormuz_transits
+    subsector: tanker
+    category: event
+    label: Hormuz transits
+    tier: missing
+    unit: per_day
+    threshold_value: null
+    threshold_label: A recovery in Gulf outbound transits would end the closure premium
+    direction: none
+    manual_state: unknown
+    expected_lag: Freight rates lag transit volumes by 2-6 weeks
+    falsifier: >-
+      Rates stay bid after transits recover, meaning the premium was never about the
+      strait.
+    source_label: Not observable from our feed
+    source_url: null
+    gap_reason: >-
+      Hormuz is a configured chokepoint but has zero transit events: the free
+      terrestrial AIS feed has no receiver coverage inside the Gulf. This is a
+      permanent gap in the data source, not a configuration bug, and no amount of
+      collector tuning fixes it.
