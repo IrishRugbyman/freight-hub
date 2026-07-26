@@ -46,10 +46,11 @@ subsectors:
 
   - id: drybulk
     name: Dry bulk
-    stage: Early upcycle (tentative)
+    stage: Early upcycle, supply cushion thinning
     stage_note: >-
-      A ~7% orderbook, the lowest in years, meeting rerouting-driven ton-miles.
-      Demand is only part of the driver mix.
+      Rates are strong on rerouting-driven ton-miles, but the thin orderbook that was
+      the bull case is closing: 14% of fleet on a capacity basis and rising, with
+      ordering up more than 20% year on year against 3.8% fleet growth.
     headline_signal: bdi
     orderbook_signal: drybulk_orderbook
     coverage_note: >-
@@ -57,10 +58,12 @@ subsectors:
 
   - id: tanker
     name: Tanker
-    stage: Renewed expansion (tentative)
+    stage: Late expansion, ordering has overshot
     stage_note: >-
-      Earnings at multi-month highs while scrapping sits near zero and the fleet
-      ages. The open questions are the orderbook and when scrapping restarts.
+      Earnings at multi-month highs, and the supply answer has already been ordered:
+      the crude orderbook is 27% of the fleet at a historic 130m dwt, with 151 VLCC
+      contracts booked by mid-2026, the largest tally since 1973. Scrapping is still
+      near zero. The threshold on this one is breached.
     headline_signal: bdti
     orderbook_signal: tanker_orderbook
     coverage_note: >-
@@ -72,11 +75,11 @@ signals:
   - id: container_rates
     subsector: container
     category: price
-    label: Container freight (SCFI / CCFI)
+    label: Container freight (CCFI, SCFI alongside)
     tier: registered
     unit: index
-    value: 3184.83
-    value_note: SCFI composite; CCFI stood at 1873.15 the same day
+    value: 1901.27
+    value_note: CCFI composite; SCFI stood at 3062.95 the same week (-17.4 w/w)
     threshold_value: 900.0
     threshold_label: CCFI back to the 2019 hub (< 900) = event premium cleared
     direction: below
@@ -84,14 +87,18 @@ signals:
     falsifier: >-
       Rates stay elevated after rerouting ends, with cargo volumes confirming real
       demand rather than a routing premium.
-    source_label: Shanghai Shipping Exchange (2026-07-10)
-    source_url: https://www.sse.net.cn/index/singleIndex?indexType=scfi
-    as_of: 2026-07-10
+    source_label: Shanghai Shipping Exchange (2026-07-24)
+    source_url: https://www.sse.net.cn/index/singleIndex?indexType=ccfi
+    as_of: 2026-07-24
     review_interval_days: 14
-    verified: false
+    verified: true
+    verified_note: >-
+      Read off the SSE index pages on 2026-07-26: CCFI 1901.27 and SCFI 3062.95, both
+      dated 2026-07-24. Supersedes the secondary 2026-07-10 pair (3184.83 / 1873.15).
+      The value is now the CCFI so that it shares units with its own threshold.
     provenance: >-
-      Secondary, via docs/reference/kimi-shipping-cycles-2026-07.md. The weekly SSE
-      series is subscription-only, so this stays a hand-recorded observation.
+      The weekly series is subscription-only; SSE publishes the latest two fixings free,
+      so this stays a hand-recorded observation refreshed from the primary page.
 
   - id: container_orderbook
     subsector: container
@@ -99,21 +106,26 @@ signals:
     label: Container orderbook, % of fleet
     tier: registered
     unit: pct
-    value: 38.7
-    value_note: 38.3-39% depending on the counter; 12.98-13.28m TEU
+    value: 38.3
+    value_note: 12.98m TEU across 1,592 ships; Clarksons puts it at 40% on a capacity basis
     threshold_value: 25.0
     threshold_label: Back under 25% of fleet = the delivery overhang has cleared
     direction: below
     expected_lag: Rates fall 1-2 quarters after a delivery wave lands
     falsifier: Mass cancellation or postponement of the 2027-2029 orderbook.
-    source_label: Alphaliner / Linerlytica (2026-06-24)
-    source_url: null
+    source_label: Alphaliner via PortNews (2026-06-24)
+    source_url: https://en.portnews.ru/news/393287/
     as_of: 2026-06-24
     review_interval_days: 90
-    verified: false
+    verified: true
+    verified_note: >-
+      Confirmed 2026-07-26 against the Alphaliner figure as reported on 2026-06-24:
+      1,592 vessels, 12.98m TEU, 38.3% of the cellular fleet in service. The recorded
+      38.7% was the top of a secondary summary's range; corrected down.
     provenance: >-
-      Secondary, via docs/reference/kimi-shipping-cycles-2026-07.md. Clarksons and
-      Alphaliner sell the primary; no free machine-readable feed exists.
+      Alphaliner and Clarksons sell the primary data; this is the free trade-press
+      reporting of it, cross-checked against the Clarksons H1-2026 review (40%, capacity
+      basis rather than TEU).
 
   # ----------------------------------------------------------------- dry bulk
   - id: bdi
@@ -158,21 +170,27 @@ signals:
     label: Dry-bulk orderbook, % of fleet
     tier: registered
     unit: pct
-    value: 7.0
-    value_note: Multi-year low
+    value: 14.0
+    value_note: >-
+      Capacity basis, Clarksons mid-2026. By vessel count it is 11.0% (1,642 on order
+      against 14,908 in service), up from 9.5% a year earlier.
     threshold_value: 15.0
     threshold_label: Rising to 15%+ = supply discipline has broken
     direction: above
     expected_lag: Deliveries land 2-3 years after ordering
     falsifier: A dry-bulk ordering wave triggered by the current earnings level.
-    source_label: Clarksons via Benzinga (2026-02-16)
-    source_url: null
-    as_of: 2026-02-16
-    review_interval_days: 90
-    verified: false
-    provenance: >-
-      Secondary, via docs/reference/kimi-shipping-cycles-2026-07.md. Five months old
-      at the time of writing - treat as directional, not current.
+    source_label: Clarksons H1-2026 review; Breakwave Advisors (2026-07-07)
+    source_url: https://www.breakwaveadvisors.com/insights/2026/7/7/dry-bulk-orderbook-accelerates-as-greek-owners-lead-newbuilding-momentum
+    as_of: 2026-07-07
+    review_interval_days: 60
+    verified: true
+    verified_note: >-
+      Corrected on 2026-07-26, and this one was materially wrong. The recorded ~7%
+      "multi-year low" is not the current market: Clarksons' H1-2026 review puts the
+      bulker orderbook at 14% of fleet, and Breakwave has the count-based ratio rising
+      from 9.5% to 11.0% year on year with the orderbook up more than 20% while the
+      fleet grew 3.8%. The falsifier that was written for this signal - a dry-bulk
+      ordering wave - is the thing that has been happening.
 
   # ------------------------------------------------------------------- tanker
   - id: bdti
@@ -217,21 +235,25 @@ signals:
     label: Tanker orderbook, % of fleet
     tier: registered
     unit: pct
-    value: 14.7
-    value_note: Up from ~7% at the 2022 trough
+    value: 27.0
+    value_note: >-
+      Crude tanker orderbook 130m dwt, a historic peak. Clarksons puts all tankers at
+      25% and BIMCO had crude at 22% in Q1 - every read is now north of the threshold.
     threshold_value: 20.0
     threshold_label: Above 20% = the ordering response has overshot the cycle
     direction: above
     expected_lag: Deliveries land 2-3 years after ordering
     falsifier: Ordering stalls on yard slot scarcity and fuel-technology uncertainty.
-    source_label: Riviera / Clarksons (2025-11-10)
-    source_url: null
-    as_of: 2025-11-10
-    review_interval_days: 90
-    verified: false
-    provenance: >-
-      Secondary, via docs/reference/kimi-shipping-cycles-2026-07.md. Eight months old
-      at the time of writing; the direction matters more than the level.
+    source_label: BIMCO via IndexBox (2026-07-09)
+    source_url: https://www.indexbox.io/blog/crude-tanker-ordering-hits-record-high-in-2026/
+    as_of: 2026-07-09
+    review_interval_days: 60
+    verified: true
+    verified_note: >-
+      Corrected on 2026-07-26, and this one flips the read. The recorded 14.7% was from
+      2025-11 and the market has run away from it: crude tanker orderbook 130m dwt =
+      27% of the operational fleet, with 151 VLCC contracts booked by mid-2026 - the
+      largest annual tally since 1973. The threshold is breached, not approached.
 
   - id: tanker_scrapping
     subsector: tanker

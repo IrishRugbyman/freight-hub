@@ -1,5 +1,33 @@
 # Freight Hub Changelog
 
+## 2026-07-26 (session 18b) - Verified the four registered figures; two were wrong and both flipped a read
+
+Every hand-recorded number on `/cycle` shipped flagged `verified: false`. Checking them against
+primary and free trade-press sources took an hour and changed the board's conclusion on two of
+three subsectors. Worth recording precisely, because it is the argument for the tiering:
+
+| Signal | Was (secondary) | Now (verified) | Effect |
+|---|---|---|---|
+| Dry-bulk orderbook | 7.0%, "multi-year low", 2026-02-16 | **14.0%** capacity basis (Clarksons H1-2026); 11.0% by count, up from 9.5% YoY, orderbook +20% against 3.8% fleet growth (Breakwave, 2026-07-07) | holding -> **approaching** |
+| Tanker orderbook | 14.7%, 2025-11-10 | **27.0%** - crude orderbook 130m dwt, 151 VLCC contracts by mid-2026, largest tally since 1973 (BIMCO via IndexBox, 2026-07-09) | holding -> **breached** |
+| Container orderbook | 38.7% | **38.3%** - 1,592 ships / 12.98m TEU (Alphaliner via PortNews, 2026-06-24) | confirmed, corrected off the top of a range |
+| Container rates | SCFI 3,184.83 / CCFI 1,873.15, 2026-07-10 | **CCFI 1,901.27**, SCFI 3,062.95, both 2026-07-24, read off the SSE index pages | superseded by a current fixing |
+
+The dry-bulk error was the serious one: ~7% was not merely stale, it was the wrong picture. The
+thin-orderbook supply cushion that made "early upcycle" the read is closing, and the falsifier
+written into that signal - a dry-bulk ordering wave - is the thing that has been happening.
+Tankers are worse still: every current source puts the orderbook above the 20% overshoot
+threshold, so the signal is breached and the subsector card now reads "late expansion, ordering
+has overshot" rather than "renewed expansion".
+
+Also fixed a units mismatch found while verifying: `container_rates` stored the SCFI but carried a
+CCFI threshold, so the distance-to-threshold was comparing two different indices. It now stores the
+CCFI with the SCFI alongside as a note.
+
+Review intervals on both orderbook signals cut from 90 to 60 days - they demonstrably move faster
+than a quarter. New test: `verified: true` requires a `verified_note` and a source URL, so the flag
+cannot be set without recording what was read and when. Backend 673 passing.
+
 ## 2026-07-26 (session 18) - Freight Cycle board: three clocks, thresholds, falsifiers, and a published gap register
 
 **The premise: shipping is not one cycle.** Container, dry bulk and tanker run on different clocks

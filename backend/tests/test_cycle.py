@@ -252,6 +252,14 @@ def test_shipped_registry_marks_unverified_secondary_observations():
             assert s.provenance.strip(), f"{s.id} is unverified but explains nothing"
 
 
+def test_shipped_registry_records_how_each_verified_number_was_checked():
+    """`verified: true` is a claim someone read the primary; it must say what and when."""
+    for s in get_registry().signals:
+        if s.verified:
+            assert s.verified_note.strip(), f"{s.id} claims verified with no note"
+            assert s.source_url, f"{s.id} claims verified with no source URL"
+
+
 def test_shipped_registry_covers_all_three_subsectors():
     assert {s["id"] for s in get_registry().subsectors} == {"container", "drybulk", "tanker"}
 

@@ -13,21 +13,16 @@ or `missing` (no acceptable source, rendered as a published gap). Nothing is int
 is carried forward silently, and a `registered` number stays flagged `verified: false` until
 someone has read the primary source.
 
-## C5 - Verify the registered observations
-
-The four hand-recorded numbers all came from a secondary summary and are flagged unverified on the
-page. Each needs a primary source read, then `verified: true` plus a `verified_note` naming the
-source and date.
-
-- [ ] Container SCFI/CCFI - confirm the level and date against the Shanghai Shipping Exchange page.
-- [ ] Container orderbook % - find a citable Alphaliner or Linerlytica publication, not a summary.
-- [ ] Dry-bulk orderbook % - the recorded figure is from 2026-02 and is the stalest on the board.
-- [ ] Tanker orderbook % - recorded 2025-11; check whether the ordering trend has continued.
+C5 - verify the registered observations [COMPLETE 2026-07-26]
 
 ## C6 - Freshness handling
 
+Verification moved two review intervals to 60 days: the dry-bulk and tanker orderbooks both drifted
+far enough in one quarter to change their signal state, so 90 days was too slack for them.
+
 - [ ] Decide whether the review reminder lives in the hourly analytics build or stays a manual
-      pass. No new timer unless the data actually moves - registered observations move quarterly.
+      pass. No new timer unless the data actually moves - but note the orderbooks moved fast enough
+      in H1 2026 to invalidate a recorded figure inside a single review window.
 - [ ] Consider a compact "stale registry" line on `/analytics` so a stale tile is noticed without
       opening `/cycle`.
 

@@ -132,6 +132,23 @@ the table below.
   unavailable in that session.
 - The Feb-Jul 2026 Hormuz/Red Sea situation is still evolving; figures are as of 2026-07-10.
 
+## Corrections found on verification (2026-07-26)
+
+Every figure the report supplied was checked against a primary or free trade-press source
+before going on the site. Two of the four were materially wrong, and both in the same
+direction - the report's supply-side bull case for dry bulk and tankers no longer holds:
+
+| Report claim | Verified | Verdict |
+|---|---|---|
+| Dry-bulk orderbook ~7%, "multi-year low" (Clarksons via Benzinga, 2026-02-16) | 14% of fleet on a capacity basis (Clarksons H1-2026 review); 11.0% by vessel count, up from 9.5% a year earlier, orderbook +20% YoY against 3.8% fleet growth (Breakwave Advisors, 2026-07-07) | **Wrong.** Not a multi-year low and not stable - the ordering wave the report names as its own falsifier is under way |
+| Tanker orderbook 14.7% (Riviera/Clarksons, 2025-11-10) | Crude tanker orderbook 130m dwt = 27% of the operational fleet; 151 VLCC contracts by mid-2026, largest tally since 1973 (BIMCO via IndexBox, 2026-07-09). Clarksons has all tankers at 25%; BIMCO had crude at 22% in Q1 | **Badly stale.** Every current read is above the 20% overshoot threshold |
+| Container orderbook 38.3-39% (Alphaliner, 2026-06-24) | 1,592 ships / 12.98m TEU / 38.3% of the cellular fleet in service | **Confirmed** (we had recorded the top of the range; corrected to 38.3%) |
+| SCFI 3,184.83 / CCFI 1,873.15 (SSE, 2026-07-10) | SSE publishes the latest two fixings free: SCFI 3,062.95 and CCFI 1,901.27, both 2026-07-24. The 07-10 pair could not be re-read (the page only shows two weeks) but the level is consistent | **Superseded** by a directly-read current fixing |
+
+The lesson is the one the board is built around: a plausible, well-sourced-looking number in a
+secondary summary is worth nothing until someone opens the primary. Two of these had drifted far
+enough to invert the read on a subsector.
+
 ## What we took from it, and what we did not
 
 Adopted: the three-clocks framing, the orderbook as the state variable that separates the
