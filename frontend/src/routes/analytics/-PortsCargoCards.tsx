@@ -6,7 +6,7 @@ import {
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
-  usePortArrivals, usePortFlow, usePortCongestion, useAnchorageOccupancy,
+  usePortArrivals, usePortFlow, usePortCongestion, useChokepointCongestion, useAnchorageOccupancy,
   useTradeLaneMatrix, useDestinationFlows, useCargoTransitions,
   useCargoStateChanges, useLaden, useDensity, useEuropeanInbound,
   useLngInbound, useTransitRateTimeline, useEtaAccuracy, useArrivals,
@@ -443,6 +443,91 @@ export function PortCongestionCard() {
                     <td className="py-1.5 pr-3 font-medium text-foreground/90">
                       {row.zone.replace(/_/g, ' ')}
                       {row.region && <span className="ml-1 text-muted-foreground/60 text-[10px]">({row.region})</span>}
+                    </td>
+                    <td className="text-right pr-3 tabular-nums">{row.current_vessels}</td>
+                    <td className="text-right pr-3 tabular-nums text-muted-foreground">
+                      {row.avg_current_dwell_hours != null ? `${row.avg_current_dwell_hours.toFixed(0)}h` : '-'}
+                    </td>
+                    <td className="text-right pr-3 tabular-nums text-muted-foreground">
+                      {row.baseline_avg_vessels != null ? row.baseline_avg_vessels.toFixed(1) : '-'}
+                    </td>
+                    <td className={`text-right pr-3 tabular-nums font-semibold ${congestionColor(row.congestion_factor)}`}>
+                      {row.congestion_factor.toFixed(2)}x
+                    </td>
+                    <td className={`text-right text-[10px] font-medium ${congestionColor(row.congestion_factor)}`}>
+                      {congestionBadge(row.congestion_factor)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// ChokepointCongestionCard
+// ---------------------------------------------------------------------------
+export function ChokepointCongestionCard() {
+  const [kindFilter, setKindFilter] = React.useState<'' | 'tanker' | 'bulk'>('')
+  const [days, setDays] = React.useState(14)
+  const { data, isLoading } = useChokepointCongestion(kindFilter, days)
+  const rows = (data?.rows ?? []).filter(r => r.current_vessels > 0 || (r.baseline_avg_vessels ?? 0) > 0)
+
+  return (
+    <Card className="bg-card/60 backdrop-blur border-border/40">
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <CardTitle className="text-sm font-medium">Chokepoint Congestion Monitor</CardTitle>
+          <div className="flex gap-2">
+            <div className="flex gap-1">
+              {(['', 'tanker', 'bulk'] as const).map(k => (
+                <button key={k || 'all'} onClick={() => setKindFilter(k)}
+                  className={`rounded px-2 py-0.5 text-xs ${kindFilter === k ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+                  {k || 'All'}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-1">
+              {([7, 14, 30] as const).map(d => (
+                <button key={d} onClick={() => setDays(d)}
+                  className={`rounded px-2 py-0.5 text-xs ${days === d ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+                  {d}d
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          Vessels currently transiting vs {days}d baseline - congestion factor = current / avg concurrent
+        </p>
+      </CardHeader>
+      <CardContent className="pt-0">
+        {isLoading && <ChartSkeleton className="h-24" />}
+        {!isLoading && rows.length === 0 && (
+          <p className="text-xs text-muted-foreground">No transit episodes in selected window.</p>
+        )}
+        {rows.length > 0 && (
+          <div className="overflow-auto max-h-[400px]">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border/40 text-muted-foreground">
+                  <th className="text-left py-1 pr-3 font-medium">Chokepoint</th>
+                  <th className="text-right py-1 pr-3 font-medium">Now</th>
+                  <th className="text-right py-1 pr-3 font-medium">Dwell</th>
+                  <th className="text-right py-1 pr-3 font-medium">Baseline</th>
+                  <th className="text-right py-1 pr-3 font-medium">Factor</th>
+                  <th className="text-right py-1 font-medium">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(row => (
+                  <tr key={row.chokepoint} className="border-b border-border/20 hover:bg-muted/20">
+                    <td className="py-1.5 pr-3 font-medium text-foreground/90">
+                      {row.chokepoint.replace(/_/g, ' ')}
                     </td>
                     <td className="text-right pr-3 tabular-nums">{row.current_vessels}</td>
                     <td className="text-right pr-3 tabular-nums text-muted-foreground">
@@ -2104,6 +2189,7 @@ export default function PortsCargoTab() {
       <PortFlowCard />
       <ActualArrivalsCard />
       <PortCongestionCard />
+      <ChokepointCongestionCard />
       <AnchorageOccupancyCard />
       <TradeLaneMatrixCard />
       <DestinationFlowCard />

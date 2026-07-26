@@ -1666,6 +1666,169 @@ def test_port_congestion_dwell_hours(congestion_client):
 
 
 # ---------------------------------------------------------------------------
+# Chokepoint transit congestion index (AIS dwell time inside the chokepoint region)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def chokepoint_congestion_client(tmp_path, monkeypatch):
+    """Client seeded with transit_events for chokepoint congestion testing.
+
+    'suez' (tanker/VLCC):
+      - 2 vessels currently mid-transit (closed fragments ending now, 6h/8h dwell)
+      - 3 completed historical transits (12h each) -> the baseline
+
+    'panama' (tanker/Suezmax):
+      - 1 vessel that entered <2h ago (no historical overlap)
+      - No baseline -> congestion_factor = 1.0
+    """
+    import duckdb
+    from datetime import UTC, datetime, timedelta
+    from fastapi.testclient import TestClient
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+
+    ais_schema = """
+    CREATE TABLE live_positions (
+        mmsi BIGINT PRIMARY KEY, name VARCHAR, lat DOUBLE, lon DOUBLE,
+        sog DOUBLE, cog DOUBLE, heading DOUBLE, destination VARCHAR,
+        ship_type INTEGER, length_m DOUBLE, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, updated_ts TIMESTAMP,
+        imo BIGINT, draught DOUBLE, nav_status INTEGER, eta VARCHAR
+    );
+    CREATE TABLE ais_snapshots (
+        snapshot_ts TIMESTAMP, mmsi BIGINT, kind VARCHAR, segment VARCHAR,
+        region VARCHAR, lat DOUBLE, lon DOUBLE, ship_type INTEGER, length_m DOUBLE,
+        sog DOUBLE, nav_status INTEGER, draught DOUBLE, destination VARCHAR,
+        PRIMARY KEY (snapshot_ts, mmsi)
+    );
+    """
+
+    an_schema = """
+    CREATE TABLE meta_watermark (key VARCHAR PRIMARY KEY, ts TIMESTAMP);
+    CREATE TABLE ais_events (
+        event_id VARCHAR PRIMARY KEY, type VARCHAR,
+        mmsi BIGINT, mmsi2 BIGINT,
+        start_ts TIMESTAMP, end_ts TIMESTAMP,
+        lat DOUBLE, lon DOUBLE,
+        region VARCHAR, kind VARCHAR, segment VARCHAR, details VARCHAR
+    );
+    CREATE TABLE transit_events (
+        mmsi BIGINT, chokepoint VARCHAR, entered_ts TIMESTAMP, exited_ts TIMESTAMP,
+        direction VARCHAR, kind VARCHAR, segment VARCHAR, laden BOOLEAN,
+        PRIMARY KEY (mmsi, chokepoint, entered_ts)
+    );
+    CREATE TABLE anchored_episodes (
+        mmsi BIGINT, zone VARCHAR, start_ts TIMESTAMP, end_ts TIMESTAMP,
+        kind VARCHAR, segment VARCHAR, PRIMARY KEY (mmsi, zone, start_ts)
+    );
+    CREATE TABLE fleet_density (
+        ts TIMESTAMP, region VARCHAR, kind VARCHAR, segment VARCHAR,
+        laden_count INTEGER, ballast_count INTEGER, unknown_count INTEGER,
+        PRIMARY KEY (ts, region, kind, segment)
+    );
+    CREATE TABLE vessel_state (
+        mmsi BIGINT PRIMARY KEY, max_draught_seen DOUBLE, last_draught DOUBLE,
+        laden VARCHAR, updated_ts TIMESTAMP
+    );
+    """
+
+    ais_file = tmp_path / "ais.duckdb"
+    ais_conn = duckdb.connect(str(ais_file))
+    ais_conn.execute(ais_schema)
+    ais_conn.close()
+
+    an_file = tmp_path / "analytics.duckdb"
+    an_conn = duckdb.connect(str(an_file))
+    an_conn.execute(an_schema)
+
+    # Currently mid-transit at suez: closed fragments ending now (6h, 8h dwell).
+    for i in range(2):
+        an_conn.execute(
+            "INSERT INTO transit_events VALUES (?,?,?,?,'northbound','tanker','VLCC',true)",
+            [6300 + i, 'suez', now - timedelta(hours=6 + i * 2), now],
+        )
+    # Historical completed transits at suez (past days) - the baseline.
+    for i in range(3):
+        start = now - timedelta(days=3 + i, hours=12)
+        end = start + timedelta(hours=12)
+        an_conn.execute(
+            "INSERT INTO transit_events VALUES (?,?,?,?,'northbound','tanker','VLCC',true)",
+            [7300 + i, 'suez', start, end],
+        )
+
+    # Currently mid-transit at panama, entered <2h ago -> no historical baseline.
+    an_conn.execute(
+        "INSERT INTO transit_events VALUES (6400,'panama',?,?,'eastbound','tanker','Suezmax',false)",
+        [now - timedelta(hours=1), now],
+    )
+
+    an_conn.close()
+
+    monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
+    monkeypatch.setenv("ANALYTICS_DB", str(an_file))
+    from app.main import app
+    return TestClient(app)
+
+
+def test_chokepoint_congestion_structure(chokepoint_congestion_client):
+    r = chokepoint_congestion_client.get("/api/analytics/chokepoint-congestion?days=14")
+    assert r.status_code == 200
+    d = r.json()
+    assert "as_of" in d
+    assert "days_baseline" in d
+    assert "rows" in d
+    assert d["days_baseline"] == 14
+    if d["rows"]:
+        row = d["rows"][0]
+        for field in ("chokepoint", "current_vessels", "congestion_factor"):
+            assert field in row
+
+
+def test_chokepoint_congestion_current_vessels(chokepoint_congestion_client):
+    r = chokepoint_congestion_client.get("/api/analytics/chokepoint-congestion?days=14")
+    rows = {row["chokepoint"]: row for row in r.json()["rows"]}
+    assert "suez" in rows
+    assert rows["suez"]["current_vessels"] == 2
+    assert "panama" in rows
+    assert rows["panama"]["current_vessels"] == 1
+
+
+def test_chokepoint_congestion_no_baseline_factor(chokepoint_congestion_client):
+    r = chokepoint_congestion_client.get("/api/analytics/chokepoint-congestion?days=14")
+    rows = {row["chokepoint"]: row for row in r.json()["rows"]}
+    assert rows["panama"]["congestion_factor"] == pytest.approx(1.0, abs=0.01)
+    assert rows["panama"]["baseline_avg_vessels"] is None
+
+
+def test_chokepoint_congestion_sorted_by_factor(chokepoint_congestion_client):
+    r = chokepoint_congestion_client.get("/api/analytics/chokepoint-congestion?days=14")
+    rows = r.json()["rows"]
+    factors = [row["congestion_factor"] for row in rows]
+    assert factors == sorted(factors, reverse=True)
+
+
+def test_chokepoint_congestion_dwell_hours(chokepoint_congestion_client):
+    r = chokepoint_congestion_client.get("/api/analytics/chokepoint-congestion?days=14")
+    rows = {row["chokepoint"]: row for row in r.json()["rows"]}
+    suez = rows.get("suez")
+    if suez:
+        # 2 current vessels transiting 6h and 8h -> avg ~7h
+        if suez["avg_current_dwell_hours"] is not None:
+            assert 5.0 <= suez["avg_current_dwell_hours"] <= 10.0
+
+
+def test_chokepoint_congestion_baseline_higher_than_current(chokepoint_congestion_client):
+    r = chokepoint_congestion_client.get("/api/analytics/chokepoint-congestion?days=14")
+    rows = {row["chokepoint"]: row for row in r.json()["rows"]}
+    suez = rows["suez"]
+    # baseline_avg_dwell_hours mixes in the two currently-transiting spans that
+    # overlap the baseline window (same behavior as port-congestion's baseline calc),
+    # so it sits between the 12h historical transits and the 6h/8h in-progress ones.
+    assert 8.0 <= suez["baseline_avg_dwell_hours"] <= 12.0
+    assert suez["congestion_factor"] > 0
+
+
+# ---------------------------------------------------------------------------
 # Phase 28: destination flow intelligence
 # ---------------------------------------------------------------------------
 
@@ -5138,6 +5301,15 @@ def test_port_arrivals_smoke(analytics_client):
 
 def test_port_congestion_smoke(analytics_client):
     r = analytics_client.get("/api/analytics/port-congestion")
+    assert r.status_code == 200
+    d = r.json()
+    assert "as_of" in d
+    assert "rows" in d
+    assert isinstance(d["rows"], list)
+
+
+def test_chokepoint_congestion_smoke(analytics_client):
+    r = analytics_client.get("/api/analytics/chokepoint-congestion")
     assert r.status_code == 200
     d = r.json()
     assert "as_of" in d

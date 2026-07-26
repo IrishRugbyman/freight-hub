@@ -750,6 +750,22 @@ class PortCongestionResponse(BaseModel):
     rows: list[PortCongestionRow]
 
 
+class ChokepointCongestionRow(BaseModel):
+    chokepoint: str
+    kind: str | None
+    current_vessels: int
+    avg_current_dwell_hours: float | None  # hours for open (in-progress) transits
+    baseline_avg_vessels: float | None     # avg simultaneous transiting vessels over history
+    baseline_avg_dwell_hours: float | None  # avg completed-transit duration over history
+    congestion_factor: float               # current_vessels / baseline_avg (or 1.0 if no baseline)
+
+
+class ChokepointCongestionResponse(BaseModel):
+    as_of: str
+    days_baseline: int
+    rows: list[ChokepointCongestionRow]
+
+
 # ---- Phase 34: Anomaly watchlist ----
 
 

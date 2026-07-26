@@ -102,6 +102,8 @@ from .schemas import (
     VesselBehavioralRisk,
     PortCongestionRow,
     PortCongestionResponse,
+    ChokepointCongestionRow,
+    ChokepointCongestionResponse,
     VesselRiskRow,
     VesselRiskResponse,
     RoutesResponse,
@@ -4139,6 +4141,147 @@ def analytics_port_congestion(kind: str = "", days: int = 14):
 
     rows_out.sort(key=lambda r: (-r.congestion_factor, -r.current_vessels))
     return PortCongestionResponse(
+        as_of=_iso(now_ts) or "",
+        days_baseline=days,
+        rows=rows_out,
+    )
+
+
+def _merged_transit_spans(since: datetime, kind: str = "") -> pd.DataFrame:
+    """Merged continuous chokepoint-transit spans since `since`, computed in DuckDB.
+
+    Mirrors `_merged_anchored_spans`: the analytics job's sliding window stores one
+    continuous transit as a chain of overlapping closed fragments (entered_ts shifts
+    each run for an ongoing transit), so raw transit_events rows would inflate both
+    the current dwell and the baseline. Same gaps-and-islands merge, aliased onto
+    transit_events' entered_ts/exited_ts/chokepoint columns so the generic
+    `current_from_spans` helper (built for anchored_episodes) can be reused as-is.
+
+    Returns columns: mmsi, zone (= chokepoint), start_ts, end_ts, kind, segment.
+    """
+    kind_cond = " AND kind = ?" if kind else ""
+    params: list = [since] + ([kind] if kind else [])
+    return db.query(
+        "WITH frags AS ("
+        "  SELECT mmsi, chokepoint AS zone, entered_ts AS start_ts, exited_ts AS end_ts, "
+        "         kind, segment "
+        "  FROM transit_events "
+        f"  WHERE exited_ts >= ?{kind_cond}"
+        "), ordered AS ("
+        "  SELECT *, max(end_ts) OVER ("
+        "      PARTITION BY mmsi, zone ORDER BY start_ts "
+        "      ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS prev_max_end "
+        "  FROM frags"
+        "), flagged AS ("
+        "  SELECT *, CASE WHEN prev_max_end IS NULL "
+        "                 OR start_ts > prev_max_end + INTERVAL 2 HOUR "
+        "            THEN 1 ELSE 0 END AS new_span "
+        "  FROM ordered"
+        "), spanned AS ("
+        "  SELECT *, sum(new_span) OVER ("
+        "      PARTITION BY mmsi, zone ORDER BY start_ts "
+        "      ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS span_id "
+        "  FROM flagged"
+        ") "
+        "SELECT mmsi, zone, min(start_ts) AS start_ts, max(end_ts) AS end_ts, "
+        "       any_value(kind) AS kind, any_value(segment) AS segment "
+        "FROM spanned GROUP BY mmsi, zone, span_id",
+        params,
+        db=db.analytics_db_path(),
+    )
+
+
+@app.get("/api/analytics/chokepoint-congestion", response_model=ChokepointCongestionResponse)
+def analytics_chokepoint_congestion(kind: str = "", days: int = 14):
+    """Chokepoint transit congestion monitor, built from AIS dwell time.
+
+    Same current-vs-baseline design as `/api/analytics/port-congestion`, applied to
+    the 9 chokepoints (Suez, Panama, Malacca, Hormuz, etc.) instead of anchorage
+    zones: "dwell time" here is how long a vessel spends inside the chokepoint's
+    AIS-tagged region while transiting, not pre-transit staging. Vessels currently
+    mid-transit are compared against the historical average number of concurrent
+    transits and average transit duration for that chokepoint, over the last `days`
+    days. Chokepoints with no historical baseline still appear if vessels are
+    currently transiting: they get congestion_factor=1.0 (no comparison available).
+    """
+    from analytics.detect import CURRENT_ANCHOR_WINDOW_H, current_from_spans
+
+    days = max(3, min(90, days))
+    now_ts = datetime.now(UTC).replace(tzinfo=None)
+    since = now_ts - timedelta(days=days)
+
+    span_df = _merged_transit_spans(since, kind)
+    max_end = pd.to_datetime(span_df["end_ts"]).max() if not span_df.empty else None
+    spans = span_df.to_dict("records") if not span_df.empty else []
+    current = current_from_spans(spans, max_end) if max_end is not None else []
+
+    kind_map: dict[int, str | None] = {}
+    if not span_df.empty:
+        for _, r in span_df.dropna(subset=["mmsi"]).iterrows():
+            kind_map.setdefault(int(r["mmsi"]), _str_or_none(r.get("kind")))
+
+    # Build current state: chokepoint -> {vessels, avg_dwell, kind}
+    zone_current: dict[str, dict] = {}
+    cur_df = pd.DataFrame(current)
+    if not cur_df.empty:
+        for zone_key, grp in cur_df.groupby("zone"):
+            mmsis = [int(m) for m in grp["mmsi"]]
+            kinds = [kind_map.get(m) for m in mmsis if kind_map.get(m)]
+            zone_current[str(zone_key)] = {
+                "current_vessels": int(len(grp)),
+                "avg_current_dwell_hours": round(float(grp["dwell_hours"].mean()), 1),
+                "kind": kinds[0] if kinds else None,
+            }
+
+    # Historical baseline from merged spans: avg concurrent transiting vessels over
+    # the window EXCLUDING the present (each span clipped to [since, baseline_end]).
+    zone_baseline: dict[str, dict] = {}
+    if not span_df.empty and max_end is not None:
+        span_df["start_ts"] = pd.to_datetime(span_df["start_ts"])
+        span_df["end_ts"] = pd.to_datetime(span_df["end_ts"])
+        baseline_end = pd.Timestamp(max_end) - pd.Timedelta(hours=CURRENT_ANCHOR_WINDOW_H)
+        since_pd = pd.Timestamp(since)
+        obs_hours = max((baseline_end - since_pd).total_seconds() / 3600, 1)
+        clip_start = span_df["start_ts"].clip(lower=since_pd)
+        clip_end = span_df["end_ts"].clip(upper=baseline_end)
+        span_df["overlap_h"] = (
+            (clip_end - clip_start).dt.total_seconds() / 3600
+        ).clip(lower=0)
+        span_df["dwell_hours"] = (
+            (span_df["end_ts"] - span_df["start_ts"]).dt.total_seconds() / 3600
+        )
+        for zone_key, grp in span_df.groupby("zone"):
+            overlap_sum = float(grp["overlap_h"].sum())
+            hist = grp[grp["overlap_h"] > 0]["dwell_hours"]
+            zone_baseline[str(zone_key)] = {
+                "baseline_avg_vessels": round(overlap_sum / obs_hours, 2) if overlap_sum > 0 else None,
+                "baseline_avg_dwell_hours": round(float(hist.mean()), 1) if len(hist) else None,
+            }
+
+    all_zones = set(zone_current.keys()) | set(zone_baseline.keys())
+    rows_out: list[ChokepointCongestionRow] = []
+    for z in all_zones:
+        cur = zone_current.get(z, {})
+        bas = zone_baseline.get(z, {})
+        cv = cur.get("current_vessels", 0)
+        bav = bas.get("baseline_avg_vessels")
+        if bav and bav > 0:
+            factor = round(cv / bav, 2)
+        else:
+            factor = 1.0 if cv > 0 else 0.0
+
+        rows_out.append(ChokepointCongestionRow(
+            chokepoint=z,
+            kind=cur.get("kind"),
+            current_vessels=cv,
+            avg_current_dwell_hours=cur.get("avg_current_dwell_hours"),
+            baseline_avg_vessels=bav,
+            baseline_avg_dwell_hours=bas.get("baseline_avg_dwell_hours"),
+            congestion_factor=factor,
+        ))
+
+    rows_out.sort(key=lambda r: (-r.congestion_factor, -r.current_vessels))
+    return ChokepointCongestionResponse(
         as_of=_iso(now_ts) or "",
         days_baseline=days,
         rows=rows_out,

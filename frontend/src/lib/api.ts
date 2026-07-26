@@ -1335,6 +1335,31 @@ export function usePortCongestion(kind = '', days = 14) {
   })
 }
 
+export interface ChokepointCongestionRow {
+  chokepoint: string
+  kind: string | null
+  current_vessels: number
+  avg_current_dwell_hours: number | null
+  baseline_avg_vessels: number | null
+  baseline_avg_dwell_hours: number | null
+  congestion_factor: number
+}
+
+export interface ChokepointCongestionResponse {
+  as_of: string
+  days_baseline: number
+  rows: ChokepointCongestionRow[]
+}
+
+export function useChokepointCongestion(kind = '', days = 14) {
+  return useQuery({
+    queryKey: ['chokepoint-congestion', kind, days],
+    queryFn: () => getJSON<ChokepointCongestionResponse>(`/api/analytics/chokepoint-congestion?kind=${kind}&days=${days}`),
+    staleTime: 3 * 60 * 1000,
+    refetchInterval: 3 * 60 * 1000,
+  })
+}
+
 
 export interface ChokepointHeatmapCell {
   date: string
