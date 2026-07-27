@@ -28,10 +28,16 @@ far enough in one quarter to change their signal state, so 90 days was too slack
 
 ## C7 - Candidate additions (only with a real source behind them)
 
-- [ ] Tanker scrapping: currently a published gap. Promote only if a free, citable demolition count
-      turns up - not a number lifted from a market commentary.
-- [ ] Fleet-age distribution from our own registry data as a scrapping *proxy*, clearly labelled as
-      a proxy rather than as scrapping.
+Tanker demolition and the two fleet-age proxies shipped 2026-07-27. Remaining:
+
+- [ ] Re-source `tanker_scrapping` properly. It is on the board but still `verified: false`: the
+      annual rate is our own arithmetic on a cumulative 2022-2026 tally, and the publisher blocks
+      automated reads. Find a citable per-period crude-tanker demolition count, or fall back to the
+      NGO Shipbreaking Platform quarterly totals with the all-vessel-types caveat made explicit.
+- [ ] Raise Equasis/MST build-year coverage above ~25% of the tracked fleet, which is what limits
+      the fleet-age signals. Until then the level is indicative and only the direction is reliable.
+- [ ] Check the fleet-age sample for crawl-order bias against a known-age subset, so the caveat can
+      state a measured skew rather than a suspected one.
 - [ ] Our own chokepoint transit index rebased to collection start, charted next to (never spliced
       with) the Baltic series.
 

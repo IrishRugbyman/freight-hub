@@ -95,6 +95,8 @@ export function formatValue(value: number | null | undefined, unit: string): str
       return value.toFixed(2)
     case 'per_day':
       return `${value.toFixed(0)}/day`
+    case 'per_year':
+      return `${value.toFixed(1)}/yr`
     default:
       return value.toLocaleString(undefined, { maximumFractionDigits: 0 })
   }

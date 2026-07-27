@@ -367,7 +367,14 @@ function CyclePage() {
             <li>
               <span className="text-foreground">Container rates and every orderbook figure:</span>{' '}
               SCFI, CCFI and Clarksons/Alphaliner orderbook data are sold, not published. They are
-              hand-recorded observations with an as-of date and go visibly stale.
+              hand-recorded observations, each read off a primary or trade-press source on a stated
+              date, and they go visibly stale rather than quietly current.
+            </li>
+            <li>
+              <span className="text-foreground">Fleet age is a proxy, not demolition:</span> we
+              cannot see scrappings, only how much of the fleet has reached scrapping age - and only
+              across the vessels our enrichment crawlers have reached, which is roughly a quarter of
+              what we track and is crawl-order, not a random sample.
             </li>
             <li>
               <span className="text-foreground">Any &quot;versus 2023&quot; transit comparison:</span>{' '}

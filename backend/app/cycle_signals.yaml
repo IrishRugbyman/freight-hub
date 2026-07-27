@@ -258,23 +258,86 @@ signals:
   - id: tanker_scrapping
     subsector: tanker
     category: capacity
-    label: Tanker scrapping
-    tier: missing
-    unit: vessels
-    threshold_value: null
-    threshold_label: A surge in 20-year-plus demolition would confirm the late cycle
-    direction: none
-    manual_state: unknown
+    label: Crude tanker demolition
+    tier: registered
+    unit: per_year
+    value: 11.6
+    value_note: >-
+      52 crude tankers demolished across 2022 to mid-2026 (7 VLCC, 16 Suezmax, 23
+      Aframax), which is 11.6 a year over 4.5 years. Effectively nothing against a
+      fleet with ~500 vessels already past 20.
+    threshold_value: 52.0
+    threshold_label: >-
+      A single year beating the entire 2022-2026 total (52) = the demolition wave has
+      started
+    direction: above
     expected_lag: Coincident with, or just after, the freight-rate peak
     falsifier: >-
       The dark fleet absorbs the old tonnage, so the compliant fleet never scraps and
       the age profile stops signalling anything.
-    source_label: No free feed; Clarksons demolition data is subscription-only
+    source_label: Crude tanker demolition tally 2022 to mid-2026, via Hellenic Shipping News
+    source_url: https://www.hellenicshippingnews.com/crude-tanker-scrapping-the-calm-before-the-storm/
+    as_of: 2026-07-09
+    review_interval_days: 90
+    verified: false
+    provenance: >-
+      Promoted from a published gap on 2026-07-27, but only part way. The annual rate
+      is our own arithmetic on a cumulative multi-year tally (52 / 4.5 years), and the
+      publisher blocks automated reads so the figure came through search rather than
+      from the page itself. Clarksons sells the authoritative demolition series. Cross
+      checks: the NGO Shipbreaking Platform counted 88 ships dismantled in Q1 2026 and
+      71 in Q2 across all vessel types worldwide, and BIMCO expects tanker scrapping to
+      stay subdued through 2026 and only surge from 2028.
+
+  - id: tanker_fleet_age
+    subsector: tanker
+    category: capacity
+    label: Tanker fleet at scrapping age (our sample)
+    tier: live
+    unit: pct
+    resolver: fleet_age:tanker
+    threshold_value: 25.0
+    threshold_label: >-
+      Above 25% past 20 years with demolition still flat = the overhang has to clear
+      eventually
+    direction: above
+    expected_lag: Leads demolition; a vessel is a candidate for years before it goes
+    falsifier: >-
+      Scrapping accelerates and pulls the share down, or the aged tonnage migrates
+      permanently into the dark fleet, where age stops implying demolition.
+    source_label: Own registry (Equasis crawler + MyShipTracking build years)
     source_url: null
-    gap_reason: >-
-      Demolition counts are sold, not published. The last figure we saw second-hand
-      was ~36 vessels in the first nine months of 2025, which we will not put on a
-      tile as if it were current.
+    review_interval_days: 2
+    caveat: >-
+      A proxy for scrapping pressure, not a scrapping count, and computed over the
+      vessels whose build year our crawlers happen to have - roughly a quarter of the
+      tankers we track, in crawl order rather than a random sample. It lands close to
+      BIMCO's independent 22%-of-crude-fleet-over-20 figure, which is reassuring but
+      not a substitute for full coverage.
+
+  - id: drybulk_fleet_age
+    subsector: drybulk
+    category: capacity
+    label: Bulker fleet at scrapping age (our sample)
+    tier: live
+    unit: pct
+    resolver: fleet_age:bulk
+    threshold_value: 25.0
+    threshold_label: >-
+      Above 25% past 20 years = an ageing fleet meeting a rising orderbook, the 2009
+      setup
+    direction: above
+    expected_lag: Leads demolition; a vessel is a candidate for years before it goes
+    falsifier: >-
+      Demolition clears the tail, or the aged share is an artefact of which vessels our
+      crawlers reached rather than of the fleet.
+    source_label: Own registry (Equasis crawler + MyShipTracking build years)
+    source_url: null
+    review_interval_days: 2
+    caveat: >-
+      Same sampling limits as the tanker figure: roughly a quarter of the bulkers we
+      track have a known build year, in crawl order rather than at random. Read the
+      level as indicative and the direction as the signal.
 
   # -------------------------------------------------------------------- event
   - id: suez_transits

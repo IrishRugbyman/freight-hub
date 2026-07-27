@@ -1,5 +1,40 @@
 # Freight Hub Changelog
 
+## 2026-07-27 (session 19) - Tanker demolition and two fleet-age proxies; the bulker age signal came back breached
+
+Filled the last capacity-side hole on `/cycle`. 11 signals -> 13.
+
+**Crude tanker demolition, gap -> registered.** No free per-period demolition count exists, but a
+cumulative tally does: 52 crude tankers scrapped across 2022 to mid-2026 (7 VLCC, 16 Suezmax, 23
+Aframax), which annualises to 11.6/yr against a fleet with roughly 500 vessels already past 20.
+The threshold is deliberately anchored to that same tally - a single year beating the whole
+2022-2026 total means the wave has started - so value and threshold share a basis. It ships
+`verified: false` on purpose: the annual rate is our own arithmetic on someone else's cumulative
+figure and the publisher blocks automated reads, so the number reached us through search rather
+than off the page. Cross-checks recorded on the tile: NGO Shipbreaking Platform counted 88 ships
+dismantled in Q1 2026 and 71 in Q2 across all types worldwide, and BIMCO expects tanker scrapping
+subdued through 2026, surging only from 2028.
+
+**Fleet age at scrapping age, two live signals from our own registry.** `_fleet_age_over_20`
+joins Equasis build years (PostgreSQL `vessels`) with MyShipTracking filling gaps, over vessels
+seen in the last 24h, and reports the share at or past 20 years with the cutoff computed from the
+current year rather than hardcoded. Tanker 20.8% (61 of 293 known build years, 24% of 1,202
+tracked, mean age 14.6y). Bulk **31.9%** (137 of 430, 23% of 1,847, mean age 16.8y) - **breached**,
+and the more interesting of the two: an ageing bulker fleet now meeting the rising orderbook that
+last session's verification uncovered, which is the 2009 setup in miniature.
+
+The tanker figure lands at 20.8% against BIMCO's independent 22%-of-crude-fleet-over-20, which is a
+useful sanity check that the sample is not wildly skewed - but it is still roughly a quarter of the
+fleet, selected in crawl order rather than at random, so the coverage count travels with the value
+everywhere it is displayed and the caveat says to read the direction rather than the level.
+
+New tests: every `live` signal in the shipped registry must name a resolver that actually exists in
+DEFAULT_RESOLVERS (a typo would otherwise render an empty tile forever), and `per_year` formatting.
+Backend 674 passing, frontend 50 passing.
+
+Board now reads: 2 breached (tanker orderbook 27%, bulker fleet age 31.9%), 1 approaching
+(dry-bulk orderbook 14%), 1 published gap (Hormuz transits).
+
 ## 2026-07-26 (session 18b) - Verified the four registered figures; two were wrong and both flipped a read
 
 Every hand-recorded number on `/cycle` shipped flagged `verified: false`. Checking them against

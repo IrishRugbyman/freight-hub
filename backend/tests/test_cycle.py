@@ -260,6 +260,15 @@ def test_shipped_registry_records_how_each_verified_number_was_checked():
             assert s.source_url, f"{s.id} claims verified with no source URL"
 
 
+def test_shipped_registry_live_signals_all_name_a_real_resolver():
+    """A typo in a resolver key would silently render an empty tile forever."""
+    from app.cycle import DEFAULT_RESOLVERS
+
+    for s in get_registry().signals:
+        if s.tier == "live":
+            assert s.resolver in DEFAULT_RESOLVERS, f"{s.id}: no resolver {s.resolver!r}"
+
+
 def test_shipped_registry_covers_all_three_subsectors():
     assert {s["id"] for s in get_registry().subsectors} == {"container", "drybulk", "tanker"}
 

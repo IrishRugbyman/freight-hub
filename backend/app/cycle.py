@@ -331,6 +331,64 @@ def _baltic_ratio(numerator: str, denominator: str) -> Resolved:
     )
 
 
+SCRAPPING_AGE_YEARS = 20
+
+
+def _fleet_age_over_20(kind: str) -> Resolved:
+    """Share of our aged sample of `kind` vessels at or past scrapping age.
+
+    A scrapping *proxy*, not a scrapping count: we cannot see demolitions, but we can
+    see how much of the fleet we track has reached the age at which it is a candidate.
+
+    Build years come from two enrichment crawlers - the Equasis registry (PostgreSQL
+    `vessels`) with MyShipTracking filling gaps - and neither has covered the whole
+    live fleet, so the denominator is the vessels whose age we know, not the fleet.
+    That sample is crawl-order rather than random, which is why the coverage count
+    travels with the value everywhere it is shown.
+    """
+    import pandas as pd
+
+    from app.db import mst_db_path, pg_query, query
+
+    try:
+        tracked = pg_query(
+            "SELECT imo, year_built FROM vessels "
+            "WHERE kind = %s AND ais_last_seen > now() - interval '24 hours'",
+            [kind],
+        )
+        if tracked.empty:
+            return Resolved(value=None)
+        mst = query(
+            "SELECT imo, year_built FROM mst_vessel_state "
+            "WHERE year_built IS NOT NULL AND imo IS NOT NULL",
+            db=mst_db_path(),
+        )
+    except Exception:  # noqa: BLE001 - a dead crawler DB degrades to unknown
+        return Resolved(value=None)
+
+    if not mst.empty:
+        tracked = tracked.merge(mst, on="imo", how="left", suffixes=("", "_mst"))
+        tracked["year_built"] = tracked["year_built"].fillna(tracked["year_built_mst"])
+
+    years = pd.to_numeric(tracked["year_built"], errors="coerce").dropna()
+    years = years[(years > 1900) & (years <= date.today().year)]
+    if years.empty:
+        return Resolved(value=None)
+
+    cutoff = date.today().year - SCRAPPING_AGE_YEARS
+    aged = int((years <= cutoff).sum())
+    mean_age = date.today().year - float(years.mean())
+    return Resolved(
+        value=aged / len(years) * 100.0,
+        as_of=date.today(),
+        note=(
+            f"{aged} of {len(years)} known build years "
+            f"({len(years) / len(tracked) * 100:.0f}% of {len(tracked)} tracked); "
+            f"mean age {mean_age:.1f}y"
+        ),
+    )
+
+
 def _transits(chokepoint: str, window_days: int = 14) -> Resolved:
     """Mean daily transits of one chokepoint over a trailing window, from our own AIS.
 
@@ -372,6 +430,8 @@ DEFAULT_RESOLVERS: dict[str, Callable[[], Resolved]] = {
     "baltic:BCI_OVER_BPI": lambda: _baltic_ratio("BCI", "BPI"),
     "transits:suez": lambda: _transits("suez"),
     "transits:hormuz": lambda: _transits("hormuz"),
+    "fleet_age:tanker": lambda: _fleet_age_over_20("tanker"),
+    "fleet_age:bulk": lambda: _fleet_age_over_20("bulk"),
 }
 
 

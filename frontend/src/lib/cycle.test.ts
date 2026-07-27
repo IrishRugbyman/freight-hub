@@ -92,6 +92,7 @@ describe('formatValue', () => {
     expect(formatValue(7, 'pct')).toBe('7.0%')
     expect(formatValue(2.117, 'ratio')).toBe('2.12')
     expect(formatValue(109.36, 'per_day')).toBe('109/day')
+    expect(formatValue(11.55, 'per_year')).toBe('11.6/yr')
   })
 
   it('renders a dash rather than a zero when there is no value', () => {
