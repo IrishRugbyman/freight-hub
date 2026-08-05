@@ -58,6 +58,11 @@ Each is a standalone Python project with its own venv (symlinked from `~/data/`)
 - **Backend** (`backend/`): FastAPI `freight-api` on `:8003`, a thin read layer over the
   AIS collector's `live_positions` table. pytest suite (mirrors squiidwiki).
 
+Each half has its own CLAUDE.md with the detail that belongs to it - read the one for the
+side you are working on: [`backend/CLAUDE.md`](backend/CLAUDE.md) (read-only DB rules, batch
+jobs, ETA stack, test fixtures) and [`frontend/CLAUDE.md`](frontend/CLAUDE.md) (routing,
+query cadence tiers, theme tokens, the deck.gl bundling constraint).
+
 ## Data flow
 
 ```
