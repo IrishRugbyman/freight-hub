@@ -70,6 +70,23 @@ Use `_fresh_cutoff()` / `_visible_cutoff()` in `main.py` rather than re-deriving
 the API keeps reading the live file through the whole ~5-10 min build. `--reset` wipes the
 watermark and reprocesses all history. Preserve all three of those properties in any change.
 
+**The snapshot window is loaded into one DataFrame**, so window width is the job's memory
+driver. It was OOM-killed three times in Jul 2026 (4.0-5.0 GB on a 7.6 GB box) and could not
+self-recover: a dead run stops advancing the watermark, so the next run reads a larger window
+and dies sooner. Recover a backlog with bounded passes, then one full run:
+
+```bash
+.venv/bin/python -m analytics.build --max-window-hours 48 --skip-derived   # repeat until clear
+.venv/bin/python -m analytics.build                                        # final, with 7b-7e
+```
+
+`--skip-derived` skips `_run_derived_stages()` (7b-7e: ETA labels/samples/serving, destination,
+drift). Those read the **full AIS history** regardless of the watermark, so they dominate the
+footprint and grow daily; only their final state matters, so intermediate passes skip them.
+The unit carries `MemoryMax=5G` to keep an overrun a contained cgroup OOM rather than a global
+one that could pick postgres or the collector as its victim. Do not raise it without fixing the
+underlying footprint.
+
 Per-account quotas on the crawlers are not tuning knobs: raising the Equasis rate locks the
 account for 7 days, and MyShipTracking is anonymous but IP-rate-limited. See the root CLAUDE.md.
 

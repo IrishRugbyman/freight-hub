@@ -1,5 +1,48 @@
 # Freight Hub Changelog
 
+## 2026-08-05 (session 20) - The analytics job had been dead for 10 days; bounded catch-up passes and a memory guard
+
+`freight-analytics.timer` was `enabled` but `inactive`, last run 2026-07-26 15:00. The exit state
+read `Result=success` with `ExecMainStatus=9`, which is not an application failure: code 2 is
+`CLD_KILLED`, and the kernel log has `Out of memory: Killed process 3675307 (python)
+anon-rss:4658924kB task_memcg=/system.slice/freight-analytics.service`. Three OOM kills in total
+(2026-07-20, and twice on 2026-07-26 at 4.99 GB and 4.66 GB) on a 7.6 GB box. Each was a *global*
+OOM, so the victim was whichever process was largest: postgres, the AIS collector and every other
+live service were in the blast radius. The 15:33 kill was triggered by an unrelated `claude`
+process pushing the machine over.
+
+**Why it could not recover on its own.** `_run_inner` loaded every snapshot since the watermark
+into a single DataFrame with no upper bound. Once a run dies, the watermark stops advancing, so
+the next run reads a strictly larger window and dies sooner - a ratchet. By the time it was
+noticed the gap was 10.3 days, 6.2M snapshot rows against ~25k for a normal hourly increment.
+
+- `_window_bounds(watermark, max_window_hours)` now resolves `[since, until)`, exposed as
+  `--max-window-hours`. It rejects any width at or below the 6h overlap, since such a window can
+  never advance the watermark and a walk-forward on it would livelock. 9 unit tests
+  (`tests/test_build_window.py`), including the net-advance invariant.
+- An empty *bounded* window with rows beyond it advances the watermark to `until` instead of
+  returning early, so a stretch with no collector coverage cannot stall the walk.
+- Stages 7b-7e (ETA labels, destination labels, ETA samples/serving, drift) moved into
+  `_run_derived_stages()`, skippable via `--skip-derived`. They read the full AIS history, are
+  independent of the incremental window, and only their final state matters - so intermediate
+  catch-up passes should not pay for them. The 15:33 kill landed in 7c (`eta_samples`), ~11 min
+  after `destination_labels` finished.
+- `MemoryAccounting=yes` + `MemoryMax=5G` on `freight-analytics.service`. This does not stop an
+  overrun, it *contains* it: a cgroup OOM kills only this job instead of letting the kernel pick
+  a victim machine-wide. Swap left unlimited on purpose - thrashing to a slow finish beats dying.
+- Cleared an orphaned `freight_analytics.new.duckdb.wal` (7.9 MB) left by the killed run.
+  `_open_analytics_scratch()` unlinks a leftover `.new.duckdb` but not its WAL, so a fresh scratch
+  copy would have replayed it. Related and still open: `os.replace` promotes the scratch `.duckdb`
+  but leaves `freight_analytics.duckdb.wal` orphaned beside the live DB (one from 2026-07-04 is
+  still there).
+
+Backlog walked forward in 48h passes (42h net advance each), peak RSS 1.27 GB on the first pass
+against the 4.66 GB that died - the window bound, not the guard, is what made it fit.
+
+**Still open:** the derived ETA stages scale with total AIS history, not with the increment, so
+their footprint grows daily regardless of the watermark. That is the next thing to fix, and it is
+what the 5 GB guard is really protecting against.
+
 ## 2026-07-27 (session 19) - Tanker demolition and two fleet-age proxies; the bulker age signal came back breached
 
 Filled the last capacity-side hole on `/cycle`. 11 signals -> 13.

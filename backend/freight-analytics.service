@@ -20,5 +20,14 @@ ExecStart=/home/lbzgiu/quant/freight/backend/.venv/bin/python -m analytics.build
 StandardOutput=journal
 StandardError=journal
 
+# Memory guard. This job was OOM-killed three times (2026-07-20, 2026-07-26 x2) at
+# 4.0-5.0 GB RSS on a 7.6 GB box; each was a GLOBAL OOM, where the kernel picks the
+# largest process on the machine as the victim - postgres, the AIS collector and every
+# other live service were in the blast radius. MemoryMax confines an overrun to a cgroup
+# OOM that kills only this job. Swap is deliberately left unlimited: thrashing to a
+# slow finish beats dying. Raise only alongside a real fix to the ETA stage's footprint.
+MemoryAccounting=yes
+MemoryMax=5G
+
 [Install]
 WantedBy=multi-user.target
