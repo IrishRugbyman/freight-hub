@@ -30,6 +30,17 @@ Promote to a phase only with a written plan:
 
 - **Owner/fleet dashboards:** aggregate analytics by owner (which owners' VLCCs are laden vs ballast right now); needs the registry join. Constraint: Equasis owner data is currently filled for only ~1,925 of 15,235 IMOs (~13%), so an owner view would be sparse until the crawler covers more of the live fleet.
 
+- **A second AIS source (redundancy):** aisstream is a single point of failure and it
+  failed - zero vessels from 2026-08-05 13:31 UTC for over a day, with the tracker
+  showing an empty map throughout. The collector no longer *fabricates* data during an
+  outage (see CHANGELOG 2026-08-07), but it still has nothing to fall back on.
+  **AISHub** is the candidate: a genuinely independent feed on a contributor model
+  (feed your receiver's data in, get stream access out), which is the catch - it needs
+  hardware in VHF range or a contributing partner. Verify the contributor threshold and
+  licensing before committing. National open-data feeds (Norway, Denmark) are free and
+  independent but single-region, so they supplement rather than replace. Detail and the
+  ruled-out options are in [`docs/reference/landscape.md`](reference/landscape.md).
+
 ---
 
 ## Deliberately Not Building
