@@ -61,8 +61,22 @@ _HISTORY_START = datetime(2026, 1, 1)
 # Retry budget when the collector holds the AIS DB lock (usually < 1s per write)
 _LOCK_RETRIES = 200  # 200 * 0.3s = 60s; collector holds write lock between upserts
 
+# Ceiling for DuckDB's own buffer manager. Unset, DuckDB defaults to 80% of system
+# RAM (~6.1 GB on this 7.6 GB box), which is ABOVE the unit's MemoryMax=5G - so it
+# would keep allocating until the cgroup killed it instead of spilling to disk.
+# The remainder of the 5 GB budget is for the pandas frames this job builds, which
+# DuckDB does not count against its limit.
+_DUCKDB_MEMORY_LIMIT = os.environ.get("FREIGHT_DUCKDB_MEMORY_LIMIT", "2GB")
+
 # Window within max_ts where a vessel is considered "recently active" for gap closure
 _GAP_RECHECK_H = 6
+
+
+def _tune(conn: duckdb.DuckDBPyConnection) -> duckdb.DuckDBPyConnection:
+    """Apply the memory ceiling to a freshly opened connection."""
+    conn.execute(f"SET memory_limit='{_DUCKDB_MEMORY_LIMIT}'")
+    return conn
+
 
 # ---------------------------------------------------------------------------
 # Analytics DB schema
@@ -141,7 +155,7 @@ def _ais_query(sql: str, params: list | None = None) -> pd.DataFrame:
         return pd.DataFrame()
     for attempt in range(_LOCK_RETRIES):
         try:
-            conn = duckdb.connect(str(AIS_DB), read_only=True)
+            conn = _tune(duckdb.connect(str(AIS_DB), read_only=True))
             try:
                 return conn.execute(sql, params or []).df()
             finally:
@@ -169,6 +183,11 @@ def _rows_beyond(ts: datetime) -> int:
 _ANALYTICS_NEW = ANALYTICS_DB.with_suffix(".new.duckdb")
 
 
+def _wal_for(db: Path) -> Path:
+    """DuckDB's write-ahead log sits beside the DB as `<name>.wal`."""
+    return db.with_name(db.name + ".wal")
+
+
 def _open_analytics_scratch() -> duckdb.DuckDBPyConnection:
     """Open a scratch DB for this build run.
 
@@ -178,16 +197,18 @@ def _open_analytics_scratch() -> duckdb.DuckDBPyConnection:
     """
     ANALYTICS_DB.parent.mkdir(parents=True, exist_ok=True)
 
-    # Remove any leftover scratch from a prior crashed run.
-    if _ANALYTICS_NEW.exists():
-        _ANALYTICS_NEW.unlink()
+    # Remove any leftover scratch from a prior crashed run - including its WAL.
+    # Dropping the .duckdb but leaving the .wal would let a dead run's writes
+    # replay into the fresh copy we are about to make.
+    _ANALYTICS_NEW.unlink(missing_ok=True)
+    _wal_for(_ANALYTICS_NEW).unlink(missing_ok=True)
 
     # Seed scratch with all existing historical data so INSERT OR REPLACE
     # only needs to add/update incremental rows.
     if ANALYTICS_DB.exists():
         shutil.copy2(ANALYTICS_DB, _ANALYTICS_NEW)
 
-    conn = duckdb.connect(str(_ANALYTICS_NEW))
+    conn = _tune(duckdb.connect(str(_ANALYTICS_NEW)))
     conn.execute(_SCHEMA)
     return conn
 
@@ -199,6 +220,17 @@ def _commit_scratch() -> None:
         return
     # On Linux, os.replace is POSIX rename(2) - atomic within the same filesystem.
     os.replace(_ANALYTICS_NEW, ANALYTICS_DB)
+
+    # A WAL belongs to a database *path*, not an inode, so the rename above would
+    # otherwise strand the scratch's WAL under the old name and leave any WAL
+    # sitting beside the live DB pointing at a file that no longer exists. Keep
+    # the pair consistent: carry a real scratch WAL across, drop a stale one.
+    scratch_wal, live_wal = _wal_for(_ANALYTICS_NEW), _wal_for(ANALYTICS_DB)
+    if scratch_wal.exists():
+        os.replace(scratch_wal, live_wal)
+    else:
+        live_wal.unlink(missing_ok=True)
+
     log.info("scratch promoted to live: %s", ANALYTICS_DB)
 
 

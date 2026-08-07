@@ -1,5 +1,62 @@
 # Freight Hub Changelog
 
+## 2026-08-07 (session 21) - 80% of the analytics DB was empty space; the disk scare was never a capacity problem
+
+Session 20 restarted the analytics job by hand but never restarted its timer, so
+`freight-analytics.timer` was still `enabled`/`inactive` and the last run was 2026-07-26. The root
+disk was at 93% (5.4 GB free of 75 GB) with a 10.6 GB `freight_analytics.new.duckdb` orphaned
+beside the live DB. Two candidate explanations were on the table - the DB had genuinely grown, or
+we needed a bigger box - and both were wrong.
+
+**The measurement that settled it.** `PRAGMA database_size` on the 9.8 GiB live DB reported
+`used_blocks 8,083` against `free_blocks 32,398` at a 256 KB block size: ~2.0 GB of data in a
+9.8 GB file, **80% free space**. DuckDB reuses free blocks but never returns them to the OS, and
+`_open_analytics_scratch()` `shutil.copy2`s the whole file every run, so each hourly build was
+copying ~8 GB of holes and needed 10 GB free just to start. A full rewrite via
+`COPY FROM DATABASE` took it to **0.45 GB - 4.2% of the original** - with all 26 tables and all
+4,282,927 rows verified equal before the swap.
+
+A caution for the next person measuring this: `duckdb_tables().estimated_size` reported
+`eta_arrivals` at 57M rows when the real count is 117,067. It is an estimate and it is not close.
+Count explicitly.
+
+**DuckDB was allowed to allocate past its own cgroup cap.** `build.py` set no `memory_limit`, so
+DuckDB defaulted to 80% of system RAM (~6.1 GB on this 7.6 GB box) against the unit's
+`MemoryMax=5G`. It would keep allocating until the cgroup killed it rather than spilling to disk -
+which reframes the July OOMs: the guard added in session 20 could not work as intended while the
+engine's own ceiling sat above it. Now pinned to 2 GB (`FREIGHT_DUCKDB_MEMORY_LIMIT`), leaving the
+rest of the 5 GB budget for the pandas frames DuckDB does not count.
+
+**The WAL pairing bug, closed.** A DuckDB WAL is bound to a database *path*, not an inode.
+`_open_analytics_scratch()` unlinked a stale `.new.duckdb` but not its `.wal`, so a dead run's
+writes would replay into the next build's fresh copy; `_commit_scratch()`'s `os.replace` stranded
+the scratch WAL under the old name and left any live-side WAL pointing at a replaced file. Both
+now move in step with their DB. This was not theoretical - two killed runs (2026-08-05, and one
+this session) each stranded exactly this pair. 7 unit tests in `tests/test_build_scratch.py`.
+
+**Verified.** Bounded catch-up cleared the backlog with peak RSS 798 MB against the 4.66 GB that
+died in July; watermark advanced to 2026-08-06 02:28:54, which is the end of available snapshots.
+683 existing tests still pass.
+
+**Hardware, for the record.** netcup VPS pricing was compared against a Hetzner cx43 rescale at
+several points during this session. Net of VAT the two are near-identical on RAM (VPS 2000 €16.18
+vs cx43 €15.99) and netcup wins heavily on disk; ARM64 is better still (VPS 3000 ARM, 24 GB /
+768 GB, €15.93 net) but is currently sold out. No move was made, because after compaction there is
+no capacity problem to solve: the binding constraint was free-space bloat and an unbounded window,
+both fixed in code. Also corrected: `~/ops/README.md` lists cx43 as 160 GB and volumes at
+~€0.04/GB; the console shows 80 GB on the disk-preserving rescale and €0.06864/GB incl. VAT.
+
+**Found, not fixed (separate incidents).**
+- The AIS collector has been delivering **zero vessels since 2026-08-06 02:29** while reporting
+  `ais connected: 29 regions`. Same code that worked until then, subscription accepted, no
+  messages - points at `AISSTREAM_API_KEY` or an aisstream.io outage. Untouched deliberately:
+  aisstream permits one concurrent connection per key, so probing it would disconnect the live
+  collector. This is why the analytics backlog "cleared" at 02:28:54.
+- `vessel master upsert failed (ON CONFLICT DO UPDATE command cannot affect row a second time)`
+  on every ~10 min collector cycle for as long as the journal goes back, so
+  `vessel-master rows upserted` has been 0 throughout. Needs a dedupe on the conflict key before
+  the upsert.
+
 ## 2026-08-05 (session 20) - The analytics job had been dead for 10 days; bounded catch-up passes and a memory guard
 
 `freight-analytics.timer` was `enabled` but `inactive`, last run 2026-07-26 15:00. The exit state
