@@ -47,6 +47,14 @@ Each is a standalone Python project with its own venv (symlinked from `~/data/`)
   Runner: `backend/app/runner_routes.py`. Target tab: `/routes`.
 - **`research/freight-dispersion/`** - Capesize 5TC FFA vs fleet geographic dispersion backtest.
   Runner: `backend/app/runner_dispersion.py`. Target tab: `/dispersion`.
+- **`research/supply-nowcast/`** - Probabilistic seaborne supply nowcast from the AIS collector's own
+  store: a two-stage cascade `P(destination zone) x P(arrival day | zone)` weighted by carrying
+  capacity, plus a floating-storage curve (storage vs in-movement, at 5 and 10 days) and a Suez-queue
+  count. **Scaffold**: modules raise `NotImplementedError`; see its `docs/ROADMAP.md`. Build order is
+  inverted relative to the source system - floating storage first, because it needs no labels, no
+  models and no long history. Belongs to the quant clean-room family (`docs/SOURCE.md` committed,
+  `docs/_source.md` gitignored). No target tab yet; the storage ratio or queue count are the
+  candidates.
 
 `uv.lock` paths point one level deeper than `research/` projects elsewhere: `../../../shared/`.
 
