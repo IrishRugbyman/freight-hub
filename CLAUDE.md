@@ -50,11 +50,16 @@ Each is a standalone Python project with its own venv (symlinked from `~/data/`)
 - **`research/supply-nowcast/`** - Probabilistic seaborne supply nowcast from the AIS collector's own
   store: a two-stage cascade `P(destination zone) x P(arrival day | zone)` weighted by carrying
   capacity, plus a floating-storage curve (storage vs in-movement, at 5 and 10 days) and a Suez-queue
-  count. **Scaffold**: modules raise `NotImplementedError`; see its `docs/ROADMAP.md`. Build order is
-  inverted relative to the source system - floating storage first, because it needs no labels, no
+  count. **Phase 1 shipped 2026-08-09**: the floating-storage curve, the Suez queue and the coverage
+  report run over the full history; the forecast cascade (Phases 2-5) is still scaffold. Build order
+  is inverted relative to the source system - floating storage first, because it needs no labels, no
   models and no long history. Belongs to the quant clean-room family (`docs/SOURCE.md` committed,
   `docs/_source.md` gitignored). No target tab yet; the storage ratio or queue count are the
-  candidates.
+  candidates, but **not before the live-reading problem is fixed** - the panel ends at each vessel's
+  last observed day, so the latest day's denominator is the fleet still being seen, not the fleet
+  afloat. Two rules any consumer must respect: `undetermined` is a published third state that stays
+  out of every denominator, and vessel class is re-derived from `length_m`, never read from the
+  stored `segment` column (pre-calibration for tankers across the whole history).
 
 `uv.lock` paths point one level deeper than `research/` projects elsewhere: `../../../shared/`.
 
