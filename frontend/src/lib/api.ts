@@ -131,12 +131,23 @@ export interface ChokepointCount {
   has_coverage: boolean
 }
 
+export interface FeedStatus {
+  /** live | stale | down | unknown */
+  state: 'live' | 'stale' | 'down' | 'unknown'
+  /** Newest position in the store, read past every freshness filter. */
+  last_seen: string | null
+  age_minutes: number | null
+  stale_hours: number
+  visible_hours: number
+}
+
 export interface Meta {
   kinds: string[]
   segments: string[]
   regions: string[]
   total_tracked: number
   last_update: string | null
+  feed?: FeedStatus | null
 }
 
 export interface VesselFilters {

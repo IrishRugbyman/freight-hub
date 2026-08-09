@@ -31,15 +31,28 @@ Promote to a phase only with a written plan:
 - **Owner/fleet dashboards:** aggregate analytics by owner (which owners' VLCCs are laden vs ballast right now); needs the registry join. Constraint: Equasis owner data is currently filled for only ~1,925 of 15,235 IMOs (~13%), so an owner view would be sparse until the crawler covers more of the live fleet.
 
 - **A second AIS source (redundancy):** aisstream is a single point of failure and it
-  failed - zero vessels from 2026-08-05 13:31 UTC for over a day, with the tracker
-  showing an empty map throughout. The collector no longer *fabricates* data during an
-  outage (see CHANGELOG 2026-08-07), but it still has nothing to fall back on.
-  **AISHub** is the candidate: a genuinely independent feed on a contributor model
-  (feed your receiver's data in, get stream access out), which is the catch - it needs
-  hardware in VHF range or a contributing partner. Verify the contributor threshold and
-  licensing before committing. National open-data feeds (Norway, Denmark) are free and
-  independent but single-region, so they supplement rather than replace. Detail and the
-  ruled-out options are in [`docs/reference/landscape.md`](reference/landscape.md).
+  has now failed twice - zero vessels from 2026-08-05 13:31 UTC for over a day, then
+  again from 2026-08-06 02:28 UTC for several days. The collector no longer
+  *fabricates* data during an outage (CHANGELOG 2026-08-07) and the site now says so
+  out loud (2026-08-09), but it still has nothing to fall back on.
+
+  **Both free candidates are now ruled out, verified against their own terms**
+  (2026-08-09, detail in [`docs/reference/landscape.md`](reference/landscape.md)):
+  AISHub is contributor-only with no consumer tier and explicitly bans re-feeding
+  public sources, and a receiver is not viable from Geneva anyway; Data Docked is
+  credit-metered REST at roughly 42k credits/day for our basin coverage against a
+  20-credit free tier, and does not return vessel type inline with positions.
+
+  The requirement that eliminates most providers, and the first thing to check on any
+  new one: **the feed must carry `ship_type` and dimensions**, or `classify()` cannot
+  produce a segment and every segment-keyed surface breaks.
+
+  What remains, in order of realism: (a) scope redundancy to the 13 chokepoints only
+  and price a fixed-area plan (VesselFinder LiveData), rather than replacing a global
+  firehose like-for-like; (b) a receiver hosted by someone within VHF range of real
+  traffic, which unlocks AISHub legitimately for ~EUR 60 plus a standing favour;
+  (c) national open feeds (Norway, Denmark, Finland) as an honest partial - about 3% of
+  our rows, so a supplement and nothing more.
 
 ---
 

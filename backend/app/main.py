@@ -24,163 +24,171 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import Response, StreamingResponse
 from loaders.freight import load_ais_dispersion
-from quant_lib.freight import flag_from_mmsi, to_iso2
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
-from . import cycle as _cycle, db, feed as _feed, fleet as _fleet, runner_destination as _runner_destination, runner_eta as _runner_eta
+from quant_lib.freight import flag_from_mmsi, to_iso2
+
+from . import cycle as _cycle
+from . import db
+from . import feed as _feed
+from . import fleet as _fleet
+from . import runner_destination as _runner_destination
+from . import runner_eta as _runner_eta
 from .runner_dispersion import run_dispersion_default
 from .runner_routes import run_routes_default
 from .schemas import (
     AisDispersionRow,
+    AisEvent,
+    AnalyticsZone,
+    AnchorageDwellResponse,
+    AnchorageOccupancyPoint,
+    AnchorageOccupancyResponse,
+    AnchoredVessel,
+    AnomalyWatchlistItem,
+    AnomalyWatchlistResponse,
+    ArrivalsResponse,
+    ArrivalTarget,
+    ArrivalVessel,
+    CargoStateChangeRow,
+    CargoStateChangesResponse,
+    CargoTransitionEvent,
+    CargoTransitionsResponse,
+    ChokepointAnomalyResponse,
+    ChokepointAnomalyRow,
+    ChokepointCongestionResponse,
+    ChokepointCongestionRow,
+    ChokepointCount,
+    ChokepointHeatmapCell,
+    ChokepointHeatmapResponse,
+    ChokepointStatusResponse,
+    ChokepointStatusRow,
+    CongestionResponse,
+    CrudeOnWaterResponse,
+    CrudeSegmentRow,
     CycleSeriesPoint,
     CycleSeriesResponse,
     CycleSignal,
     CycleSignalsResponse,
     CycleSubsector,
     CycleSubsectorsResponse,
-    AisEvent,
-    AnalyticsZone,
-    ArrivalsResponse,
-    ArrivalTarget,
-    UpcomingArrivalsResponse,
-    UpcomingVessel,
-    ChokepointCount,
+    DensityResponse,
     DestinationCandidate,
+    DestinationChangeRow,
+    DestinationChangesResponse,
+    DestinationFlowRow,
+    DestinationFlowsResponse,
     DestinationResponse,
+    DispersionResponse,
     EtaAccuracyResponse,
     EtaAccuracyRow,
     EtaByTargetResponse,
     EtaByTargetRow,
     EtaDriftAlert,
-    EtaTrendPoint,
-    MstPortCall,
-    MstVesselData,
-    MstVoyage,
-    EtaTrendResponse,
     EtaPrediction,
     EtaResponse,
-    CongestionResponse,
-    DensityResponse,
-    DispersionResponse,
+    EtaTrendPoint,
+    EtaTrendResponse,
+    EuropeanInboundResponse,
+    EuropeanInboundVessel,
+    EventRatePoint,
+    EventRateTimelineResponse,
     EventsResponse,
+    FeedStatus,
     FlagMismatchResponse,
     FlagMismatchRow,
     FlagRiskResponse,
     FlagRiskRow,
+    FleetAgeBand,
+    FleetAgeResponse,
     FleetFacets,
     FleetFlagRow,
     FleetFlagsResponse,
+    FleetHistoryResponse,
+    FleetHistorySegmentRow,
     FleetKPIs,
     FleetResponse,
+    FleetTrendDay,
+    FleetTrendResponse,
+    FleetUtilizationResponse,
+    FleetUtilizationRow,
     HighRiskPosition,
     HighRiskPositionsResponse,
+    InboundRegionRow,
     LadenResponse,
     LadenSegment,
-    Meta,
-    OwnerRiskItem,
-    OwnerRiskResponse,
-    PortFlowResponse,
-    PortDestItem,
-    RegionUtilResponse,
-    RegionUtilRow,
-    AnchorageDwellResponse,
-    AnchoredVessel,
-    CargoTransitionEvent,
-    CargoTransitionsResponse,
-    FleetAgeBand,
-    FleetAgeResponse,
-    RerouteRiskEvent,
-    RerouteRiskResponse,
-    DestinationFlowRow,
-    DestinationFlowsResponse,
+    LngInboundResponse,
+    LngLoadingVessel,
+    LngVessel,
     MarketSegmentSummary,
     MarketSummaryResponse,
+    Meta,
+    MstPortCall,
+    MstVesselData,
+    MstVoyage,
+    OwnerFleetStatusResponse,
+    OwnerFleetStatusRow,
+    OwnerIntelResponse,
+    OwnerIntelRow,
+    OwnerRiskItem,
+    OwnerRiskResponse,
+    PipelineSegment,
+    PipelinesResponse,
+    PortArrivalForecast,
+    PortArrivalResponse,
+    PortCongestionResponse,
+    PortCongestionRow,
+    PortDestItem,
+    PortFlowResponse,
+    RegionMomentumResponse,
+    RegionMomentumRow,
+    RegionUtilResponse,
+    RegionUtilRow,
+    RerouteRiskEvent,
+    RerouteRiskResponse,
     RiskEventItem,
     RiskEventsResponse,
-    ChokepointHeatmapCell,
-    ChokepointHeatmapResponse,
-    AnomalyWatchlistItem,
-    AnomalyWatchlistResponse,
-    TradeLaneCell,
-    TradeLaneMatrixResponse,
-    VesselBehavioralRisk,
-    PortCongestionRow,
-    PortCongestionResponse,
-    ChokepointCongestionRow,
-    ChokepointCongestionResponse,
-    VesselRiskRow,
-    VesselRiskResponse,
     RoutesResponse,
+    ShadowFleetResponse,
+    ShadowFleetRow,
     SlowSteamerEvent,
     SlowSteamersResponse,
-    FleetUtilizationRow,
-    FleetUtilizationResponse,
-    TransitRiskEvent,
-    TransitRiskResponse,
     SpeedAnalyticsResponse,
-    AnchorageOccupancyPoint,
-    AnchorageOccupancyResponse,
-    FleetHistorySegmentRow,
-    FleetHistoryResponse,
+    SpeedAnomalyResponse,
+    SpeedAnomalyRow,
+    SpeedSegmentRow,
+    SpeedTrendPoint,
+    SpeedTrendResponse,
     StsOffenderRow,
     StsOffendersResponse,
-    EventRatePoint,
-    EventRateTimelineResponse,
-    TransitRatePoint,
-    TransitRateTimelineResponse,
-    RegionMomentumRow,
-    RegionMomentumResponse,
     StsProximityPair,
     StsProximityResponse,
     StsRiskEvent,
     StsRiskResponse,
-    SpeedSegmentRow,
-    SpeedTrendPoint,
-    SpeedTrendResponse,
     TrackPoint,
+    TradeLaneCell,
+    TradeLaneMatrixResponse,
+    TransitRatePoint,
+    TransitRateTimelineResponse,
+    TransitRiskEvent,
+    TransitRiskResponse,
     TransitsResponse,
+    UpcomingArrivalsResponse,
+    UpcomingVessel,
     Vessel,
+    VesselBehavioralRisk,
+    VesselRiskResponse,
+    VesselRiskRow,
     VesselStateData,
     VoyageEvent,
     VoyagesResponse,
-    DestinationChangeRow,
-    DestinationChangesResponse,
-    OwnerIntelRow,
-    OwnerIntelResponse,
-    ChokepointAnomalyRow,
-    ChokepointAnomalyResponse,
-    CargoStateChangeRow,
-    CargoStateChangesResponse,
-    SpeedAnomalyRow,
-    SpeedAnomalyResponse,
-    ArrivalVessel,
-    PortArrivalForecast,
-    PortArrivalResponse,
-    CrudeSegmentRow,
-    InboundRegionRow,
-    CrudeOnWaterResponse,
-    ChokepointStatusRow,
-    ChokepointStatusResponse,
-    FleetTrendDay,
-    FleetTrendResponse,
-    ShadowFleetRow,
-    ShadowFleetResponse,
-    PipelineSegment,
-    PipelinesResponse,
-    OwnerFleetStatusRow,
-    OwnerFleetStatusResponse,
-    EuropeanInboundVessel,
-    EuropeanInboundResponse,
-    LngVessel,
-    LngLoadingVessel,
-    LngInboundResponse,
 )
 
 _STATIC = Path(__file__).parent / "static"
 _STATIC_ROUTES = _STATIC / "routes_default.json"
 _STATIC_DISPERSION = _STATIC / "dispersion_default.json"
+
 
 def _write_atomic(path: Path, text: str) -> None:
     path.parent.mkdir(exist_ok=True)
@@ -254,7 +262,7 @@ def _str_or_none(v) -> str | None:
 
 def _norm_dest(s: str) -> str:
     """Normalize an AIS destination string: strip garbage chars, collapse whitespace, uppercase."""
-    return _re.sub(r'\s+', ' ', _re.sub(r'[^A-Z0-9 ]', '', s.strip().upper())).strip()
+    return _re.sub(r"\s+", " ", _re.sub(r"[^A-Z0-9 ]", "", s.strip().upper())).strip()
 
 
 # Canonical port resolver for the live destination-distribution lists.
@@ -273,94 +281,122 @@ def _norm_dest(s: str) -> str:
 # matched too, so unlisted berths still fold into the city.
 _PORT_CANON: dict[str, list[str]] = {
     # NW Europe - Netherlands
-    "Rotterdam":        ["NLRTM", "ROTTERDAM", "EUROPOORT", "BOTLEK", "MAASVLAKTE", "PERNIS",
-                         "HARTELHAVEN", "CALANDKANAAL", "MAASHAVEN", "MERWEHAVEN",
-                         "NECKARHAVEN", "DINTELHAVEN", "YANGTZEKANAAL", "PRINSES AMALIAHAVEN"],
-    "Amsterdam":        ["NLAMS", "AMSTERDAM"],
-    "Dordrecht":        ["NLDOR", "DORDRECHT"],
-    "Moerdijk":         ["NLMOE", "MOERDIJK"],
-    "Vlaardingen":      ["NLVLA", "VLAARDINGEN"],
-    "Harlingen":        ["NLHAR", "HARLINGEN"],
-    "Delfzijl":         ["NLDZL", "DELFZIJL", "EEMSHAVEN", "NLEEM"],
-    "Terneuzen":        ["NLTNZ", "TERNEUZEN"],
-    "Vlissingen":       ["NLVLI", "VLISSINGEN", "FLUSHING"],
+    "Rotterdam": [
+        "NLRTM",
+        "ROTTERDAM",
+        "EUROPOORT",
+        "BOTLEK",
+        "MAASVLAKTE",
+        "PERNIS",
+        "HARTELHAVEN",
+        "CALANDKANAAL",
+        "MAASHAVEN",
+        "MERWEHAVEN",
+        "NECKARHAVEN",
+        "DINTELHAVEN",
+        "YANGTZEKANAAL",
+        "PRINSES AMALIAHAVEN",
+    ],
+    "Amsterdam": ["NLAMS", "AMSTERDAM"],
+    "Dordrecht": ["NLDOR", "DORDRECHT"],
+    "Moerdijk": ["NLMOE", "MOERDIJK"],
+    "Vlaardingen": ["NLVLA", "VLAARDINGEN"],
+    "Harlingen": ["NLHAR", "HARLINGEN"],
+    "Delfzijl": ["NLDZL", "DELFZIJL", "EEMSHAVEN", "NLEEM"],
+    "Terneuzen": ["NLTNZ", "TERNEUZEN"],
+    "Vlissingen": ["NLVLI", "VLISSINGEN", "FLUSHING"],
     # NW Europe - Belgium
-    "Antwerp":          ["BEANR", "ANTWERPEN", "ANTWERP",
-                         "KALLO", "DEURGANCKDOK", "LEOPOLDDOK", "CHURCHILLDOK", "KANAALDOK"],
-    "Ghent":            ["BEGNE", "GENT", "GHENT", "KLUIZENDOK"],
-    "Zeebrugge":        ["BEZEE", "ZEEBRUGGE", "ZEEBRUGE"],
+    "Antwerp": [
+        "BEANR",
+        "ANTWERPEN",
+        "ANTWERP",
+        "KALLO",
+        "DEURGANCKDOK",
+        "LEOPOLDDOK",
+        "CHURCHILLDOK",
+        "KANAALDOK",
+    ],
+    "Ghent": ["BEGNE", "GENT", "GHENT", "KLUIZENDOK"],
+    "Zeebrugge": ["BEZEE", "ZEEBRUGGE", "ZEEBRUGE"],
     # NW Europe - France / UK / Ireland
-    "Dunkirk":          ["FRDKK", "DUNKIRK", "DUNKERQUE"],
-    "Le Havre":         ["FRLEH", "LEHAVRE", "LE HAVRE", "HAVRE"],
-    "Southampton":      ["GBSOU", "SOUTHAMPTON"],
-    "Fawley":           ["GBFAW", "FAWLEY"],
-    "Tilbury":          ["GBTIL", "TILBURY"],
-    "Immingham":        ["GBIMM", "IMMINGHAM"],
-    "Teesside":         ["GBTEE", "TEESSIDE", "TEESPORT"],
-    "Liverpool":        ["GBLIV", "LIVERPOOL"],
-    "Dublin":           ["IEDUB", "DUBLIN"],
+    "Dunkirk": ["FRDKK", "DUNKIRK", "DUNKERQUE"],
+    "Le Havre": ["FRLEH", "LEHAVRE", "LE HAVRE", "HAVRE"],
+    "Southampton": ["GBSOU", "SOUTHAMPTON"],
+    "Fawley": ["GBFAW", "FAWLEY"],
+    "Tilbury": ["GBTIL", "TILBURY"],
+    "Immingham": ["GBIMM", "IMMINGHAM"],
+    "Teesside": ["GBTEE", "TEESSIDE", "TEESPORT"],
+    "Liverpool": ["GBLIV", "LIVERPOOL"],
+    "Dublin": ["IEDUB", "DUBLIN"],
     # Mediterranean / Iberia
-    "Gibraltar":        ["GIGIB", "GIBRALTAR"],
-    "Algeciras":        ["ESALG", "ALGECIRAS"],
-    "Huelva":           ["ESHUV", "HUELVA"],
-    "Valencia":         ["ESVLC", "VALENCIA"],
-    "Trieste":          ["ITTRS", "TRIESTE"],
+    "Gibraltar": ["GIGIB", "GIBRALTAR"],
+    "Algeciras": ["ESALG", "ALGECIRAS"],
+    "Huelva": ["ESHUV", "HUELVA"],
+    "Valencia": ["ESVLC", "VALENCIA"],
+    "Trieste": ["ITTRS", "TRIESTE"],
     # Scandinavia / Baltic states
-    "Gothenburg":       ["SEGOT", "GOTHENBURG", "GOTEBORG"],
-    "Helsinki":         ["FIHEL", "HELSINKI"],
-    "Turku":            ["FITKU", "TURKU"],
-    "Hamina":           ["FIHMN", "HAMINA"],
-    "Gdansk":           ["PLGDN", "GDANSK"],
-    "Klaipeda":         ["LTKLJ", "KLAIPEDA"],
+    "Gothenburg": ["SEGOT", "GOTHENBURG", "GOTEBORG"],
+    "Helsinki": ["FIHEL", "HELSINKI"],
+    "Turku": ["FITKU", "TURKU"],
+    "Hamina": ["FIHMN", "HAMINA"],
+    "Gdansk": ["PLGDN", "GDANSK"],
+    "Klaipeda": ["LTKLJ", "KLAIPEDA"],
     # Russia / Eastern Europe
-    "St. Petersburg":   ["RULED", "ST PETERSBURG", "SAINT PETERSBURG"],
-    "Ust-Luga":         ["RUULU", "USTLUGA"],
-    "Kaliningrad":      ["RUKGD", "KALININGRAD"],
-    "Novorossiysk":     ["RUNVS", "NOVOROSSIYSK"],
-    "Taman":            ["RUTAM", "TAMAN"],
-    "Constanta":        ["ROCND", "CONSTANTA"],
+    "St. Petersburg": ["RULED", "ST PETERSBURG", "SAINT PETERSBURG"],
+    "Ust-Luga": ["RUULU", "USTLUGA"],
+    "Kaliningrad": ["RUKGD", "KALININGRAD"],
+    "Novorossiysk": ["RUNVS", "NOVOROSSIYSK"],
+    "Taman": ["RUTAM", "TAMAN"],
+    "Constanta": ["ROCND", "CONSTANTA"],
     # Turkey
-    "Istanbul":         ["TRIST", "ISTANBUL"],
-    "Tuzla":            ["TRTUZ", "TUZLA"],
-    "Izmit":            ["TRIZT", "IZMIT"],
-    "Izmir":            ["TRIZM", "IZMIR"],
-    "Ambarli":          ["TRAMB", "AMBARLI"],
-    "Dilovasi":         ["TRDIL", "DILOVASI"],
-    "Tekirdag":         ["TRTEK", "TEKIRDAG"],
+    "Istanbul": ["TRIST", "ISTANBUL"],
+    "Tuzla": ["TRTUZ", "TUZLA"],
+    "Izmit": ["TRIZT", "IZMIT"],
+    "Izmir": ["TRIZM", "IZMIR"],
+    "Ambarli": ["TRAMB", "AMBARLI"],
+    "Dilovasi": ["TRDIL", "DILOVASI"],
+    "Tekirdag": ["TRTEK", "TEKIRDAG"],
     # Black Sea / Caucasus
-    "Bourgas":          ["BGBOJ", "BOURGAS", "BURGAS"],
-    "Poti":             ["GEPTI", "POTI"],
-    "Batumi":           ["GEBUS", "BATUMI"],
+    "Bourgas": ["BGBOJ", "BOURGAS", "BURGAS"],
+    "Poti": ["GEPTI", "POTI"],
+    "Batumi": ["GEBUS", "BATUMI"],
     # Egypt / Middle East
-    "Port Said":        ["EGPSD", "EGPSE", "PORTSAID", "PORT SAID", "PORTSAIDOPL",
-                         "OPLPORTSAID", "PORTSAIDEGYPT"],
-    "Suez":             ["EGSUZ", "SUEZ"],
+    "Port Said": [
+        "EGPSD",
+        "EGPSE",
+        "PORTSAID",
+        "PORT SAID",
+        "PORTSAIDOPL",
+        "OPLPORTSAID",
+        "PORTSAIDEGYPT",
+    ],
+    "Suez": ["EGSUZ", "SUEZ"],
     # Africa
-    "Cape Town":        ["ZACPT", "CAPE TOWN"],
-    "Durban":           ["ZADUR", "DURBAN"],
+    "Cape Town": ["ZACPT", "CAPE TOWN"],
+    "Durban": ["ZADUR", "DURBAN"],
     # Morocco
-    "Tangier Med":      ["MAPTM", "TANGIER MED", "TANGIERMED"],
+    "Tangier Med": ["MAPTM", "TANGIER MED", "TANGIERMED"],
     # Israel
-    "Ashdod":           ["ILASH", "ASHDOD"],
+    "Ashdod": ["ILASH", "ASHDOD"],
     # Singapore
-    "Singapore":        ["SGSIN", "SINGAPORE"],
+    "Singapore": ["SGSIN", "SINGAPORE"],
     # East Asia
-    "Ulsan":            ["KRUSN", "ULSAN"],
-    "Busan":            ["KRPUS", "BUSAN", "PUSAN"],
-    "Incheon":          ["KRINC", "INCHEON"],
-    "Nagoya":           ["JPNGO", "NAGOYA"],
-    "Tokyo":            ["JPTYO", "TOKYO"],
+    "Ulsan": ["KRUSN", "ULSAN"],
+    "Busan": ["KRPUS", "BUSAN", "PUSAN"],
+    "Incheon": ["KRINC", "INCHEON"],
+    "Nagoya": ["JPNGO", "NAGOYA"],
+    "Tokyo": ["JPTYO", "TOKYO"],
     # Americas
-    "Houston":          ["USHOU", "HOUSTON"],
-    "Corpus Christi":   ["USCRP", "CORPUS CHRISTI"],
-    "Beaumont":         ["USBPT", "BEAUMONT"],
-    "New York":         ["USNYC", "NEW YORK"],
-    "Seattle":          ["USSEA", "SEATTLE"],
-    "Norfolk":          ["USORF", "NORFOLK"],
-    "Santos":           ["BRSSZ", "SANTOS"],
+    "Houston": ["USHOU", "HOUSTON"],
+    "Corpus Christi": ["USCRP", "CORPUS CHRISTI"],
+    "Beaumont": ["USBPT", "BEAUMONT"],
+    "New York": ["USNYC", "NEW YORK"],
+    "Seattle": ["USSEA", "SEATTLE"],
+    "Norfolk": ["USORF", "NORFOLK"],
+    "Santos": ["BRSSZ", "SANTOS"],
     # Germany (Rhine/Kiel Canal)
-    "Brunsbuttel":      ["DEBRV", "BRUNSBUTTEL"],
-    "Tallinn":          ["EETLL", "TALLINN", "MUUGA"],
+    "Brunsbuttel": ["DEBRV", "BRUNSBUTTEL"],
+    "Tallinn": ["EETLL", "TALLINN", "MUUGA"],
 }
 
 # Flat alias -> canonical name (normalised; LOCODE spaces removed so "NL RTM"
@@ -385,8 +421,19 @@ def _canonical_port(raw: str | None) -> str | None:
         return None
     norm = _norm_dest(raw)
     if not norm or norm in {
-        "FOR ORDERS", "FOR ORDER", "FORORDERS", "TO ORDER", "ORDERS", "ORDER",
-        "TBN", "UNKNOWN", "NA", "NONE", "AT SEA", "AT ANCHOR", "DRIFTING",
+        "FOR ORDERS",
+        "FOR ORDER",
+        "FORORDERS",
+        "TO ORDER",
+        "ORDERS",
+        "ORDER",
+        "TBN",
+        "UNKNOWN",
+        "NA",
+        "NONE",
+        "AT SEA",
+        "AT ANCHOR",
+        "DRIFTING",
         "GOF FOR ORDER",
     }:
         return None
@@ -493,7 +540,11 @@ def _live_all():
     current_path = str(db.db_path())
     with _live_cache_lock:
         path_match = _live_cache["path"] == current_path
-        if path_match and _live_cache["df"] is not None and now - _live_cache["ts"] < _LIVE_CACHE_TTL:
+        if (
+            path_match
+            and _live_cache["df"] is not None
+            and now - _live_cache["ts"] < _LIVE_CACHE_TTL
+        ):
             return _live_cache["df"]
     df = db.query(
         "SELECT * FROM live_positions WHERE updated_ts > ?",
@@ -527,7 +578,11 @@ def _live_visible():
     current_path = str(db.db_path())
     with _live_cache_lock:
         path_match = _live_visible_cache["path"] == current_path
-        if path_match and _live_visible_cache["df"] is not None and now_mono - _live_visible_cache["ts"] < _LIVE_CACHE_TTL:
+        if (
+            path_match
+            and _live_visible_cache["df"] is not None
+            and now_mono - _live_visible_cache["ts"] < _LIVE_CACHE_TTL
+        ):
             return _live_visible_cache["df"]
 
     cutoff = _visible_cutoff()
@@ -572,7 +627,9 @@ def _live_visible():
                 ghost_df["imo"] = None
             for col in ("cog", "heading", "eta"):
                 ghost_df[col] = None
-            live_df = pd.concat([live_df, ghost_df], ignore_index=True) if not live_df.empty else ghost_df
+            live_df = (
+                pd.concat([live_df, ghost_df], ignore_index=True) if not live_df.empty else ghost_df
+            )
 
     df = live_df
     if not df.empty:
@@ -632,14 +689,66 @@ def _live(where: str = "", params: list | None = None):
     )
 
 
+def _feed_status() -> FeedStatus:
+    """State of the upstream AIS feed, read past every freshness filter.
+
+    The queries are deliberately unfiltered. Every other read applies the
+    VISIBLE_HOURS window, so during an outage longer than a day they all return
+    nothing and can no longer say when the feed last worked - which is exactly
+    when a visitor most needs to be told.
+
+    `live_positions` alone is not enough, and the reason is easy to miss: the
+    collector *prunes* rows from it once they age past its staleness window, so
+    a long outage empties the table completely and it destroys the very evidence
+    of when the feed died. `ais_snapshots` is append-only and therefore the
+    durable record. Falling back to it is what turns "we have never had a feed"
+    into "the feed stopped on this date", which are very different things to
+    show a visitor. Only when both are empty is the answer genuinely unknown.
+    """
+    df = db.query("SELECT max(updated_ts) AS last_seen FROM live_positions")
+    last_seen = None if df.empty else df["last_seen"].iloc[0]
+    if last_seen is None or pd.isna(last_seen):
+        snaps = db.query("SELECT max(snapshot_ts) AS last_seen FROM ais_snapshots")
+        last_seen = None if snaps.empty else snaps["last_seen"].iloc[0]
+    if last_seen is None or pd.isna(last_seen):
+        return FeedStatus(
+            state="unknown",
+            stale_hours=db.STALE_HOURS,
+            visible_hours=db.VISIBLE_HOURS,
+        )
+    age_min = (
+        datetime.now(UTC).replace(tzinfo=None) - pd.Timestamp(last_seen)
+    ).total_seconds() / 60
+    if age_min <= db.STALE_HOURS * 60:
+        state = "live"
+    elif age_min <= db.VISIBLE_HOURS * 60:
+        state = "stale"
+    else:
+        state = "down"
+    return FeedStatus(
+        state=state,
+        last_seen=_iso(last_seen),
+        age_minutes=round(age_min, 1),
+        stale_hours=db.STALE_HOURS,
+        visible_hours=db.VISIBLE_HOURS,
+    )
+
+
 @app.get("/api/health")
 def health() -> dict:
-    """DB reachability + count and timestamp of currently-tracked vessels."""
+    """DB reachability + count and timestamp of currently-tracked vessels.
+
+    `ok` stays a statement about *this service*, not about the upstream feed:
+    uptime monitoring watches it, and flipping it during an aisstream outage
+    would page for something no deploy of ours can fix. The feed's own state is
+    reported separately, and honestly.
+    """
     df = _live()
     return {
         "ok": True,
         "tracked": int(len(df)),
         "last_update": _iso(df["updated_ts"].max()) if not df.empty else None,
+        "feed": _feed_status().model_dump(),
     }
 
 
@@ -721,9 +830,11 @@ def vessels(
             flag_foc=bool(getattr(r, "flag_foc", False)),
             flag_shadow=bool(getattr(r, "flag_shadow", False)),
             stale=((now_dt - r.updated_ts).total_seconds() / 60) > stale_threshold_min
-                if r.updated_ts is not None else False,
+            if r.updated_ts is not None
+            else False,
             age_minutes=round((now_dt - r.updated_ts).total_seconds() / 60)
-                if r.updated_ts is not None else None,
+            if r.updated_ts is not None
+            else None,
         )
         for r in df.itertuples()
     ]
@@ -755,8 +866,8 @@ def vessel_track(mmsi: int, hours: int = 24):
     df = df.astype(object).where(df.notna(), None)
     rows = list(df.itertuples())
 
-    _CLUSTER_M = 400.0        # within this of the run centroid => stationary swing
-    _MOVE_M = 200.0           # distance-thinning for moving points
+    _CLUSTER_M = 400.0  # within this of the run centroid => stationary swing
+    _MOVE_M = 200.0  # distance-thinning for moving points
     _M_PER_DEG = 111_000.0
     _coslat = math.cos(math.radians(rows[0].lat))
 
@@ -782,7 +893,7 @@ def vessel_track(mmsi: int, hours: int = 24):
             else:
                 break
         if cnt >= 3:
-            kept.append(rows[j])   # collapse the swing to its departure fix
+            kept.append(rows[j])  # collapse the swing to its departure fix
             i = j + 1
         else:
             r = rows[i]
@@ -806,8 +917,7 @@ def vessel_state_endpoint(mmsi: int):
     (nav_status 1 or 5) ending at the most recent snapshot, or None if underway.
     """
     df = db.query(
-        "SELECT laden, last_draught, max_draught_seen, updated_ts "
-        "FROM vessel_state WHERE mmsi = ?",
+        "SELECT laden, last_draught, max_draught_seen, updated_ts FROM vessel_state WHERE mmsi = ?",
         [mmsi],
         db=db.analytics_db_path(),
     )
@@ -815,8 +925,10 @@ def vessel_state_endpoint(mmsi: int):
     laden_val = last_draught_val = max_draught_val = updated_ts_val = None
     if not df.empty:
         r = df.iloc[0]
+
         def _fv(v):
             return None if (v is None or (isinstance(v, float) and pd.isna(v))) else float(v)
+
         laden_val = str(r["laden"]) if r["laden"] else None
         last_draught_val = _fv(r["last_draught"])
         max_draught_val = _fv(r["max_draught_seen"])
@@ -908,7 +1020,11 @@ def vessel_voyages(mmsi: int, days: int = 14):
     )
     for _, r in transit_df.iterrows():
         laden_val = r["laden"]
-        laden_bool = None if (laden_val is None or (isinstance(laden_val, float) and pd.isna(laden_val))) else bool(laden_val)
+        laden_bool = (
+            None
+            if (laden_val is None or (isinstance(laden_val, float) and pd.isna(laden_val)))
+            else bool(laden_val)
+        )
         events.append(
             VoyageEvent(
                 type="transit",
@@ -961,7 +1077,9 @@ def vessel_voyages(mmsi: int, days: int = 14):
         name2_map: dict[int, str | None] = {}
         if sts_mmsis2:
             ph_sts = ",".join("?" * len(sts_mmsis2))
-            n2 = db.query(f"SELECT mmsi, name FROM live_positions WHERE mmsi IN ({ph_sts})", sts_mmsis2)
+            n2 = db.query(
+                f"SELECT mmsi, name FROM live_positions WHERE mmsi IN ({ph_sts})", sts_mmsis2
+            )
             for _, r in n2.iterrows():
                 name2_map[int(r["mmsi"])] = _str_or_none(r.get("name"))
         for _, r in sts_df.iterrows():
@@ -969,18 +1087,22 @@ def vessel_voyages(mmsi: int, days: int = 14):
                 d = _json.loads(r["details"]) if r["details"] else {}
             except (ValueError, TypeError):
                 d = {}
-            mmsi2_val = int(r["mmsi2"]) if r["mmsi2"] is not None and not pd.isna(r["mmsi2"]) else None
-            events.append(VoyageEvent(
-                type="sts",
-                ts=_iso(r["start_ts"]) or "",
-                end_ts=_iso(r["end_ts"]) if r["end_ts"] is not None else None,
-                lat=float(r["lat"]) if r["lat"] is not None and not pd.isna(r["lat"]) else None,
-                lon=float(r["lon"]) if r["lon"] is not None and not pd.isna(r["lon"]) else None,
-                kind=str(r["kind"]) if r["kind"] else None,
-                segment=str(r["segment"]) if r["segment"] else None,
-                mmsi2=mmsi2_val,
-                name2=name2_map.get(mmsi2_val) if mmsi2_val else None,
-            ))
+            mmsi2_val = (
+                int(r["mmsi2"]) if r["mmsi2"] is not None and not pd.isna(r["mmsi2"]) else None
+            )
+            events.append(
+                VoyageEvent(
+                    type="sts",
+                    ts=_iso(r["start_ts"]) or "",
+                    end_ts=_iso(r["end_ts"]) if r["end_ts"] is not None else None,
+                    lat=float(r["lat"]) if r["lat"] is not None and not pd.isna(r["lat"]) else None,
+                    lon=float(r["lon"]) if r["lon"] is not None and not pd.isna(r["lon"]) else None,
+                    kind=str(r["kind"]) if r["kind"] else None,
+                    segment=str(r["segment"]) if r["segment"] else None,
+                    mmsi2=mmsi2_val,
+                    name2=name2_map.get(mmsi2_val) if mmsi2_val else None,
+                )
+            )
 
     # Cargo transitions for this vessel from AIS snapshots
     snap_df = db.query(
@@ -995,10 +1117,17 @@ def vessel_voyages(mmsi: int, days: int = 14):
         snap_df["bucket"] = snap_df["snapshot_ts"].dt.floor("6h")
         bucket_agg = (
             snap_df.groupby("bucket")
-            .agg(d_median=("draught", "median"), lat=("lat", "median"), lon=("lon", "median"), fix_cnt=("draught", "count"))
+            .agg(
+                d_median=("draught", "median"),
+                lat=("lat", "median"),
+                lon=("lon", "median"),
+                fix_cnt=("draught", "count"),
+            )
             .reset_index()
         )
-        bucket_agg = bucket_agg[bucket_agg["fix_cnt"] >= 2].sort_values("bucket").reset_index(drop=True)
+        bucket_agg = (
+            bucket_agg[bucket_agg["fix_cnt"] >= 2].sort_values("bucket").reset_index(drop=True)
+        )
         if len(bucket_agg) >= 2:
             bucket_agg["prev_d"] = bucket_agg["d_median"].shift(1)
             bucket_agg["change"] = bucket_agg["d_median"] - bucket_agg["prev_d"]
@@ -1006,16 +1135,22 @@ def vessel_voyages(mmsi: int, days: int = 14):
             for _, row in bucket_agg[bucket_agg["change"].abs() >= 2.0].iterrows():
                 ch = float(row["change"])
                 bkt = row["bucket"]
-                trans_ts = bkt.to_pydatetime().replace(tzinfo=None) if hasattr(bkt, "to_pydatetime") else bkt
-                events.append(VoyageEvent(
-                    type="cargo_load" if ch > 0 else "cargo_discharge",
-                    ts=_iso(trans_ts) or "",
-                    lat=round(float(row["lat"]), 4),
-                    lon=round(float(row["lon"]), 4),
-                    draught_before=round(float(row["prev_d"]), 1),
-                    draught_after=round(float(row["d_median"]), 1),
-                    change_m=round(abs(ch), 1),
-                ))
+                trans_ts = (
+                    bkt.to_pydatetime().replace(tzinfo=None)
+                    if hasattr(bkt, "to_pydatetime")
+                    else bkt
+                )
+                events.append(
+                    VoyageEvent(
+                        type="cargo_load" if ch > 0 else "cargo_discharge",
+                        ts=_iso(trans_ts) or "",
+                        lat=round(float(row["lat"]), 4),
+                        lon=round(float(row["lon"]), 4),
+                        draught_before=round(float(row["prev_d"]), 1),
+                        draught_after=round(float(row["d_median"]), 1),
+                        change_m=round(abs(ch), 1),
+                    )
+                )
 
     # Sort all events chronologically
     events.sort(key=lambda e: e.ts)
@@ -1072,13 +1207,19 @@ def vessel_behavioral_risk(mmsi: int, days: int = 30):
                 d = _json.loads(r["details"]) if r["details"] else {}
             except (ValueError, TypeError):
                 d = {}
-            recent_events.append({
-                "type": str(r["type"]),
-                "ts": _iso(r["start_ts"]) or "",
-                "lat": round(float(r["lat"]), 4) if r["lat"] is not None and not pd.isna(r["lat"]) else None,
-                "lon": round(float(r["lon"]), 4) if r["lon"] is not None and not pd.isna(r["lon"]) else None,
-                **{k: v for k, v in d.items() if k in ("old_destination", "new_destination")},
-            })
+            recent_events.append(
+                {
+                    "type": str(r["type"]),
+                    "ts": _iso(r["start_ts"]) or "",
+                    "lat": round(float(r["lat"]), 4)
+                    if r["lat"] is not None and not pd.isna(r["lat"])
+                    else None,
+                    "lon": round(float(r["lon"]), 4)
+                    if r["lon"] is not None and not pd.isna(r["lon"])
+                    else None,
+                    **{k: v for k, v in d.items() if k in ("old_destination", "new_destination")},
+                }
+            )
 
     # Look up IMO from live_positions to query registry
     lp_df = db.query("SELECT imo FROM live_positions WHERE mmsi = ?", [mmsi])
@@ -1088,8 +1229,7 @@ def vessel_behavioral_risk(mmsi: int, days: int = 30):
     ofac = False
     if imo:
         reg_df = db.pg_query(
-            "SELECT risk_score, ofac_sanctioned FROM vessels "
-            "WHERE imo = %s AND fetch_ok = true",
+            "SELECT risk_score, ofac_sanctioned FROM vessels WHERE imo = %s AND fetch_ok = true",
             [imo],
         )
         if not reg_df.empty:
@@ -1235,17 +1375,19 @@ def analytics_high_risk_positions(min_risk: int = 60):
     merged = live_df.merge(reg_df, on="imo", how="inner")
     rows = []
     for _, r in merged.iterrows():
-        rows.append(HighRiskPosition(
-            mmsi=int(r["mmsi"]),
-            imo=int(r["imo"]),
-            lat=float(r["lat"]),
-            lon=float(r["lon"]),
-            name=str(r["name"]) if r["name"] else None,
-            segment=str(r["segment"]) if r["segment"] else None,
-            kind=str(r["kind"]) if r["kind"] else None,
-            risk_score=int(r["risk_score"]),
-            ofac_sanctioned=bool(r["ofac_sanctioned"]),
-        ))
+        rows.append(
+            HighRiskPosition(
+                mmsi=int(r["mmsi"]),
+                imo=int(r["imo"]),
+                lat=float(r["lat"]),
+                lon=float(r["lon"]),
+                name=str(r["name"]) if r["name"] else None,
+                segment=str(r["segment"]) if r["segment"] else None,
+                kind=str(r["kind"]) if r["kind"] else None,
+                risk_score=int(r["risk_score"]),
+                ofac_sanctioned=bool(r["ofac_sanctioned"]),
+            )
+        )
 
     rows.sort(key=lambda x: -x.risk_score)
     return HighRiskPositionsResponse(
@@ -1288,18 +1430,20 @@ def analytics_speed():
         avg_sog_uw = round(float(underway_sog.mean()), 1) if len(underway_sog) > 0 else None
         p50 = grp["sog"].dropna()
         p50_sog = round(float(p50.median()), 1) if len(p50) > 0 else None
-        rows.append(SpeedSegmentRow(
-            segment=str(segment),
-            kind=str(kind),
-            underway=underway,
-            anchored=anchored,
-            moored=moored,
-            other=other,
-            total=total,
-            avg_sog_underway=avg_sog_uw,
-            p50_sog=p50_sog,
-            pct_underway=round(underway / total * 100, 1) if total > 0 else 0.0,
-        ))
+        rows.append(
+            SpeedSegmentRow(
+                segment=str(segment),
+                kind=str(kind),
+                underway=underway,
+                anchored=anchored,
+                moored=moored,
+                other=other,
+                total=total,
+                avg_sog_underway=avg_sog_uw,
+                p50_sog=p50_sog,
+                pct_underway=round(underway / total * 100, 1) if total > 0 else 0.0,
+            )
+        )
 
     rows.sort(key=lambda r: r.total, reverse=True)
     return SpeedAnalyticsResponse(
@@ -1343,12 +1487,14 @@ def analytics_speed_trend(kind: str = "tanker", segment: str | None = None, days
         total = len(grp)
         underway = grp[(grp["nav_status"] == 0) & (grp["sog"] > 0.2)]
         avg_sog = round(float(underway["sog"].mean()), 2) if len(underway) > 0 else None
-        series.append(SpeedTrendPoint(
-            date=str(day),
-            avg_sog=avg_sog,
-            underway_count=len(underway),
-            total_count=total,
-        ))
+        series.append(
+            SpeedTrendPoint(
+                date=str(day),
+                avg_sog=avg_sog,
+                underway_count=len(underway),
+                total_count=total,
+            )
+        )
 
     series.sort(key=lambda p: p.date)
     return SpeedTrendResponse(kind=kind, segment=segment, days=days, series=series)
@@ -1378,15 +1524,17 @@ def analytics_region_util():
         moored = int((grp["nav_status"] == 5).sum())
         sog_vals = grp["sog"].dropna()
         avg_sog = round(float(sog_vals.mean()), 1) if len(sog_vals) > 0 else None
-        rows.append(RegionUtilRow(
-            region=str(region),
-            total=total,
-            underway=underway,
-            anchored=anchored,
-            moored=moored,
-            pct_underway=round(underway / total * 100, 1) if total > 0 else 0.0,
-            avg_sog=avg_sog,
-        ))
+        rows.append(
+            RegionUtilRow(
+                region=str(region),
+                total=total,
+                underway=underway,
+                anchored=anchored,
+                moored=moored,
+                pct_underway=round(underway / total * 100, 1) if total > 0 else 0.0,
+                avg_sog=avg_sog,
+            )
+        )
 
     rows.sort(key=lambda r: r.total, reverse=True)
     return RegionUtilResponse(
@@ -1417,7 +1565,10 @@ def analytics_sts_risk(days: int = 30, min_risk: int = 0):
     if events_df.empty:
         return StsRiskResponse(
             as_of=_iso(datetime.now(UTC).replace(tzinfo=None)) or "",
-            days=days, total_events=0, enriched_events=0, rows=[],
+            days=days,
+            total_events=0,
+            enriched_events=0,
+            rows=[],
         )
 
     # Collect unique MMSIs
@@ -1496,24 +1647,26 @@ def analytics_sts_risk(days: int = 30, min_risk: int = 0):
         if rs1 is not None or rs2 is not None:
             enriched += 1
 
-        rows.append(StsRiskEvent(
-            event_id=str(ev["event_id"]),
-            start_ts=_iso(ev["start_ts"]) or "",
-            region=_str_or_none(ev.get("region")),
-            kind=_str_or_none(ev.get("kind")),
-            segment=_str_or_none(ev.get("segment")),
-            mmsi=mmsi_val,
-            mmsi2=mmsi2_val,
-            name=_str_or_none(mmsi_info.get(mmsi_val, {}).get("name")),
-            name2=_str_or_none(mmsi_info.get(mmsi2_val, {}).get("name")) if mmsi2_val else None,
-            duration_hours=det.get("duration_hours"),
-            co_location_fixes=det.get("co_location_fixes"),
-            risk_score=rs1,
-            risk_score2=rs2,
-            ofac=bool(r1.get("ofac", False)),
-            ofac2=bool(r2.get("ofac", False)),
-            max_risk=max_risk,
-        ))
+        rows.append(
+            StsRiskEvent(
+                event_id=str(ev["event_id"]),
+                start_ts=_iso(ev["start_ts"]) or "",
+                region=_str_or_none(ev.get("region")),
+                kind=_str_or_none(ev.get("kind")),
+                segment=_str_or_none(ev.get("segment")),
+                mmsi=mmsi_val,
+                mmsi2=mmsi2_val,
+                name=_str_or_none(mmsi_info.get(mmsi_val, {}).get("name")),
+                name2=_str_or_none(mmsi_info.get(mmsi2_val, {}).get("name")) if mmsi2_val else None,
+                duration_hours=det.get("duration_hours"),
+                co_location_fixes=det.get("co_location_fixes"),
+                risk_score=rs1,
+                risk_score2=rs2,
+                ofac=bool(r1.get("ofac", False)),
+                ofac2=bool(r2.get("ofac", False)),
+                max_risk=max_risk,
+            )
+        )
 
     rows.sort(key=lambda r: r.max_risk, reverse=True)
     return StsRiskResponse(
@@ -1554,10 +1707,16 @@ def analytics_sts_offenders(days: int = 30, limit: int = 50):
     ev_df_m2["mmsi2"] = ev_df_m2["mmsi2"].astype(int)
     cp_counts = ev_df_m2.groupby("mmsi2").size().rename("as_counterpart")
 
-    all_mmsis = pd.concat([
-        init_counts.rename("n"),
-        cp_counts.rename("n"),
-    ]).groupby(level=0).sum()
+    all_mmsis = (
+        pd.concat(
+            [
+                init_counts.rename("n"),
+                cp_counts.rename("n"),
+            ]
+        )
+        .groupby(level=0)
+        .sum()
+    )
     initiator_map: dict[int, int] = init_counts.to_dict()
     counterpart_map: dict[int, int] = cp_counts.to_dict()
 
@@ -1605,8 +1764,12 @@ def analytics_sts_offenders(days: int = 30, limit: int = 50):
                 sts_events=int(total),
                 as_initiator=initiator_map.get(int(mmsi_int), 0),
                 as_counterpart=counterpart_map.get(int(mmsi_int), 0),
-                registry_risk=int(reg["risk_score"]) if reg and reg.get("risk_score") is not None else None,
-                ofac=bool(reg["ofac_sanctioned"]) if reg and reg.get("ofac_sanctioned") is not None else False,
+                registry_risk=int(reg["risk_score"])
+                if reg and reg.get("risk_score") is not None
+                else None,
+                ofac=bool(reg["ofac_sanctioned"])
+                if reg and reg.get("ofac_sanctioned") is not None
+                else False,
             )
         )
         if len(rows) >= lim:
@@ -1649,7 +1812,9 @@ def analytics_reroutes(
     if events_df.empty:
         return RerouteRiskResponse(
             as_of=_iso(datetime.now(UTC).replace(tzinfo=None)) or "",
-            days=days, total_events=0, rows=[],
+            days=days,
+            total_events=0,
+            rows=[],
         )
 
     # MMSI -> name + risk from live_positions then vessels
@@ -1666,9 +1831,7 @@ def analytics_reroutes(
         missing = [m for m in all_mmsis if m not in mmsi_info]
         if missing:
             ph2 = ",".join("?" * len(missing))
-            v_df = db.query(
-                f"SELECT mmsi, name, imo FROM vessels WHERE mmsi IN ({ph2})", missing
-            )
+            v_df = db.query(f"SELECT mmsi, name, imo FROM vessels WHERE mmsi IN ({ph2})", missing)
             for _, r in v_df.iterrows():
                 mmsi_info[int(r["mmsi"])] = {"name": r.get("name"), "imo": r.get("imo")}
 
@@ -1705,22 +1868,24 @@ def analytics_reroutes(
         if (rs or 0) < min_risk:
             continue
 
-        rows.append(RerouteRiskEvent(
-            event_id=str(ev["event_id"]),
-            start_ts=_iso(ev["start_ts"]) or "",
-            region=_str_or_none(ev.get("region")),
-            kind=_str_or_none(ev.get("kind")),
-            segment=_str_or_none(ev.get("segment")),
-            mmsi=mmsi_val,
-            name=_str_or_none(info.get("name")),
-            old_destination=_str_or_none(det.get("old_destination")),
-            new_destination=_str_or_none(det.get("new_destination")),
-            fixes_at_old=det.get("fixes_at_old"),
-            risk_score=rs,
-            ofac=bool(risk_info.get("ofac", False)),
-        ))
+        rows.append(
+            RerouteRiskEvent(
+                event_id=str(ev["event_id"]),
+                start_ts=_iso(ev["start_ts"]) or "",
+                region=_str_or_none(ev.get("region")),
+                kind=_str_or_none(ev.get("kind")),
+                segment=_str_or_none(ev.get("segment")),
+                mmsi=mmsi_val,
+                name=_str_or_none(info.get("name")),
+                old_destination=_str_or_none(det.get("old_destination")),
+                new_destination=_str_or_none(det.get("new_destination")),
+                fixes_at_old=det.get("fixes_at_old"),
+                risk_score=rs,
+                ofac=bool(risk_info.get("ofac", False)),
+            )
+        )
 
-    rows.sort(key=lambda r: (r.risk_score or 0), reverse=True)
+    rows.sort(key=lambda r: r.risk_score or 0, reverse=True)
     return RerouteRiskResponse(
         as_of=_iso(datetime.now(UTC).replace(tzinfo=None)) or "",
         days=days,
@@ -1755,12 +1920,14 @@ def vessel_equasis(imo: int):
         if val is None:
             continue
         import pandas as _pd
+
         if _pd.isna(val):
             continue
         if col in ("gross_tonnage", "dwt", "year_built"):
             result[col] = str(int(val))
         elif col == "risk_indicators":
             import json as _json_mod
+
             try:
                 result[col] = _json_mod.loads(val) if isinstance(val, str) else val
             except (ValueError, TypeError):
@@ -1809,18 +1976,22 @@ def vessel_myshiptracking(mmsi: int):
     )
     voyages = [
         MstVoyage(
-            origin=_v(x["origin"]), departure=_v(x["departure"]),
-            destination=_v(x["destination"]), arrival=_v(x["arrival"]),
-            distance_nm=_v(x["distance_nm"]), duration=_v(x["duration"]),
-            draught_m=_v(x["draught_m"]), avg_speed_kn=_v(x["avg_speed_kn"]),
-            max_speed_kn=_v(x["max_speed_kn"]), stops=_i(x["stops"]),
+            origin=_v(x["origin"]),
+            departure=_v(x["departure"]),
+            destination=_v(x["destination"]),
+            arrival=_v(x["arrival"]),
+            distance_nm=_v(x["distance_nm"]),
+            duration=_v(x["duration"]),
+            draught_m=_v(x["draught_m"]),
+            avg_speed_kn=_v(x["avg_speed_kn"]),
+            max_speed_kn=_v(x["max_speed_kn"]),
+            stops=_i(x["stops"]),
         )
         for _, x in voy_df.iterrows()
     ]
 
     pc_df = db.query(
-        "SELECT port, arrival, departure FROM mst_port_calls "
-        "WHERE mmsi = ? ORDER BY arrival DESC",
+        "SELECT port, arrival, departure FROM mst_port_calls WHERE mmsi = ? ORDER BY arrival DESC",
         [mmsi],
         db=_db,
     )
@@ -1831,15 +2002,25 @@ def vessel_myshiptracking(mmsi: int):
 
     return MstVesselData(
         mmsi=mmsi,
-        imo=_i(r["imo"]), name=_v(r["name"]), flag=_v(r["flag"]),
-        call_sign=_v(r["call_sign"]), ship_type=_v(r["ship_type"]),
-        length_m=_v(r["length_m"]), beam_m=_v(r["beam_m"]),
-        gross_tonnage=_i(r["gross_tonnage"]), dwt=_i(r["dwt"]), year_built=_i(r["year_built"]),
-        status=_v(r["status"]), destination=_v(r["destination"]), eta=_v(r["eta"]),
-        draught_m=_v(r["draught_m"]), station=_v(r["station"]),
+        imo=_i(r["imo"]),
+        name=_v(r["name"]),
+        flag=_v(r["flag"]),
+        call_sign=_v(r["call_sign"]),
+        ship_type=_v(r["ship_type"]),
+        length_m=_v(r["length_m"]),
+        beam_m=_v(r["beam_m"]),
+        gross_tonnage=_i(r["gross_tonnage"]),
+        dwt=_i(r["dwt"]),
+        year_built=_i(r["year_built"]),
+        status=_v(r["status"]),
+        destination=_v(r["destination"]),
+        eta=_v(r["eta"]),
+        draught_m=_v(r["draught_m"]),
+        station=_v(r["station"]),
         position_received_utc=_v(r["position_received_utc"]),
         fetched_ts=_iso(r["fetched_ts"]),
-        voyages=voyages, port_calls=port_calls,
+        voyages=voyages,
+        port_calls=port_calls,
     )
 
 
@@ -1885,8 +2066,12 @@ def fleet_flags(top_n: int = 40):
         df = df[df["segment"] != "Small"]
     if df.empty:
         return FleetFlagsResponse(
-            as_of=as_of, total_with_flag=0, total_unresolved=0,
-            foc_count=0, shadow_count=0, rows=[],
+            as_of=as_of,
+            total_with_flag=0,
+            total_unresolved=0,
+            foc_count=0,
+            shadow_count=0,
+            rows=[],
         )
     flags = {int(m): flag_from_mmsi(int(m)) for m in df["mmsi"].dropna().unique()}
     unresolved = int(sum(flags.get(int(m)) is None for m in df["mmsi"] if pd.notna(m)))
@@ -1918,15 +2103,17 @@ def fleet_flags(top_n: int = 40):
             foc_total += n
         if f0.is_shadow:
             shadow_total += n
-        rows.append(FleetFlagRow(
-            flag=f0.country,
-            flag_code=code,
-            vessel_count=n,
-            length_sum_m=round(length_sum, 1),
-            is_foc=f0.is_foc,
-            is_shadow=f0.is_shadow,
-            by_segment=seg_counts,
-        ))
+        rows.append(
+            FleetFlagRow(
+                flag=f0.country,
+                flag_code=code,
+                vessel_count=n,
+                length_sum_m=round(length_sum, 1),
+                is_foc=f0.is_foc,
+                is_shadow=f0.is_shadow,
+                by_segment=seg_counts,
+            )
+        )
 
     rows.sort(key=lambda r: r.vessel_count, reverse=True)
     return FleetFlagsResponse(
@@ -1977,16 +2164,18 @@ def flag_mismatches():
         # or genuinely matches the MMSI-derived flag.
         if reg_iso2 is None or f.code == reg_iso2:
             continue
-        rows.append(FlagMismatchRow(
-            mmsi=int(r.mmsi),
-            imo=imo,
-            name=_str_or_none(getattr(r, "name", None)),
-            segment=_str_or_none(getattr(r, "segment", None)),
-            mmsi_flag=f.country,
-            mmsi_flag_code=f.code,
-            registry_flag=str(rr.registry_flag),
-            registry_flag_code=str(rr.registry_flag_code),
-        ))
+        rows.append(
+            FlagMismatchRow(
+                mmsi=int(r.mmsi),
+                imo=imo,
+                name=_str_or_none(getattr(r, "name", None)),
+                segment=_str_or_none(getattr(r, "segment", None)),
+                mmsi_flag=f.country,
+                mmsi_flag_code=f.code,
+                registry_flag=str(rr.registry_flag),
+                registry_flag_code=str(rr.registry_flag_code),
+            )
+        )
 
     rows.sort(key=lambda r: (r.segment or "", r.name or ""))
     return FlagMismatchResponse(as_of=as_of, rows=rows)
@@ -1994,16 +2183,23 @@ def flag_mismatches():
 
 @app.get("/api/meta", response_model=Meta)
 def meta():
-    """Distinct kinds/segments/regions, total tracked, and last update time."""
+    """Distinct kinds/segments/regions, total tracked, last update, and feed state.
+
+    The feed block rides along here rather than getting its own endpoint because
+    the frontend already polls /api/meta on the 60s tier, so the banner costs no
+    extra request.
+    """
+    feed = _feed_status()
     df = _live()
     if df.empty:
-        return Meta(kinds=[], segments=[], regions=[], total_tracked=0, last_update=None)
+        return Meta(kinds=[], segments=[], regions=[], total_tracked=0, last_update=None, feed=feed)
     return Meta(
         kinds=sorted(df["kind"].dropna().unique().tolist()),
         segments=sorted(df["segment"].dropna().unique().tolist()),
         regions=sorted(df["region"].dropna().unique().tolist()),
         total_tracked=int(len(df)),
         last_update=_iso(df["updated_ts"].max()),
+        feed=feed,
     )
 
 
@@ -2057,6 +2253,7 @@ def analytics_transits(chokepoint: str = "suez", days: int = 30):
         df["date"] = pd.to_datetime(df["entered_ts"]).dt.date.astype(str)
         for (date_s, direction, kind), grp in df.groupby(["date", "direction", "kind"]):
             from .schemas import TransitDay
+
             series.append(TransitDay(date=date_s, direction=direction, kind=kind, count=len(grp)))
         series.sort(key=lambda r: r.date)
     return TransitsResponse(chokepoint=chokepoint, days=d, series=series)
@@ -2082,7 +2279,11 @@ def analytics_transit_risk(chokepoint: str = "hormuz", days: int = 30, min_risk:
     if df.empty:
         return TransitRiskResponse(
             as_of=_iso(datetime.now(UTC).replace(tzinfo=None)) or "",
-            days=days, chokepoint=chokepoint, total_transits=0, enriched=0, rows=[],
+            days=days,
+            chokepoint=chokepoint,
+            total_transits=0,
+            enriched=0,
+            rows=[],
         )
 
     all_mmsis = list(set(int(m) for m in df["mmsi"].dropna().tolist()))
@@ -2097,11 +2298,12 @@ def analytics_transit_risk(chokepoint: str = "hormuz", days: int = 30, min_risk:
         missing = [m for m in all_mmsis if m not in mmsi_info]
         if missing:
             ph2 = ",".join("?" * len(missing))
-            v_df = db.query(
-                f"SELECT mmsi, name, imo FROM vessels WHERE mmsi IN ({ph2})", missing
-            )
+            v_df = db.query(f"SELECT mmsi, name, imo FROM vessels WHERE mmsi IN ({ph2})", missing)
             for _, r in v_df.iterrows():
-                mmsi_info[int(r["mmsi"])] = {"name": _str_or_none(r.get("name")), "imo": r.get("imo")}
+                mmsi_info[int(r["mmsi"])] = {
+                    "name": _str_or_none(r.get("name")),
+                    "imo": r.get("imo"),
+                }
 
     imo_risk: dict[int, dict] = {}
     known_imos = list(set(i for i in (_valid_imo(v.get("imo")) for v in mmsi_info.values()) if i))
@@ -2132,24 +2334,30 @@ def analytics_transit_risk(chokepoint: str = "hormuz", days: int = 30, min_risk:
             enriched += 1
 
         laden_val = ev.get("laden")
-        laden_bool = None if laden_val is None or (isinstance(laden_val, float) and pd.isna(laden_val)) else bool(laden_val)
+        laden_bool = (
+            None
+            if laden_val is None or (isinstance(laden_val, float) and pd.isna(laden_val))
+            else bool(laden_val)
+        )
 
-        rows.append(TransitRiskEvent(
-            mmsi=mmsi_val,
-            name=_str_or_none(info.get("name")),
-            imo=imo_val,
-            chokepoint=str(ev["chokepoint"]),
-            entered_ts=_iso(ev["entered_ts"]) or "",
-            exited_ts=_iso(ev.get("exited_ts")) if ev.get("exited_ts") is not None else None,
-            direction=_str_or_none(ev.get("direction")),
-            kind=_str_or_none(ev.get("kind")),
-            segment=_str_or_none(ev.get("segment")),
-            laden=laden_bool,
-            risk_score=rs,
-            ofac=bool(risk_info.get("ofac", False)),
-        ))
+        rows.append(
+            TransitRiskEvent(
+                mmsi=mmsi_val,
+                name=_str_or_none(info.get("name")),
+                imo=imo_val,
+                chokepoint=str(ev["chokepoint"]),
+                entered_ts=_iso(ev["entered_ts"]) or "",
+                exited_ts=_iso(ev.get("exited_ts")) if ev.get("exited_ts") is not None else None,
+                direction=_str_or_none(ev.get("direction")),
+                kind=_str_or_none(ev.get("kind")),
+                segment=_str_or_none(ev.get("segment")),
+                laden=laden_bool,
+                risk_score=rs,
+                ofac=bool(risk_info.get("ofac", False)),
+            )
+        )
 
-    rows.sort(key=lambda r: (r.risk_score or 0), reverse=True)
+    rows.sort(key=lambda r: r.risk_score or 0, reverse=True)
     return TransitRiskResponse(
         as_of=_iso(datetime.now(UTC).replace(tzinfo=None)) or "",
         days=days,
@@ -2178,6 +2386,7 @@ def analytics_congestion(zone: str = "singapore_west", days: int = 30):
         ).dt.total_seconds() / 3600
         for date_s, grp in df.groupby("date"):
             from .schemas import CongestionDay
+
             series.append(
                 CongestionDay(
                     date=date_s,
@@ -2247,7 +2456,8 @@ def analytics_anchorage_dwell(zone: str = "singapore_west", limit: int = 50):
     # Laden state from vessel_state
     mmsi_laden: dict[int, str | None] = {}
     vs_df = db.query(
-        f"SELECT mmsi, laden FROM vessel_state WHERE mmsi IN ({ph})", all_mmsis,
+        f"SELECT mmsi, laden FROM vessel_state WHERE mmsi IN ({ph})",
+        all_mmsis,
         db=db.analytics_db_path(),
     )
     for _, r in vs_df.iterrows():
@@ -2287,18 +2497,20 @@ def analytics_anchorage_dwell(zone: str = "singapore_west", limit: int = 50):
         risk_info = imo_risk.get(imo_val, {}) if imo_val else {}
         rs = risk_info.get("risk_score")
 
-        rows.append(AnchoredVessel(
-            mmsi=mmsi_val,
-            name=mmsi_name.get(mmsi_val),
-            zone=zone,
-            kind=m.get("kind"),
-            segment=m.get("segment"),
-            start_ts=_iso(start_ts) or "",
-            dwell_hours=dwell_h,
-            laden=mmsi_laden.get(mmsi_val),
-            risk_score=rs,
-            ofac=bool(risk_info.get("ofac", False)),
-        ))
+        rows.append(
+            AnchoredVessel(
+                mmsi=mmsi_val,
+                name=mmsi_name.get(mmsi_val),
+                zone=zone,
+                kind=m.get("kind"),
+                segment=m.get("segment"),
+                start_ts=_iso(start_ts) or "",
+                dwell_hours=dwell_h,
+                laden=mmsi_laden.get(mmsi_val),
+                risk_score=rs,
+                ofac=bool(risk_info.get("ofac", False)),
+            )
+        )
 
     rows.sort(key=lambda r: r.dwell_hours, reverse=True)
     return AnchorageDwellResponse(as_of=_iso(now) or "", zone=zone, rows=rows)
@@ -2333,7 +2545,9 @@ def analytics_cargo_transitions(days: int = 7, min_change: float = 2.0, segment:
         [since] + seg_params + [min_change * 0.7],
     )
     if cand_df.empty:
-        return CargoTransitionsResponse(as_of=_iso(now) or "", days=days, min_change=min_change, rows=[])
+        return CargoTransitionsResponse(
+            as_of=_iso(now) or "", days=days, min_change=min_change, rows=[]
+        )
 
     cand_mmsis = [int(m) for m in cand_df["mmsi"].unique()]
     ph = ",".join("?" * len(cand_mmsis))
@@ -2346,7 +2560,9 @@ def analytics_cargo_transitions(days: int = 7, min_change: float = 2.0, segment:
         [since] + cand_mmsis,
     )
     if snap_df.empty:
-        return CargoTransitionsResponse(as_of=_iso(now) or "", days=days, min_change=min_change, rows=[])
+        return CargoTransitionsResponse(
+            as_of=_iso(now) or "", days=days, min_change=min_change, rows=[]
+        )
 
     snap_df["snapshot_ts"] = pd.to_datetime(snap_df["snapshot_ts"])
 
@@ -2357,10 +2573,17 @@ def analytics_cargo_transitions(days: int = 7, min_change: float = 2.0, segment:
     for mmsi_val, grp in snap_df.groupby("mmsi"):
         bucket_agg = (
             grp.groupby("bucket")
-            .agg(d_median=("draught", "median"), lat=("lat", "median"), lon=("lon", "median"), fix_cnt=("draught", "count"))
+            .agg(
+                d_median=("draught", "median"),
+                lat=("lat", "median"),
+                lon=("lon", "median"),
+                fix_cnt=("draught", "count"),
+            )
             .reset_index()
         )
-        bucket_agg = bucket_agg[bucket_agg["fix_cnt"] >= 2].sort_values("bucket").reset_index(drop=True)
+        bucket_agg = (
+            bucket_agg[bucket_agg["fix_cnt"] >= 2].sort_values("bucket").reset_index(drop=True)
+        )
         if len(bucket_agg) < 2:
             continue
 
@@ -2382,8 +2605,14 @@ def analytics_cargo_transitions(days: int = 7, min_change: float = 2.0, segment:
             trans_ts = trans_ts.to_pydatetime().replace(tzinfo=None)
 
         # Most-common kind/segment/region for this vessel
-        kind_val = _str_or_none(grp["kind"].mode().iloc[0]) if not grp["kind"].dropna().empty else None
-        seg_val = _str_or_none(grp["segment"].mode().iloc[0]) if not grp["segment"].dropna().empty else None
+        kind_val = (
+            _str_or_none(grp["kind"].mode().iloc[0]) if not grp["kind"].dropna().empty else None
+        )
+        seg_val = (
+            _str_or_none(grp["segment"].mode().iloc[0])
+            if not grp["segment"].dropna().empty
+            else None
+        )
         region_slice = grp[
             (grp["snapshot_ts"] >= pd.Timestamp(trans_ts))
             & (grp["snapshot_ts"] < pd.Timestamp(trans_ts) + pd.Timedelta(hours=6))
@@ -2394,22 +2623,26 @@ def analytics_cargo_transitions(days: int = 7, min_change: float = 2.0, segment:
             else (grp["region"].mode().iloc[0] if not grp["region"].dropna().empty else None)
         )
 
-        transitions.append({
-            "mmsi": int(mmsi_val),
-            "kind": kind_val,
-            "segment": seg_val,
-            "region": region_val,
-            "direction": "loading" if change_val > 0 else "discharging",
-            "draught_before": round(float(best["prev_d"]), 1),
-            "draught_after": round(float(best["d_median"]), 1),
-            "change_m": round(abs(change_val), 1),
-            "transition_ts": _iso(trans_ts) or "",
-            "lat": round(float(best["lat"]), 4),
-            "lon": round(float(best["lon"]), 4),
-        })
+        transitions.append(
+            {
+                "mmsi": int(mmsi_val),
+                "kind": kind_val,
+                "segment": seg_val,
+                "region": region_val,
+                "direction": "loading" if change_val > 0 else "discharging",
+                "draught_before": round(float(best["prev_d"]), 1),
+                "draught_after": round(float(best["d_median"]), 1),
+                "change_m": round(abs(change_val), 1),
+                "transition_ts": _iso(trans_ts) or "",
+                "lat": round(float(best["lat"]), 4),
+                "lon": round(float(best["lon"]), 4),
+            }
+        )
 
     if not transitions:
-        return CargoTransitionsResponse(as_of=_iso(now) or "", days=days, min_change=min_change, rows=[])
+        return CargoTransitionsResponse(
+            as_of=_iso(now) or "", days=days, min_change=min_change, rows=[]
+        )
 
     transitions.sort(key=lambda t: t["change_m"], reverse=True)
 
@@ -2456,24 +2689,28 @@ def analytics_cargo_transitions(days: int = 7, min_change: float = 2.0, segment:
         mmsi_val = t["mmsi"]
         imo_val = mmsi_imo.get(mmsi_val)
         risk_info = imo_risk.get(imo_val, {}) if imo_val else {}
-        rows.append(CargoTransitionEvent(
-            mmsi=mmsi_val,
-            name=mmsi_name.get(mmsi_val),
-            kind=t["kind"],
-            segment=t["segment"],
-            region=t["region"],
-            direction=t["direction"],
-            draught_before=t["draught_before"],
-            draught_after=t["draught_after"],
-            change_m=t["change_m"],
-            transition_ts=t["transition_ts"],
-            lat=t.get("lat"),
-            lon=t.get("lon"),
-            risk_score=risk_info.get("risk_score"),
-            ofac=bool(risk_info.get("ofac", False)),
-        ))
+        rows.append(
+            CargoTransitionEvent(
+                mmsi=mmsi_val,
+                name=mmsi_name.get(mmsi_val),
+                kind=t["kind"],
+                segment=t["segment"],
+                region=t["region"],
+                direction=t["direction"],
+                draught_before=t["draught_before"],
+                draught_after=t["draught_after"],
+                change_m=t["change_m"],
+                transition_ts=t["transition_ts"],
+                lat=t.get("lat"),
+                lon=t.get("lon"),
+                risk_score=risk_info.get("risk_score"),
+                ofac=bool(risk_info.get("ofac", False)),
+            )
+        )
 
-    return CargoTransitionsResponse(as_of=_iso(now) or "", days=days, min_change=min_change, rows=rows)
+    return CargoTransitionsResponse(
+        as_of=_iso(now) or "", days=days, min_change=min_change, rows=rows
+    )
 
 
 @app.get("/api/analytics/density", response_model=DensityResponse)
@@ -2491,11 +2728,14 @@ def analytics_density(region: str = "singapore_malacca", days: int = 30):
     if not df.empty:
         df["date"] = pd.to_datetime(df["ts"]).dt.date.astype(str)
         agg = (
-            df.groupby(["date", "kind", "segment"])[["laden_count", "ballast_count", "unknown_count"]]
+            df.groupby(["date", "kind", "segment"])[
+                ["laden_count", "ballast_count", "unknown_count"]
+            ]
             .sum()
             .reset_index()
         )
         from .schemas import DensityDay
+
         for _, r in agg.iterrows():
             series.append(
                 DensityDay(
@@ -2688,11 +2928,21 @@ def analytics_region_momentum(hours_back: int = 24, ocean_only: bool = True):
     unique_ts = df["ts"].unique()
     prev_ts = unique_ts[abs(unique_ts - target_prev_ts).argmin()]
 
-    curr = df[df["ts"] == latest_ts].groupby("region")[["laden_count", "ballast_count", "unknown_count", "total"]].sum()
+    curr = (
+        df[df["ts"] == latest_ts]
+        .groupby("region")[["laden_count", "ballast_count", "unknown_count", "total"]]
+        .sum()
+    )
     prev = df[df["ts"] == prev_ts].groupby("region")["total"].sum().rename("prev_total")
 
     merged = curr.join(prev, how="outer").fillna(0)
-    merged.columns = ["laden_count", "ballast_count", "unknown_count", "current_total", "prev_total"]
+    merged.columns = [
+        "laden_count",
+        "ballast_count",
+        "unknown_count",
+        "current_total",
+        "prev_total",
+    ]
     merged["delta"] = (merged["current_total"] - merged["prev_total"]).astype(int)
     merged["laden_ratio_pct"] = merged.apply(
         lambda r: round(100.0 * r["laden_count"] / max(r["current_total"], 1), 1), axis=1
@@ -2781,7 +3031,9 @@ def analytics_fleet_at_time(ts: str = "", region: str = ""):
     for (kind_val, seg_val), grp in df.groupby(["kind", "segment"]):
         laden, ballast = _laden_ballast(grp, str(seg_val))
         underway = int((grp["sog"].fillna(0) > 2).sum())
-        avg_sog = round(float(grp["sog"].dropna().mean()), 1) if len(grp["sog"].dropna()) > 0 else None
+        avg_sog = (
+            round(float(grp["sog"].dropna().mean()), 1) if len(grp["sog"].dropna()) > 0 else None
+        )
         rows.append(
             FleetHistorySegmentRow(
                 kind=str(kind_val),
@@ -2848,13 +3100,15 @@ def analytics_fleet_trend(days: int = 30, region: str = ""):
             laden = int(row["laden"] or 0)
             ballast = int(row["ballast"] or 0)
             unknown = int(row["unknown"] or 0)
-            series.append(FleetTrendDay(
-                date=row["day"].strftime("%Y-%m-%d"),
-                laden=laden,
-                ballast=ballast,
-                unknown=unknown,
-                total=laden + ballast + unknown,
-            ))
+            series.append(
+                FleetTrendDay(
+                    date=row["day"].strftime("%Y-%m-%d"),
+                    laden=laden,
+                    ballast=ballast,
+                    unknown=unknown,
+                    total=laden + ballast + unknown,
+                )
+            )
 
     return FleetTrendResponse(
         as_of=now_dt.isoformat(),
@@ -2882,7 +3136,8 @@ def analytics_shadow_fleet(days: int = 7, limit: int = 50):
     sts_df = db.query(
         "SELECT mmsi, mmsi2, start_ts FROM ais_events "
         "WHERE type = 'sts' AND start_ts >= ? AND segment != 'Small'",
-        [cutoff], db=_adb,
+        [cutoff],
+        db=_adb,
     )
     if sts_df.empty:
         return ShadowFleetResponse(as_of=_iso(now_dt) or "", days=days, total=0, rows=[])
@@ -2895,7 +3150,8 @@ def analytics_shadow_fleet(days: int = 7, limit: int = 50):
     covert_df = db.query(
         f"SELECT mmsi, type, start_ts FROM ais_events "
         f"WHERE type IN ('gap','spoof') AND start_ts >= ? AND mmsi IN ({ph})",
-        [cutoff] + list(sts_mmsis), db=_adb,
+        [cutoff] + list(sts_mmsis),
+        db=_adb,
     )
     if covert_df.empty:
         return ShadowFleetResponse(as_of=_iso(now_dt) or "", days=days, total=0, rows=[])
@@ -2927,16 +3183,20 @@ def analytics_shadow_fleet(days: int = 7, limit: int = 50):
     all_mmsis = list(covert_mmsis)
     events_kind_df = db.query(
         f"SELECT mmsi, any_value(kind) AS kind, any_value(segment) AS segment "
-        f"FROM ais_events WHERE mmsi IN ({','.join('?'*len(all_mmsis))}) GROUP BY mmsi",
-        all_mmsis, db=_adb,
+        f"FROM ais_events WHERE mmsi IN ({','.join('?' * len(all_mmsis))}) GROUP BY mmsi",
+        all_mmsis,
+        db=_adb,
     )
     event_kind_map: dict[int, tuple[str | None, str | None]] = {}
     for _, r in events_kind_df.iterrows():
-        event_kind_map[int(r["mmsi"])] = (_str_or_none(r.get("kind")), _str_or_none(r.get("segment")))
+        event_kind_map[int(r["mmsi"])] = (
+            _str_or_none(r.get("kind")),
+            _str_or_none(r.get("segment")),
+        )
 
     # MMSI -> name + IMO from live_positions
     lp_df = db.query(
-        f"SELECT mmsi, name, imo FROM live_positions WHERE mmsi IN ({','.join('?'*len(all_mmsis))})",
+        f"SELECT mmsi, name, imo FROM live_positions WHERE mmsi IN ({','.join('?' * len(all_mmsis))})",
         all_mmsis,
     )
     mmsi_info: dict[int, dict] = {}
@@ -2977,27 +3237,31 @@ def analytics_shadow_fleet(days: int = 7, limit: int = 50):
         imo_val = _valid_imo(info.get("imo"))
         reg = imo_risk.get(imo_val, {}) if imo_val else {}
         ev_kind, ev_seg = event_kind_map.get(mmsi_val, (None, None))
-        rows.append(ShadowFleetRow(
-            mmsi=mmsi_val,
-            imo=imo_val,
-            name=_str_or_none(info.get("name")),
-            kind=mmsi_kind.get(mmsi_val) or ev_kind,
-            segment=mmsi_segment.get(mmsi_val) or ev_seg,
-            region=mmsi_region.get(mmsi_val),
-            sts_count=sts_count_map.get(mmsi_val, 0),
-            gap_count=gap_count_map.get(mmsi_val, 0),
-            spoof_count=spoof_count_map.get(mmsi_val, 0),
-            risk_score=reg.get("risk_score"),
-            ofac=bool(reg.get("ofac", False)),
-            flags=[reg["flag"]] if reg.get("flag") else [],
-            last_event_ts=last_event_map.get(mmsi_val),
-        ))
+        rows.append(
+            ShadowFleetRow(
+                mmsi=mmsi_val,
+                imo=imo_val,
+                name=_str_or_none(info.get("name")),
+                kind=mmsi_kind.get(mmsi_val) or ev_kind,
+                segment=mmsi_segment.get(mmsi_val) or ev_seg,
+                region=mmsi_region.get(mmsi_val),
+                sts_count=sts_count_map.get(mmsi_val, 0),
+                gap_count=gap_count_map.get(mmsi_val, 0),
+                spoof_count=spoof_count_map.get(mmsi_val, 0),
+                risk_score=reg.get("risk_score"),
+                ofac=bool(reg.get("ofac", False)),
+                flags=[reg["flag"]] if reg.get("flag") else [],
+                last_event_ts=last_event_map.get(mmsi_val),
+            )
+        )
 
-    rows.sort(key=lambda r: (
-        -(r.risk_score or 0),
-        -(r.gap_count + r.spoof_count),
-        -(r.sts_count),
-    ))
+    rows.sort(
+        key=lambda r: (
+            -(r.risk_score or 0),
+            -(r.gap_count + r.spoof_count),
+            -(r.sts_count),
+        )
+    )
     rows = rows[:limit]
 
     return ShadowFleetResponse(
@@ -3045,8 +3309,8 @@ def analytics_laden(kind: str = "tanker"):
 @app.get("/api/analytics/zones", response_model=list[AnalyticsZone])
 def analytics_zones():
     """All anchorage bboxes and chokepoint region bboxes for frontend overlay."""
-    from analytics.zones import ANCHORAGE_ZONES
     from ais.regions import REGIONS
+    from analytics.zones import ANCHORAGE_ZONES
 
     out: list[AnalyticsZone] = []
     for name, ((lat_min, lon_min), (lat_max, lon_max)) in ANCHORAGE_ZONES.items():
@@ -3086,7 +3350,9 @@ def events(
     limit = max(1, min(500, limit))
     _db = db.analytics_db_path()
 
-    from datetime import UTC, datetime, timedelta as _td
+    from datetime import UTC, datetime
+    from datetime import timedelta as _td
+
     cutoff = datetime.now(UTC).replace(tzinfo=None) - _td(days=days)
 
     where_clauses = ["start_ts >= ?"]
@@ -3101,8 +3367,7 @@ def events(
         "SELECT event_id, type, mmsi, mmsi2, start_ts, end_ts, lat, lon, "
         "       region, kind, segment, details "
         "FROM ais_events "
-        "WHERE " + " AND ".join(where_clauses) +
-        " ORDER BY start_ts DESC LIMIT ?"
+        "WHERE " + " AND ".join(where_clauses) + " ORDER BY start_ts DESC LIMIT ?"
     )
     params.append(limit)
 
@@ -3111,8 +3376,10 @@ def events(
         return EventsResponse(events=[], total=0)
 
     # Enrich with vessel names from live_positions (separate AIS DB query)
-    all_mmsis = list(set(rows_df["mmsi"].dropna().astype(int).tolist()) |
-                     set(rows_df["mmsi2"].dropna().astype(int).tolist()))
+    all_mmsis = list(
+        set(rows_df["mmsi"].dropna().astype(int).tolist())
+        | set(rows_df["mmsi2"].dropna().astype(int).tolist())
+    )
     name_map: dict[int, str] = {}
     if all_mmsis:
         placeholders = ",".join(["?"] * len(all_mmsis))
@@ -3121,7 +3388,9 @@ def events(
             all_mmsis,
         )
         if not name_df.empty:
-            name_map = dict(zip(name_df["mmsi"].astype(int), name_df["name"].fillna("")))
+            name_map = dict(
+                zip(name_df["mmsi"].astype(int), name_df["name"].fillna(""), strict=False)
+            )
 
     import json as _json
 
@@ -3129,6 +3398,7 @@ def events(
     for _, row in rows_df.iterrows():
         mmsi_int = int(row["mmsi"])
         import pandas as _pd
+
         mmsi2_val = row["mmsi2"]
         mmsi2_int = int(mmsi2_val) if mmsi2_val is not None and not _pd.isna(mmsi2_val) else None
         try:
@@ -3178,8 +3448,7 @@ def _fetch_events_raw(types: list[str], days: int, limit: int) -> list[dict]:
     sql = (
         "SELECT event_id, type, mmsi, mmsi2, start_ts, end_ts, lat, lon, "
         "       region, kind, segment, details "
-        "FROM ais_events WHERE " + " AND ".join(where_clauses) +
-        " ORDER BY start_ts DESC LIMIT ?"
+        "FROM ais_events WHERE " + " AND ".join(where_clauses) + " ORDER BY start_ts DESC LIMIT ?"
     )
     params.append(limit)
 
@@ -3199,15 +3468,15 @@ def _fetch_events_raw(types: list[str], days: int, limit: int) -> list[dict]:
             all_mmsis,
         )
         if not name_df.empty:
-            name_map = dict(zip(name_df["mmsi"].astype(int), name_df["name"].fillna("")))
+            name_map = dict(
+                zip(name_df["mmsi"].astype(int), name_df["name"].fillna(""), strict=False)
+            )
 
     out: list[dict] = []
     for _, row in rows_df.iterrows():
         mmsi_int = int(row["mmsi"])
         mmsi2_val = row["mmsi2"]
-        mmsi2_int = (
-            int(mmsi2_val) if mmsi2_val is not None and not pd.isna(mmsi2_val) else None
-        )
+        mmsi2_int = int(mmsi2_val) if mmsi2_val is not None and not pd.isna(mmsi2_val) else None
         try:
             details_dict = _json.loads(row["details"]) if row["details"] else {}
         except (ValueError, TypeError):
@@ -3282,12 +3551,25 @@ def fleet(
 ):
     """Filterable, sortable, paginated fleet registry (registry + live AIS join)."""
     return _fleet.query_fleet(
-        q=q, flag=flag, owner=owner, class_society=class_society,
-        pi_club=pi_club, paris_mou=paris_mou, tokyo_mou=tokyo_mou,
-        kind=kind, segment=segment,
-        built_min=built_min, built_max=built_max,
-        dwt_min=dwt_min, dwt_max=dwt_max, detention_min=detention_min,
-        risk_min=risk_min, live_only=live_only, sort=sort, order=order, page=page,
+        q=q,
+        flag=flag,
+        owner=owner,
+        class_society=class_society,
+        pi_club=pi_club,
+        paris_mou=paris_mou,
+        tokyo_mou=tokyo_mou,
+        kind=kind,
+        segment=segment,
+        built_min=built_min,
+        built_max=built_max,
+        dwt_min=dwt_min,
+        dwt_max=dwt_max,
+        detention_min=detention_min,
+        risk_min=risk_min,
+        live_only=live_only,
+        sort=sort,
+        order=order,
+        page=page,
     )
 
 
@@ -3322,17 +3604,23 @@ def fleet_owner_risk(min_vessels: int = 2, top_n: int = 30):
         avg_risk = float(grp["risk_score"].mean())
         max_risk = int(grp["risk_score"].max())
         high_risk = int((grp["risk_score"] >= 50).sum())
-        ofac_count = int(grp["ofac_sanctioned"].fillna(False).astype(bool).sum()) if "ofac_sanctioned" in grp.columns else 0
+        ofac_count = (
+            int(grp["ofac_sanctioned"].fillna(False).astype(bool).sum())
+            if "ofac_sanctioned" in grp.columns
+            else 0
+        )
         flags = sorted(set(grp["flag"].dropna().tolist()))[:5]
-        rows.append(OwnerRiskItem(
-            owner=str(owner),
-            vessel_count=len(grp),
-            avg_risk_score=round(avg_risk, 1),
-            max_risk_score=max_risk,
-            high_risk_count=high_risk,
-            ofac_count=ofac_count,
-            flags=flags,
-        ))
+        rows.append(
+            OwnerRiskItem(
+                owner=str(owner),
+                vessel_count=len(grp),
+                avg_risk_score=round(avg_risk, 1),
+                max_risk_score=max_risk,
+                high_risk_count=high_risk,
+                ofac_count=ofac_count,
+                flags=flags,
+            )
+        )
 
     rows.sort(key=lambda r: r.avg_risk_score, reverse=True)
     return OwnerRiskResponse(
@@ -3364,7 +3652,11 @@ def fleet_flag_risk(top_n: int = 30):
         avg_risk = float(grp["risk_score"].mean())
         max_risk = int(grp["risk_score"].max())
         high_risk = int((grp["risk_score"] >= 50).sum())
-        ofac_count = int(grp["ofac_sanctioned"].fillna(False).astype(bool).sum()) if "ofac_sanctioned" in grp.columns else 0
+        ofac_count = (
+            int(grp["ofac_sanctioned"].fillna(False).astype(bool).sum())
+            if "ofac_sanctioned" in grp.columns
+            else 0
+        )
         flag_code_vals = grp["flag_code"].dropna().tolist()
         flag_code = flag_code_vals[0] if flag_code_vals else None
         # Most common paris/tokyo MOU status for this flag
@@ -3372,17 +3664,19 @@ def fleet_flag_risk(top_n: int = 30):
         tokyo_counts = grp["tokyo_mou"].dropna().value_counts()
         paris_mou = paris_counts.index[0] if len(paris_counts) > 0 else None
         tokyo_mou = tokyo_counts.index[0] if len(tokyo_counts) > 0 else None
-        rows.append(FlagRiskRow(
-            flag=str(flag),
-            flag_code=flag_code,
-            vessel_count=len(grp),
-            avg_risk_score=round(avg_risk, 1),
-            max_risk_score=max_risk,
-            high_risk_count=high_risk,
-            ofac_count=ofac_count,
-            paris_mou=paris_mou,
-            tokyo_mou=tokyo_mou,
-        ))
+        rows.append(
+            FlagRiskRow(
+                flag=str(flag),
+                flag_code=flag_code,
+                vessel_count=len(grp),
+                avg_risk_score=round(avg_risk, 1),
+                max_risk_score=max_risk,
+                high_risk_count=high_risk,
+                ofac_count=ofac_count,
+                paris_mou=paris_mou,
+                tokyo_mou=tokyo_mou,
+            )
+        )
 
     rows.sort(key=lambda r: r.avg_risk_score, reverse=True)
     return FlagRiskResponse(
@@ -3405,8 +3699,14 @@ def fleet_kpis():
     if df.empty:
         return FleetKPIs(
             as_of=_iso(datetime.now(UTC).replace(tzinfo=None)) or "",
-            total_registry=0, scored=0, elevated=0, high_risk=0,
-            critical=0, ofac_count=0, avg_risk_score=None, pct_scored=0.0,
+            total_registry=0,
+            scored=0,
+            elevated=0,
+            high_risk=0,
+            critical=0,
+            ofac_count=0,
+            avg_risk_score=None,
+            pct_scored=0.0,
         )
 
     total = len(df)
@@ -3469,13 +3769,15 @@ def fleet_age():
         high_risk = int((scored["risk_score"] >= 50).sum()) if not scored.empty else 0
         dwt_vals = grp["dwt"].dropna()
         avg_dwt = round(float(dwt_vals.mean()), 0) if not dwt_vals.empty else None
-        bands.append(FleetAgeBand(
-            age_band=band_label,
-            vessel_count=len(grp),
-            avg_risk_score=avg_risk,
-            high_risk_count=high_risk,
-            avg_dwt=avg_dwt,
-        ))
+        bands.append(
+            FleetAgeBand(
+                age_band=band_label,
+                vessel_count=len(grp),
+                avg_risk_score=avg_risk,
+                high_risk_count=high_risk,
+                avg_dwt=avg_dwt,
+            )
+        )
 
     return FleetAgeResponse(
         as_of=_iso(datetime.now(UTC).replace(tzinfo=None)) or "",
@@ -3501,7 +3803,9 @@ def analytics_slow_steamers(kind: str = "", limit: int = 50):
         sog_num = pd.to_numeric(lp_df["sog"], errors="coerce")
         ns_num = pd.to_numeric(lp_df.get("nav_status", pd.Series()), errors="coerce")
         ns_ok = ns_num.isna() | ~ns_num.isin([1, 5])
-        lp_df = lp_df[(sog_num > 0.5) & (sog_num < 25.0) & ns_ok & (lp_df["segment"] != "Small")].copy()
+        lp_df = lp_df[
+            (sog_num > 0.5) & (sog_num < 25.0) & ns_ok & (lp_df["segment"] != "Small")
+        ].copy()
         needed = ["mmsi", "name", "kind", "segment", "region", "sog", "imo"]
         lp_df = lp_df[[c for c in needed if c in lp_df.columns]]
         if kind:
@@ -3520,7 +3824,9 @@ def analytics_slow_steamers(kind: str = "", limit: int = 50):
             seg_medians[str(seg)] = float(grp["sog"].median())
 
     if not seg_medians:
-        return SlowSteamersResponse(as_of=_iso(now) or "", total_fleet_underway=total_underway, rows=[])
+        return SlowSteamersResponse(
+            as_of=_iso(now) or "", total_fleet_underway=total_underway, rows=[]
+        )
 
     # Find vessels at < 60% of their segment median
     candidates: list[dict] = []
@@ -3534,23 +3840,27 @@ def analytics_slow_steamers(kind: str = "", limit: int = 50):
         ratio = float(v["sog"]) / median_sog
         if ratio >= 0.6:
             continue
-        candidates.append({
-            "mmsi": int(v["mmsi"]),
-            "name": _str_or_none(v.get("name")),
-            "kind": _str_or_none(v.get("kind")),
-            "segment": seg,
-            "region": _str_or_none(v.get("region")),
-            "sog": round(float(v["sog"]), 1),
-            "segment_median_sog": round(median_sog, 1),
-            "pct_of_median": round(ratio * 100, 1),
-            "imo": _valid_imo(v.get("imo")),
-        })
+        candidates.append(
+            {
+                "mmsi": int(v["mmsi"]),
+                "name": _str_or_none(v.get("name")),
+                "kind": _str_or_none(v.get("kind")),
+                "segment": seg,
+                "region": _str_or_none(v.get("region")),
+                "sog": round(float(v["sog"]), 1),
+                "segment_median_sog": round(median_sog, 1),
+                "pct_of_median": round(ratio * 100, 1),
+                "imo": _valid_imo(v.get("imo")),
+            }
+        )
 
     candidates.sort(key=lambda c: c["pct_of_median"])
     candidates = candidates[:limit]
 
     if not candidates:
-        return SlowSteamersResponse(as_of=_iso(now) or "", total_fleet_underway=total_underway, rows=[])
+        return SlowSteamersResponse(
+            as_of=_iso(now) or "", total_fleet_underway=total_underway, rows=[]
+        )
 
     # Enrich with risk scores
     all_imos = list(set(c["imo"] for c in candidates if c["imo"]))
@@ -3570,20 +3880,24 @@ def analytics_slow_steamers(kind: str = "", limit: int = 50):
     rows = []
     for c in candidates:
         risk_info = imo_risk.get(c["imo"], {}) if c["imo"] else {}
-        rows.append(SlowSteamerEvent(
-            mmsi=c["mmsi"],
-            name=c["name"],
-            kind=c["kind"],
-            segment=c["segment"],
-            region=c["region"],
-            sog=c["sog"],
-            segment_median_sog=c["segment_median_sog"],
-            pct_of_median=c["pct_of_median"],
-            risk_score=risk_info.get("risk_score"),
-            ofac=bool(risk_info.get("ofac", False)),
-        ))
+        rows.append(
+            SlowSteamerEvent(
+                mmsi=c["mmsi"],
+                name=c["name"],
+                kind=c["kind"],
+                segment=c["segment"],
+                region=c["region"],
+                sog=c["sog"],
+                segment_median_sog=c["segment_median_sog"],
+                pct_of_median=c["pct_of_median"],
+                risk_score=risk_info.get("risk_score"),
+                ofac=bool(risk_info.get("ofac", False)),
+            )
+        )
 
-    return SlowSteamersResponse(as_of=_iso(now) or "", total_fleet_underway=total_underway, rows=rows)
+    return SlowSteamersResponse(
+        as_of=_iso(now) or "", total_fleet_underway=total_underway, rows=rows
+    )
 
 
 @app.get("/api/analytics/market-summary", response_model=MarketSummaryResponse)
@@ -3656,16 +3970,18 @@ def analytics_market_summary():
             sog_grp = grp["sog"]
             underway = int(((nav_grp == 0) | (pd.to_numeric(sog_grp, errors="coerce") > 2.0)).sum())
 
-            seg_rows.append(MarketSegmentSummary(
-                segment=str(segment),
-                kind=str(kind),
-                total=seg_total,
-                laden=seg_laden,
-                ballast=seg_ballast,
-                unknown=seg_unknown,
-                laden_pct=round(seg_laden / max(seg_laden + seg_ballast, 1) * 100, 1),
-                underway_pct=round(underway / max(seg_total, 1) * 100, 1),
-            ))
+            seg_rows.append(
+                MarketSegmentSummary(
+                    segment=str(segment),
+                    kind=str(kind),
+                    total=seg_total,
+                    laden=seg_laden,
+                    ballast=seg_ballast,
+                    unknown=seg_unknown,
+                    laden_pct=round(seg_laden / max(seg_laden + seg_ballast, 1) * 100, 1),
+                    underway_pct=round(underway / max(seg_total, 1) * 100, 1),
+                )
+            )
 
         seg_rows.sort(key=lambda r: r.total, reverse=True)
 
@@ -3720,17 +4036,19 @@ def analytics_fleet_utilization():
         unknown = int((grp["status"] == "unknown").sum())
         underway_sog = grp[grp["status"] == "underway"]["sog_num"]
         avg_sog = round(float(underway_sog.mean()), 1) if not underway_sog.empty else None
-        rows_out.append(FleetUtilizationRow(
-            segment=str(segment),
-            kind=str(kind),
-            total=total,
-            underway_count=underway,
-            idle_count=idle,
-            unknown_count=unknown,
-            underway_pct=round(100.0 * underway / total, 1) if total > 0 else 0.0,
-            idle_pct=round(100.0 * idle / total, 1) if total > 0 else 0.0,
-            avg_sog_underway=avg_sog,
-        ))
+        rows_out.append(
+            FleetUtilizationRow(
+                segment=str(segment),
+                kind=str(kind),
+                total=total,
+                underway_count=underway,
+                idle_count=idle,
+                unknown_count=unknown,
+                underway_pct=round(100.0 * underway / total, 1) if total > 0 else 0.0,
+                idle_pct=round(100.0 * idle / total, 1) if total > 0 else 0.0,
+                avg_sog_underway=avg_sog,
+            )
+        )
 
     rows_out.sort(key=lambda r: r.underway_pct)  # most idle first
     total_fleet = len(lp_df)
@@ -3853,15 +4171,18 @@ def analytics_risk_events(min_risk: int = 25, days: int = 2, limit: int = 50):
     )
     if reg_df.empty:
         return RiskEventsResponse(
-            as_of=_iso(now_ts) or "", min_risk=min_risk, days=days,
-            total_high_risk_vessels=0, rows=[],
+            as_of=_iso(now_ts) or "",
+            min_risk=min_risk,
+            days=days,
+            total_high_risk_vessels=0,
+            rows=[],
         )
 
     imo_risk: dict[int, dict] = {}
     for _, r in reg_df.iterrows():
         imo_risk[int(r["imo"])] = {"risk_score": int(r["risk_score"]), "ofac": bool(r["ofac"])}
 
-    known_imos = [int(i) for i in imo_risk.keys()]
+    known_imos = [int(i) for i in imo_risk]
     ph_imos = ",".join("?" * len(known_imos))
 
     # Step 2: IMO -> MMSI + name via live_positions
@@ -3881,8 +4202,11 @@ def analytics_risk_events(min_risk: int = 25, days: int = 2, limit: int = 50):
     all_mmsis = list(mmsi_imo.keys())
     if not all_mmsis:
         return RiskEventsResponse(
-            as_of=_iso(now_ts) or "", min_risk=min_risk, days=days,
-            total_high_risk_vessels=len(known_imos), rows=[],
+            as_of=_iso(now_ts) or "",
+            min_risk=min_risk,
+            days=days,
+            total_high_risk_vessels=len(known_imos),
+            rows=[],
         )
 
     # Step 3: recent STS + reroute events for these MMSIs (either party)
@@ -3900,8 +4224,11 @@ def analytics_risk_events(min_risk: int = 25, days: int = 2, limit: int = 50):
     )
     if events_df.empty:
         return RiskEventsResponse(
-            as_of=_iso(now_ts) or "", min_risk=min_risk, days=days,
-            total_high_risk_vessels=len(known_imos), rows=[],
+            as_of=_iso(now_ts) or "",
+            min_risk=min_risk,
+            days=days,
+            total_high_risk_vessels=len(known_imos),
+            rows=[],
         )
 
     # Gather all MMSIs from events to look up names for non-high-risk counterparties
@@ -3957,29 +4284,35 @@ def analytics_risk_events(min_risk: int = 25, days: int = 2, limit: int = 50):
         if ev.get("lon") is not None and not pd.isna(ev.get("lon")):
             lon_val = round(float(ev["lon"]), 5)
 
-        risk_rows.append(RiskEventItem(
-            event_id=str(ev["event_id"]),
-            event_type=str(ev["type"]),
-            event_ts=_iso(ev["start_ts"]) or "",
-            mmsi=mmsi_val,
-            name=mmsi_name.get(mmsi_val),
-            imo=imo_val,
-            risk_score=rs,
-            ofac=bool(ri.get("ofac", False)),
-            mmsi2=mmsi2_val,
-            name2=mmsi_name.get(mmsi2_val) if mmsi2_val is not None else None,
-            imo2=imo2_val,
-            risk_score2=rs2,
-            ofac2=bool(ri2.get("ofac", False)),
-            max_risk=max_risk,
-            region=_str_or_none(ev.get("region")),
-            kind=_str_or_none(ev.get("kind")),
-            segment=_str_or_none(ev.get("segment")),
-            lat=lat_val,
-            lon=lon_val,
-            old_destination=_str_or_none(det.get("old_destination")) if isinstance(det, dict) else None,
-            new_destination=_str_or_none(det.get("new_destination")) if isinstance(det, dict) else None,
-        ))
+        risk_rows.append(
+            RiskEventItem(
+                event_id=str(ev["event_id"]),
+                event_type=str(ev["type"]),
+                event_ts=_iso(ev["start_ts"]) or "",
+                mmsi=mmsi_val,
+                name=mmsi_name.get(mmsi_val),
+                imo=imo_val,
+                risk_score=rs,
+                ofac=bool(ri.get("ofac", False)),
+                mmsi2=mmsi2_val,
+                name2=mmsi_name.get(mmsi2_val) if mmsi2_val is not None else None,
+                imo2=imo2_val,
+                risk_score2=rs2,
+                ofac2=bool(ri2.get("ofac", False)),
+                max_risk=max_risk,
+                region=_str_or_none(ev.get("region")),
+                kind=_str_or_none(ev.get("kind")),
+                segment=_str_or_none(ev.get("segment")),
+                lat=lat_val,
+                lon=lon_val,
+                old_destination=_str_or_none(det.get("old_destination"))
+                if isinstance(det, dict)
+                else None,
+                new_destination=_str_or_none(det.get("new_destination"))
+                if isinstance(det, dict)
+                else None,
+            )
+        )
 
     risk_rows.sort(key=lambda r: (-r.max_risk, r.event_ts))
     return RiskEventsResponse(
@@ -4071,7 +4404,9 @@ def analytics_port_congestion(kind: str = "", days: int = 14):
             cur_mmsis,
         )
         if not region_df.empty:
-            region_map = {int(r["mmsi"]): _str_or_none(r.get("region")) for _, r in region_df.iterrows()}
+            region_map = {
+                int(r["mmsi"]): _str_or_none(r.get("region")) for _, r in region_df.iterrows()
+            }
 
     kind_map: dict[int, str | None] = {}
     if not span_df.empty:
@@ -4107,17 +4442,15 @@ def analytics_port_congestion(kind: str = "", days: int = 14):
         obs_hours = max((baseline_end - since_pd).total_seconds() / 3600, 1)
         clip_start = span_df["start_ts"].clip(lower=since_pd)
         clip_end = span_df["end_ts"].clip(upper=baseline_end)
-        span_df["overlap_h"] = (
-            (clip_end - clip_start).dt.total_seconds() / 3600
-        ).clip(lower=0)
-        span_df["dwell_hours"] = (
-            (span_df["end_ts"] - span_df["start_ts"]).dt.total_seconds() / 3600
-        )
+        span_df["overlap_h"] = ((clip_end - clip_start).dt.total_seconds() / 3600).clip(lower=0)
+        span_df["dwell_hours"] = (span_df["end_ts"] - span_df["start_ts"]).dt.total_seconds() / 3600
         for zone_key, grp in span_df.groupby("zone"):
             overlap_sum = float(grp["overlap_h"].sum())
             hist = grp[grp["overlap_h"] > 0]["dwell_hours"]
             zone_baseline[str(zone_key)] = {
-                "baseline_avg_vessels": round(overlap_sum / obs_hours, 2) if overlap_sum > 0 else None,
+                "baseline_avg_vessels": round(overlap_sum / obs_hours, 2)
+                if overlap_sum > 0
+                else None,
                 "baseline_avg_dwell_hours": round(float(hist.mean()), 1) if len(hist) else None,
             }
 
@@ -4134,16 +4467,18 @@ def analytics_port_congestion(kind: str = "", days: int = 14):
         else:
             factor = 1.0 if cv > 0 else 0.0
 
-        rows_out.append(PortCongestionRow(
-            zone=z,
-            region=cur.get("region"),
-            kind=cur.get("kind"),
-            current_vessels=cv,
-            avg_current_dwell_hours=cur.get("avg_current_dwell_hours"),
-            baseline_avg_vessels=bav,
-            baseline_avg_dwell_hours=bas.get("baseline_avg_dwell_hours"),
-            congestion_factor=factor,
-        ))
+        rows_out.append(
+            PortCongestionRow(
+                zone=z,
+                region=cur.get("region"),
+                kind=cur.get("kind"),
+                current_vessels=cv,
+                avg_current_dwell_hours=cur.get("avg_current_dwell_hours"),
+                baseline_avg_vessels=bav,
+                baseline_avg_dwell_hours=bas.get("baseline_avg_dwell_hours"),
+                congestion_factor=factor,
+            )
+        )
 
     rows_out.sort(key=lambda r: (-r.congestion_factor, -r.current_vessels))
     return PortCongestionResponse(
@@ -4250,17 +4585,15 @@ def analytics_chokepoint_congestion(kind: str = "", days: int = 14):
         obs_hours = max((baseline_end - since_pd).total_seconds() / 3600, 1)
         clip_start = span_df["start_ts"].clip(lower=since_pd)
         clip_end = span_df["end_ts"].clip(upper=baseline_end)
-        span_df["overlap_h"] = (
-            (clip_end - clip_start).dt.total_seconds() / 3600
-        ).clip(lower=0)
-        span_df["dwell_hours"] = (
-            (span_df["end_ts"] - span_df["start_ts"]).dt.total_seconds() / 3600
-        )
+        span_df["overlap_h"] = ((clip_end - clip_start).dt.total_seconds() / 3600).clip(lower=0)
+        span_df["dwell_hours"] = (span_df["end_ts"] - span_df["start_ts"]).dt.total_seconds() / 3600
         for zone_key, grp in span_df.groupby("zone"):
             overlap_sum = float(grp["overlap_h"].sum())
             hist = grp[grp["overlap_h"] > 0]["dwell_hours"]
             zone_baseline[str(zone_key)] = {
-                "baseline_avg_vessels": round(overlap_sum / obs_hours, 2) if overlap_sum > 0 else None,
+                "baseline_avg_vessels": round(overlap_sum / obs_hours, 2)
+                if overlap_sum > 0
+                else None,
                 "baseline_avg_dwell_hours": round(float(hist.mean()), 1) if len(hist) else None,
             }
 
@@ -4276,15 +4609,17 @@ def analytics_chokepoint_congestion(kind: str = "", days: int = 14):
         else:
             factor = 1.0 if cv > 0 else 0.0
 
-        rows_out.append(ChokepointCongestionRow(
-            chokepoint=z,
-            kind=cur.get("kind"),
-            current_vessels=cv,
-            avg_current_dwell_hours=cur.get("avg_current_dwell_hours"),
-            baseline_avg_vessels=bav,
-            baseline_avg_dwell_hours=bas.get("baseline_avg_dwell_hours"),
-            congestion_factor=factor,
-        ))
+        rows_out.append(
+            ChokepointCongestionRow(
+                chokepoint=z,
+                kind=cur.get("kind"),
+                current_vessels=cv,
+                avg_current_dwell_hours=cur.get("avg_current_dwell_hours"),
+                baseline_avg_vessels=bav,
+                baseline_avg_dwell_hours=bas.get("baseline_avg_dwell_hours"),
+                congestion_factor=factor,
+            )
+        )
 
     rows_out.sort(key=lambda r: (-r.congestion_factor, -r.current_vessels))
     return ChokepointCongestionResponse(
@@ -4296,43 +4631,97 @@ def analytics_chokepoint_congestion(kind: str = "", days: int = 14):
 
 _DEST_REGION_MAP: dict[str, str] = {
     # Far East
-    "CN": "Far East", "HK": "Far East", "TW": "Far East",
-    "KR": "Far East", "JP": "Far East",
+    "CN": "Far East",
+    "HK": "Far East",
+    "TW": "Far East",
+    "KR": "Far East",
+    "JP": "Far East",
     # Southeast Asia
-    "SG": "SE Asia", "MY": "SE Asia", "TH": "SE Asia",
-    "ID": "SE Asia", "PH": "SE Asia", "VN": "SE Asia",
+    "SG": "SE Asia",
+    "MY": "SE Asia",
+    "TH": "SE Asia",
+    "ID": "SE Asia",
+    "PH": "SE Asia",
+    "VN": "SE Asia",
     # South Asia
-    "IN": "South Asia", "PK": "South Asia", "LK": "South Asia", "BD": "South Asia",
+    "IN": "South Asia",
+    "PK": "South Asia",
+    "LK": "South Asia",
+    "BD": "South Asia",
     # Middle East
-    "AE": "Middle East", "SA": "Middle East", "KW": "Middle East",
-    "IQ": "Middle East", "IR": "Middle East", "QA": "Middle East",
-    "OM": "Middle East", "BH": "Middle East", "YE": "Middle East",
+    "AE": "Middle East",
+    "SA": "Middle East",
+    "KW": "Middle East",
+    "IQ": "Middle East",
+    "IR": "Middle East",
+    "QA": "Middle East",
+    "OM": "Middle East",
+    "BH": "Middle East",
+    "YE": "Middle East",
     # Europe (NW)
-    "NL": "NW Europe", "BE": "NW Europe", "GB": "NW Europe",
-    "FR": "NW Europe", "DE": "NW Europe", "DK": "NW Europe",
-    "NO": "NW Europe", "SE": "NW Europe", "FI": "NW Europe",
-    "PL": "NW Europe", "LV": "NW Europe", "LT": "NW Europe",
-    "EE": "NW Europe", "IE": "NW Europe",
+    "NL": "NW Europe",
+    "BE": "NW Europe",
+    "GB": "NW Europe",
+    "FR": "NW Europe",
+    "DE": "NW Europe",
+    "DK": "NW Europe",
+    "NO": "NW Europe",
+    "SE": "NW Europe",
+    "FI": "NW Europe",
+    "PL": "NW Europe",
+    "LV": "NW Europe",
+    "LT": "NW Europe",
+    "EE": "NW Europe",
+    "IE": "NW Europe",
     # Mediterranean
-    "ES": "Med", "IT": "Med", "PT": "Med", "GR": "Med",
-    "TR": "Med", "EG": "Med", "LY": "Med", "TN": "Med",
-    "MA": "Med", "DZ": "Med", "MT": "Med", "HR": "Med",
+    "ES": "Med",
+    "IT": "Med",
+    "PT": "Med",
+    "GR": "Med",
+    "TR": "Med",
+    "EG": "Med",
+    "LY": "Med",
+    "TN": "Med",
+    "MA": "Med",
+    "DZ": "Med",
+    "MT": "Med",
+    "HR": "Med",
     # Americas
-    "US": "Americas", "MX": "Americas", "PA": "Americas",
-    "CA": "Americas", "CO": "Americas", "VE": "Americas",
-    "BR": "Americas", "AR": "Americas", "CL": "Americas",
-    "PE": "Americas", "EC": "Americas", "TT": "Americas",
+    "US": "Americas",
+    "MX": "Americas",
+    "PA": "Americas",
+    "CA": "Americas",
+    "CO": "Americas",
+    "VE": "Americas",
+    "BR": "Americas",
+    "AR": "Americas",
+    "CL": "Americas",
+    "PE": "Americas",
+    "EC": "Americas",
+    "TT": "Americas",
     # West Africa
-    "NG": "W Africa", "AO": "W Africa", "CI": "W Africa",
-    "GH": "W Africa", "CM": "W Africa", "SN": "W Africa",
-    "TG": "W Africa", "CD": "W Africa", "GA": "W Africa",
+    "NG": "W Africa",
+    "AO": "W Africa",
+    "CI": "W Africa",
+    "GH": "W Africa",
+    "CM": "W Africa",
+    "SN": "W Africa",
+    "TG": "W Africa",
+    "CD": "W Africa",
+    "GA": "W Africa",
     # East Africa / Indian Ocean
-    "TZ": "E Africa", "KE": "E Africa", "MZ": "E Africa",
-    "MU": "E Africa", "ZA": "S Africa",
+    "TZ": "E Africa",
+    "KE": "E Africa",
+    "MZ": "E Africa",
+    "MU": "E Africa",
+    "ZA": "S Africa",
     # Australia / Pacific
-    "AU": "Oceania", "NZ": "Oceania",
+    "AU": "Oceania",
+    "NZ": "Oceania",
     # Baltic / Black Sea
-    "RU": "Russia/CIS", "UA": "Russia/CIS", "KZ": "Russia/CIS",
+    "RU": "Russia/CIS",
+    "UA": "Russia/CIS",
+    "KZ": "Russia/CIS",
     "BY": "Russia/CIS",
 }
 
@@ -4344,10 +4733,17 @@ def _dest_to_region(dest: str | None) -> str:
     return _DEST_REGION_MAP.get(dest[:2].upper(), "Unknown")
 
 
-_HIGH_RISK_REGIONS = frozenset({
-    "hormuz", "persian_gulf", "west_africa", "somalia",
-    "red_sea", "bab_el_mandeb", "gulf_of_aden",
-})
+_HIGH_RISK_REGIONS = frozenset(
+    {
+        "hormuz",
+        "persian_gulf",
+        "west_africa",
+        "somalia",
+        "red_sea",
+        "bab_el_mandeb",
+        "gulf_of_aden",
+    }
+)
 
 
 @app.get("/api/analytics/sts-proximity", response_model=StsProximityResponse)
@@ -4369,11 +4765,25 @@ def analytics_sts_proximity(max_dist_m: float = 2000, max_sog: float = 3.0):
         ns_num = pd.to_numeric(df.get("nav_status", pd.Series()), errors="coerce")
         ns_ok = ns_num.isna() | ~ns_num.isin([1, 5])
         df = df[
-            (sog_num.notna()) & (sog_num <= sog_cap) & ns_ok
-            & df["lat"].notna() & df["lon"].notna()
+            (sog_num.notna())
+            & (sog_num <= sog_cap)
+            & ns_ok
+            & df["lat"].notna()
+            & df["lon"].notna()
             & (df["segment"] != "Small")
         ].copy()
-        needed = ["mmsi", "name", "imo", "lat", "lon", "sog", "kind", "segment", "region", "nav_status"]
+        needed = [
+            "mmsi",
+            "name",
+            "imo",
+            "lat",
+            "lon",
+            "sog",
+            "kind",
+            "segment",
+            "region",
+            "nav_status",
+        ]
         df = df[[c for c in needed if c in df.columns]]
     now = datetime.now(UTC)
     if df.empty or len(df) < 2:
@@ -4391,13 +4801,16 @@ def analytics_sts_proximity(max_dist_m: float = 2000, max_sog: float = 3.0):
     lons = np.radians(df["lon"].values.astype(float))
     dlat = lats[:, None] - lats[None, :]
     dlon = lons[:, None] - lons[None, :]
-    a = np.sin(dlat / 2) ** 2 + np.cos(lats[:, None]) * np.cos(lats[None, :]) * np.sin(dlon / 2) ** 2
+    a = (
+        np.sin(dlat / 2) ** 2
+        + np.cos(lats[:, None]) * np.cos(lats[None, :]) * np.sin(dlon / 2) ** 2
+    )
     dists = 2 * R * np.arcsin(np.sqrt(np.clip(a, 0, 1)))
     mask = np.triu(dists < d_m, k=1)
     ii, jj = np.where(mask)
 
     pairs: list[StsProximityPair] = []
-    for i_idx, j_idx in zip(ii.tolist(), jj.tolist()):
+    for i_idx, j_idx in zip(ii.tolist(), jj.tolist(), strict=False):
         a_row = df.iloc[i_idx]
         b_row = df.iloc[j_idx]
         region = _str_or_none(a_row["region"]) or _str_or_none(b_row["region"])
@@ -4485,12 +4898,17 @@ def analytics_anomaly_watchlist(
         rr: dict[int, int] = {}
         if not df.empty:
             for _, r in df.iterrows():
-                m = int(r["mmsi"]); t = str(r["type"]); c = int(r["cnt"])
-                if t == "sts": sts[m] = sts.get(m, 0) + c
-                elif t == "reroute": rr[m] = rr.get(m, 0) + c
+                m = int(r["mmsi"])
+                t = str(r["type"])
+                c = int(r["cnt"])
+                if t == "sts":
+                    sts[m] = sts.get(m, 0) + c
+                elif t == "reroute":
+                    rr[m] = rr.get(m, 0) + c
         if not mmsi2_df.empty:
             for _, r in mmsi2_df.iterrows():
-                m = int(r["mmsi"]); c = int(r["cnt"])
+                m = int(r["mmsi"])
+                c = int(r["cnt"])
                 sts[m] = sts.get(m, 0) + c
         return sts, rr
 
@@ -4518,7 +4936,11 @@ def analytics_anomaly_watchlist(
             laden_map[int(r["mmsi"])] = str(r["laden"]) if r.get("laden") else "unknown"
 
     # Step 4: registry risk for all live IMOs
-    live_imos = [_valid_imo(r.get("imo")) for _, r in lp_df.iterrows() if _valid_imo(r.get("imo")) is not None]
+    live_imos = [
+        _valid_imo(r.get("imo"))
+        for _, r in lp_df.iterrows()
+        if _valid_imo(r.get("imo")) is not None
+    ]
     reg_map: dict[int, dict] = {}
     if live_imos:
         reg_df = db.pg_query(
@@ -4531,8 +4953,13 @@ def analytics_anomaly_watchlist(
                 imo_v = _valid_imo(r.get("imo"))
                 if imo_v:
                     reg_map[imo_v] = {
-                        "risk_score": int(r["risk_score"]) if r.get("risk_score") is not None and not pd.isna(r["risk_score"]) else None,
-                        "ofac": bool(r["ofac_sanctioned"]) if r.get("ofac_sanctioned") is not None and not pd.isna(r["ofac_sanctioned"]) else False,
+                        "risk_score": int(r["risk_score"])
+                        if r.get("risk_score") is not None and not pd.isna(r["risk_score"])
+                        else None,
+                        "ofac": bool(r["ofac_sanctioned"])
+                        if r.get("ofac_sanctioned") is not None
+                        and not pd.isna(r["ofac_sanctioned"])
+                        else False,
                     }
 
     # Step 5: score and filter
@@ -4589,30 +5016,36 @@ def analytics_anomaly_watchlist(
         laden_val = laden_map.get(mmsi, "unknown")
         sog_val = row.get("sog")
         sog_f = float(sog_val) if sog_val is not None and not pd.isna(sog_val) else None
-        lat_f = float(row["lat"]) if row.get("lat") is not None and not pd.isna(row["lat"]) else None
-        lon_f = float(row["lon"]) if row.get("lon") is not None and not pd.isna(row["lon"]) else None
+        lat_f = (
+            float(row["lat"]) if row.get("lat") is not None and not pd.isna(row["lat"]) else None
+        )
+        lon_f = (
+            float(row["lon"]) if row.get("lon") is not None and not pd.isna(row["lon"]) else None
+        )
 
-        rows_out.append(AnomalyWatchlistItem(
-            mmsi=mmsi,
-            imo=imo,
-            name=_str_or_none(row.get("name")),
-            kind=_str_or_none(row.get("kind")),
-            segment=_str_or_none(row.get("segment")),
-            region=region,
-            lat=lat_f,
-            lon=lon_f,
-            sog=sog_f,
-            destination=_canonical_destination(_str_or_none(row.get("destination"))),
-            laden=laden_val,
-            total_score=total,
-            behavioral_score=behavioral,
-            registry_risk=reg_risk,
-            ofac=ofac,
-            risk_level=risk_level,
-            sts_count_7d=sts_7d_c,
-            reroute_count_7d=rr_7d_c,
-            signals=signals,
-        ))
+        rows_out.append(
+            AnomalyWatchlistItem(
+                mmsi=mmsi,
+                imo=imo,
+                name=_str_or_none(row.get("name")),
+                kind=_str_or_none(row.get("kind")),
+                segment=_str_or_none(row.get("segment")),
+                region=region,
+                lat=lat_f,
+                lon=lon_f,
+                sog=sog_f,
+                destination=_canonical_destination(_str_or_none(row.get("destination"))),
+                laden=laden_val,
+                total_score=total,
+                behavioral_score=behavioral,
+                registry_risk=reg_risk,
+                ofac=ofac,
+                risk_level=risk_level,
+                sts_count_7d=sts_7d_c,
+                reroute_count_7d=rr_7d_c,
+                signals=signals,
+            )
+        )
 
     rows_out.sort(key=lambda r: (-r.total_score, -r.behavioral_score))
     total_flagged = len(rows_out)
@@ -4648,9 +5081,9 @@ def analytics_trade_lane_matrix(
     lp_df = _live_all()
     if not lp_df.empty:
         lp_df = lp_df[
-            (lp_df["segment"] != "Small") &
-            lp_df["destination"].notna() &
-            (lp_df["destination"] != "")
+            (lp_df["segment"] != "Small")
+            & lp_df["destination"].notna()
+            & (lp_df["destination"] != "")
         ].copy()
         if kind:
             lp_df = lp_df[lp_df["kind"] == kind]
@@ -4701,7 +5134,11 @@ def analytics_trade_lane_matrix(
             sts_map[m] = sts_map.get(m, 0) + int(r["cnt"])
 
     # Registry risk
-    live_imos = [_valid_imo(r.get("imo")) for _, r in lp_df.iterrows() if _valid_imo(r.get("imo")) is not None]
+    live_imos = [
+        _valid_imo(r.get("imo"))
+        for _, r in lp_df.iterrows()
+        if _valid_imo(r.get("imo")) is not None
+    ]
     reg_map: dict[int, dict] = {}  # imo -> {risk_score, ofac}
     if live_imos:
         reg_df = db.pg_query(
@@ -4714,13 +5151,21 @@ def analytics_trade_lane_matrix(
                 imo_v = _valid_imo(r.get("imo"))
                 if imo_v:
                     reg_map[imo_v] = {
-                        "risk_score": int(r["risk_score"]) if r.get("risk_score") is not None and not pd.isna(r["risk_score"]) else None,
-                        "ofac": bool(r["ofac_sanctioned"]) if r.get("ofac_sanctioned") is not None and not pd.isna(r["ofac_sanctioned"]) else False,
+                        "risk_score": int(r["risk_score"])
+                        if r.get("risk_score") is not None and not pd.isna(r["risk_score"])
+                        else None,
+                        "ofac": bool(r["ofac_sanctioned"])
+                        if r.get("ofac_sanctioned") is not None
+                        and not pd.isna(r["ofac_sanctioned"])
+                        else False,
                     }
 
     # Step 4: aggregate cells
     from collections import defaultdict
-    cell_counts: dict[tuple[str, str], dict[str, int]] = defaultdict(lambda: {"total": 0, "high_risk": 0, "laden": 0})
+
+    cell_counts: dict[tuple[str, str], dict[str, int]] = defaultdict(
+        lambda: {"total": 0, "high_risk": 0, "laden": 0}
+    )
     origin_totals: dict[str, int] = defaultdict(int)
     dest_totals: dict[str, int] = defaultdict(int)
 
@@ -4767,13 +5212,15 @@ def analytics_trade_lane_matrix(
 
     cells: list[TradeLaneCell] = []
     for (orig, dest), counts in sorted(cell_counts.items(), key=lambda kv: -kv[1]["total"]):
-        cells.append(TradeLaneCell(
-            origin_region=orig,
-            dest_region=dest,
-            vessel_count=counts["total"],
-            high_risk_count=counts["high_risk"],
-            laden_count=counts["laden"],
-        ))
+        cells.append(
+            TradeLaneCell(
+                origin_region=orig,
+                dest_region=dest,
+                vessel_count=counts["total"],
+                high_risk_count=counts["high_risk"],
+                laden_count=counts["laden"],
+            )
+        )
 
     return TradeLaneMatrixResponse(
         as_of=_iso(now_ts) or "",
@@ -4808,8 +5255,7 @@ def analytics_chokepoint_heatmap(
     sql = (
         "SELECT strftime(entered_ts, '%Y-%m-%d') AS dt, chokepoint, kind, COUNT(*) AS cnt "
         "FROM transit_events "
-        "WHERE " + " AND ".join(where_clauses) +
-        " GROUP BY 1, 2, 3 ORDER BY 1, 2, 3"
+        "WHERE " + " AND ".join(where_clauses) + " GROUP BY 1, 2, 3 ORDER BY 1, 2, 3"
     )
     df = db.query(sql, params, db=db.analytics_db_path())
 
@@ -4824,6 +5270,7 @@ def analytics_chokepoint_heatmap(
 
     # Pivot into (date, chokepoint) -> {tanker, bulk}
     from collections import defaultdict
+
     cell_map: dict[tuple[str, str], dict[str, int]] = defaultdict(lambda: {"tanker": 0, "bulk": 0})
     cp_totals: dict[str, int] = defaultdict(int)
 
@@ -4843,13 +5290,15 @@ def analytics_chokepoint_heatmap(
 
     cells: list[ChokepointHeatmapCell] = []
     for (dt, cp), counts in sorted(cell_map.items()):
-        cells.append(ChokepointHeatmapCell(
-            date=dt,
-            chokepoint=cp,
-            total=counts["tanker"] + counts["bulk"],
-            tanker=counts["tanker"],
-            bulk=counts["bulk"],
-        ))
+        cells.append(
+            ChokepointHeatmapCell(
+                date=dt,
+                chokepoint=cp,
+                total=counts["tanker"] + counts["bulk"],
+                tanker=counts["tanker"],
+                bulk=counts["bulk"],
+            )
+        )
 
     return ChokepointHeatmapResponse(
         as_of=_iso(now_ts) or "",
@@ -4956,13 +5405,20 @@ def analytics_vessel_risk_scores(
                 imo_val = _valid_imo(r.get("imo"))
                 if imo_val is not None:
                     reg_map[imo_val] = {
-                        "risk_score": int(r["risk_score"]) if r.get("risk_score") is not None and not pd.isna(r["risk_score"]) else None,
-                        "ofac": bool(r["ofac_sanctioned"]) if r.get("ofac_sanctioned") is not None and not pd.isna(r["ofac_sanctioned"]) else False,
+                        "risk_score": int(r["risk_score"])
+                        if r.get("risk_score") is not None and not pd.isna(r["risk_score"])
+                        else None,
+                        "ofac": bool(r["ofac_sanctioned"])
+                        if r.get("ofac_sanctioned") is not None
+                        and not pd.isna(r["ofac_sanctioned"])
+                        else False,
                     }
 
     # Step 4: candidate MMSIs = vessels with behavioral events OR registry risk > 0
     behavioral_mmsis = set(sts_counts) | set(reroute_counts)
-    reg_imo_to_mmsi: dict[int, int] = {v["imo"]: k for k, v in lp_map.items() if v["imo"] is not None}
+    reg_imo_to_mmsi: dict[int, int] = {
+        v["imo"]: k for k, v in lp_map.items() if v["imo"] is not None
+    }
     reg_risk_mmsis: set[int] = set()
     for imo, r in reg_map.items():
         if (r.get("risk_score") or 0) > 0 or r.get("ofac"):
@@ -4995,22 +5451,24 @@ def analytics_vessel_risk_scores(
         if total < min_score:
             continue
 
-        rows_out.append(VesselRiskRow(
-            mmsi=mmsi,
-            imo=imo,
-            name=live["name"],
-            kind=live["kind"],
-            segment=live["segment"],
-            region=live["region"],
-            lat=live["lat"],
-            lon=live["lon"],
-            sts_count=sts_c,
-            reroute_count=rr_c,
-            registry_risk=reg_risk,
-            ofac=ofac,
-            behavioral_score=behavioral,
-            total_score=total,
-        ))
+        rows_out.append(
+            VesselRiskRow(
+                mmsi=mmsi,
+                imo=imo,
+                name=live["name"],
+                kind=live["kind"],
+                segment=live["segment"],
+                region=live["region"],
+                lat=live["lat"],
+                lon=live["lon"],
+                sts_count=sts_c,
+                reroute_count=rr_c,
+                registry_risk=reg_risk,
+                ofac=ofac,
+                behavioral_score=behavioral,
+                total_score=total,
+            )
+        )
 
     rows_out.sort(key=lambda r: (-r.total_score, -r.behavioral_score))
     total_candidates = len(rows_out)
@@ -5045,12 +5503,22 @@ def fleet_export(
 ):
     """Download current filtered fleet as CSV."""
     csv_text = _fleet.export_csv(
-        q=q, flag=flag, owner=owner, class_society=class_society,
-        pi_club=pi_club, paris_mou=paris_mou, tokyo_mou=tokyo_mou,
-        kind=kind, segment=segment,
-        built_min=built_min, built_max=built_max,
-        dwt_min=dwt_min, dwt_max=dwt_max, detention_min=detention_min,
-        risk_min=risk_min, live_only=live_only,
+        q=q,
+        flag=flag,
+        owner=owner,
+        class_society=class_society,
+        pi_club=pi_club,
+        paris_mou=paris_mou,
+        tokyo_mou=tokyo_mou,
+        kind=kind,
+        segment=segment,
+        built_min=built_min,
+        built_max=built_max,
+        dwt_min=dwt_min,
+        dwt_max=dwt_max,
+        detention_min=detention_min,
+        risk_min=risk_min,
+        live_only=live_only,
     )
     return StreamingResponse(
         iter([csv_text]),
@@ -5105,6 +5573,7 @@ async def stream_vessels(request: Request):
 # ---------------------------------------------------------------------------
 # Phase 42: Destination Change Intelligence
 # ---------------------------------------------------------------------------
+
 
 @app.get("/api/analytics/destination-changes", response_model=DestinationChangesResponse)
 def analytics_destination_changes(hours: int = 72, kind: str = "", min_confidence: int = 0):
@@ -5187,10 +5656,7 @@ def analytics_destination_changes(hours: int = 72, kind: str = "", min_confidenc
     else:
         pos_df = pd.DataFrame(columns=["mmsi", "name", "lat", "lon"])
 
-    pos_map: dict[int, dict] = {
-        int(r["mmsi"]): r.to_dict()
-        for _, r in pos_df.iterrows()
-    }
+    pos_map: dict[int, dict] = {int(r["mmsi"]): r.to_dict() for _, r in pos_df.iterrows()}
 
     rows = []
     for _, r in df.iterrows():
@@ -5226,6 +5692,7 @@ def analytics_destination_changes(hours: int = 72, kind: str = "", min_confidenc
 # Phase 43: Owner Intelligence
 # ---------------------------------------------------------------------------
 
+
 @app.get("/api/analytics/owner-intelligence", response_model=OwnerIntelResponse)
 def analytics_owner_intelligence(min_vessels: int = 2, min_risk: int = 0, limit: int = 50):
     """Aggregate fleet risk by beneficial owner from vessel_registry.
@@ -5255,7 +5722,10 @@ def analytics_owner_intelligence(min_vessels: int = 2, min_risk: int = 0, limit:
         for _, r in live_df.iterrows():
             imo_val = r.get("imo")
             if imo_val and not pd.isna(imo_val):
-                live_map[int(imo_val)] = {"kind": _str_or_none(r.get("kind")), "segment": _str_or_none(r.get("segment"))}
+                live_map[int(imo_val)] = {
+                    "kind": _str_or_none(r.get("kind")),
+                    "segment": _str_or_none(r.get("segment")),
+                }
 
     owners: dict[str, dict] = {}
     for _, r in reg_df.iterrows():
@@ -5411,8 +5881,13 @@ def analytics_owner_fleet_status(
 
         if owner not in owners_agg:
             owners_agg[owner] = {
-                "laden": 0, "ballast": 0, "unknown": 0,
-                "segments": [], "risks": [], "flags": set(), "regions": set(),
+                "laden": 0,
+                "ballast": 0,
+                "unknown": 0,
+                "segments": [],
+                "risks": [],
+                "flags": set(),
+                "regions": set(),
             }
         o = owners_agg[owner]
         if laden_str == "laden":
@@ -5467,6 +5942,7 @@ def analytics_owner_fleet_status(
 # ---------------------------------------------------------------------------
 # Phase 44: Chokepoint Throughput Anomaly Detection
 # ---------------------------------------------------------------------------
+
 
 @app.get("/api/analytics/chokepoint-anomaly", response_model=ChokepointAnomalyResponse)
 def analytics_chokepoint_anomaly(window_hours: int = 6, baseline_hours: int = 48):
@@ -5538,7 +6014,11 @@ def analytics_chokepoint_anomaly(window_hours: int = 6, baseline_hours: int = 48
                 z_score = round(max(-5.0, min(5.0, z)), 2)
             else:
                 z_score = None
-            pct_change = round((recent_count - baseline_avg) / max(baseline_avg, 0.01) * 100, 1) if baseline_avg > 0 else None
+            pct_change = (
+                round((recent_count - baseline_avg) / max(baseline_avg, 0.01) * 100, 1)
+                if baseline_avg > 0
+                else None
+            )
         else:
             baseline_avg = None
             baseline_std = None
@@ -5571,7 +6051,7 @@ def analytics_chokepoint_anomaly(window_hours: int = 6, baseline_hours: int = 48
             )
         )
 
-    rows.sort(key=lambda r: (r.z_score is None, -(r.z_score or 0) ** 2))
+    rows.sort(key=lambda r: (r.z_score is None, -((r.z_score or 0) ** 2)))
 
     return ChokepointAnomalyResponse(
         as_of=now_dt.isoformat(),
@@ -5585,8 +6065,11 @@ def analytics_chokepoint_anomaly(window_hours: int = 6, baseline_hours: int = 48
 # Phase 45: Cargo State Transition Detection
 # ---------------------------------------------------------------------------
 
+
 @app.get("/api/analytics/cargo-state-changes", response_model=CargoStateChangesResponse)
-def analytics_cargo_state_changes(days: int = 7, kind: str = "tanker", min_change_m: float = 1.5, limit: int = 100):
+def analytics_cargo_state_changes(
+    days: int = 7, kind: str = "tanker", min_change_m: float = 1.5, limit: int = 100
+):
     """Detect cargo loading/discharge by comparing draught at start vs end of port stays.
 
     Uses anchored_episodes joined with ais_snapshots (nearest snapshot to start/end).
@@ -5659,12 +6142,13 @@ def analytics_cargo_state_changes(days: int = 7, kind: str = "tanker", min_chang
     live_map: dict[int, dict] = {int(r["mmsi"]): r.to_dict() for _, r in live_df.iterrows()}
 
     # Registry risk scores
-    imo_list = [int(v["imo"]) for v in live_map.values() if v.get("imo") and not pd.isna(v.get("imo"))]
+    imo_list = [
+        int(v["imo"]) for v in live_map.values() if v.get("imo") and not pd.isna(v.get("imo"))
+    ]
     risk_map: dict[int, int] = {}
     if imo_list:
         reg_df = db.pg_query(
-            "SELECT imo, risk_score FROM vessels "
-            "WHERE imo = ANY(%s) AND fetch_ok = true",
+            "SELECT imo, risk_score FROM vessels WHERE imo = ANY(%s) AND fetch_ok = true",
             [imo_list],
         )
         if not reg_df.empty:
@@ -5696,7 +6180,9 @@ def analytics_cargo_state_changes(days: int = 7, kind: str = "tanker", min_chang
         start_snap = v_snaps.loc[start_idx]
         end_snap = v_snaps.loc[end_idx]
 
-        start_dt_diff = abs((start_snap["snapshot_ts"].replace(tzinfo=None) - start_ts).total_seconds())
+        start_dt_diff = abs(
+            (start_snap["snapshot_ts"].replace(tzinfo=None) - start_ts).total_seconds()
+        )
         end_dt_diff = abs((end_snap["snapshot_ts"].replace(tzinfo=None) - end_ts).total_seconds())
 
         # Only use snapshots within 2 hours of episode start/end
@@ -5780,7 +6266,9 @@ _SEG_TYPICAL_SOG: dict[str, tuple[float, float]] = {
 
 
 @app.get("/api/analytics/speed-anomalies", response_model=SpeedAnomalyResponse)
-def analytics_speed_anomalies(kind: str = "tanker", min_z: float = 2.5, min_sog: float = 1.0, limit: int = 50):
+def analytics_speed_anomalies(
+    kind: str = "tanker", min_z: float = 2.5, min_sog: float = 1.0, limit: int = 50
+):
     """Detect vessels moving significantly faster or slower than their segment peers.
 
     Uses live_positions; computes per-segment median and IQR-based Z-score.
@@ -5799,7 +6287,19 @@ def analytics_speed_anomalies(kind: str = "tanker", min_z: float = 2.5, min_sog:
         if kind:
             fleet_df = fleet_df[fleet_df["kind"] == kind]
         fleet_df = fleet_df[fleet_df["segment"].notna() & (fleet_df["segment"] != "Small")]
-        needed = ["mmsi", "name", "kind", "segment", "region", "lat", "lon", "sog", "destination", "nav_status", "imo"]
+        needed = [
+            "mmsi",
+            "name",
+            "kind",
+            "segment",
+            "region",
+            "lat",
+            "lon",
+            "sog",
+            "destination",
+            "nav_status",
+            "imo",
+        ]
         fleet_df = fleet_df[[c for c in needed if c in fleet_df.columns]]
 
     if fleet_df.empty:
@@ -5840,23 +6340,27 @@ def analytics_speed_anomalies(kind: str = "tanker", min_z: float = 2.5, min_sog:
         if abs(z) < min_z:
             continue
 
-        raw_rows.append({
-            "mmsi": int(r["mmsi"]),
-            "imo": _valid_imo(r.get("imo")),
-            "name": _str_or_none(r.get("name")),
-            "kind": _str_or_none(r.get("kind")),
-            "segment": seg,
-            "region": _str_or_none(r.get("region")),
-            "lat": float(r["lat"]) if not pd.isna(r.get("lat")) else None,
-            "lon": float(r["lon"]) if not pd.isna(r.get("lon")) else None,
-            "sog": round(sog_val, 1),
-            "segment_median_sog": round(median_sog, 1),
-            "z_score": round(z, 2),
-            "anomaly_type": "fast" if z > 0 else "slow",
-            "destination": _str_or_none(r.get("destination")),
-            "nav_status": int(r["nav_status"]) if r.get("nav_status") is not None and not pd.isna(r.get("nav_status")) else None,
-            "registry_risk": None,
-        })
+        raw_rows.append(
+            {
+                "mmsi": int(r["mmsi"]),
+                "imo": _valid_imo(r.get("imo")),
+                "name": _str_or_none(r.get("name")),
+                "kind": _str_or_none(r.get("kind")),
+                "segment": seg,
+                "region": _str_or_none(r.get("region")),
+                "lat": float(r["lat"]) if not pd.isna(r.get("lat")) else None,
+                "lon": float(r["lon"]) if not pd.isna(r.get("lon")) else None,
+                "sog": round(sog_val, 1),
+                "segment_median_sog": round(median_sog, 1),
+                "z_score": round(z, 2),
+                "anomaly_type": "fast" if z > 0 else "slow",
+                "destination": _str_or_none(r.get("destination")),
+                "nav_status": int(r["nav_status"])
+                if r.get("nav_status") is not None and not pd.isna(r.get("nav_status"))
+                else None,
+                "registry_risk": None,
+            }
+        )
 
     # Sort by |z_score| descending, take top limit
     raw_rows.sort(key=lambda d: abs(d["z_score"]), reverse=True)
@@ -5866,8 +6370,7 @@ def analytics_speed_anomalies(kind: str = "tanker", min_z: float = 2.5, min_sog:
     imo_list = [d["imo"] for d in raw_rows if d["imo"] is not None]
     if imo_list:
         reg_df = db.pg_query(
-            "SELECT imo, risk_score FROM vessels "
-            "WHERE imo = ANY(%s) AND fetch_ok = true",
+            "SELECT imo, risk_score FROM vessels WHERE imo = ANY(%s) AND fetch_ok = true",
             [imo_list],
         )
         risk_m: dict[int, int] = {}
@@ -5899,63 +6402,78 @@ def analytics_speed_anomalies(kind: str = "tanker", min_z: float = 2.5, min_sog:
 # Alias list is used with substring matching after destination normalization.
 _CURATED_PORTS: dict[str, dict] = {
     "Rotterdam": {
-        "lat": 51.96, "lon": 4.10,
+        "lat": 51.96,
+        "lon": 4.10,
         "aliases": ["NLRTM", "ROTTERDAM", "NLAMS", "AMSTERDAM", "NL RTM", "NLRTM", "DORDRECHT"],
     },
     "Antwerp": {
-        "lat": 51.26, "lon": 4.40,
+        "lat": 51.26,
+        "lon": 4.40,
         "aliases": ["BEANR", "ANTWERPEN", "ANTWERP", "BE ANR", "GENT", "GHENT"],
     },
     "Singapore": {
-        "lat": 1.26, "lon": 103.82,
+        "lat": 1.26,
+        "lon": 103.82,
         "aliases": ["SGSIN", "SINGAPORE", "SG SIN"],
     },
     "Busan": {
-        "lat": 35.11, "lon": 129.04,
+        "lat": 35.11,
+        "lon": 129.04,
         "aliases": ["KRPUS", "BUSAN", "KR PUS", "PUSAN"],
     },
     "Ulsan": {
-        "lat": 35.54, "lon": 129.39,
+        "lat": 35.54,
+        "lon": 129.39,
         "aliases": ["KRUSN", "ULSAN", "KR USN"],
     },
     "Houston": {
-        "lat": 29.73, "lon": -95.08,
+        "lat": 29.73,
+        "lon": -95.08,
         "aliases": ["USHOU", "HOUSTON", "GALVESTON", "USGLS"],
     },
     "Fujairah": {
-        "lat": 25.13, "lon": 56.34,
+        "lat": 25.13,
+        "lon": 56.34,
         "aliases": ["AEFJR", "FUJAIRAH", "FUJAIRA", "AEFUJ"],
     },
     "Port Said": {
-        "lat": 31.28, "lon": 32.30,
+        "lat": 31.28,
+        "lon": 32.30,
         "aliases": ["EGPSD", "PORT SAID", "PORTSAID"],
     },
     "Gibraltar": {
-        "lat": 36.14, "lon": -5.35,
+        "lat": 36.14,
+        "lon": -5.35,
         "aliases": ["GIGIB", "GIBRALTAR"],
     },
     "Port Klang": {
-        "lat": 3.00, "lon": 101.37,
+        "lat": 3.00,
+        "lon": 101.37,
         "aliases": ["MYPKG", "PORT KLANG", "WESTPORT", "KLANG"],
     },
     "Durban": {
-        "lat": -29.88, "lon": 31.04,
+        "lat": -29.88,
+        "lon": 31.04,
         "aliases": ["ZADUR", "DURBAN", "ZA DUR"],
     },
     "Trieste": {
-        "lat": 45.65, "lon": 13.76,
+        "lat": 45.65,
+        "lon": 13.76,
         "aliases": ["ITTRS", "TRIESTE", "TRIST"],
     },
     "Algeciras": {
-        "lat": 36.13, "lon": -5.45,
+        "lat": 36.13,
+        "lon": -5.45,
         "aliases": ["ESALG", "ALGECIRAS"],
     },
     "Qingdao": {
-        "lat": 36.07, "lon": 120.33,
+        "lat": 36.07,
+        "lon": 120.33,
         "aliases": ["CNTAO", "QINGDAO", "TSINGTAO"],
     },
     "Shanghai": {
-        "lat": 30.78, "lon": 121.96,
+        "lat": 30.78,
+        "lon": 121.96,
         "aliases": ["CNSHA", "SHANGHAI"],
     },
 }
@@ -5987,6 +6505,7 @@ def _match_port(destination: str | None) -> str | None:
 def _haversine_nm(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Great-circle distance in nautical miles."""
     import math
+
     R = 3440.065  # Earth radius in nautical miles
     phi1, phi2 = math.radians(lat1), math.radians(lat2)
     dphi = math.radians(lat2 - lat1)
@@ -6011,9 +6530,7 @@ def analytics_port_arrivals(horizon_h: int = 48, kind: str = "tanker", ocean_onl
     if not fleet_df.empty:
         sog_num = pd.to_numeric(fleet_df["sog"], errors="coerce")
         fleet_df = fleet_df[
-            (sog_num >= 1.5) &
-            fleet_df["destination"].notna() &
-            fleet_df["segment"].notna()
+            (sog_num >= 1.5) & fleet_df["destination"].notna() & fleet_df["segment"].notna()
         ].copy()
         if kind:
             fleet_df = fleet_df[fleet_df["kind"] == kind]
@@ -6058,19 +6575,21 @@ def analytics_port_arrivals(horizon_h: int = 48, kind: str = "tanker", ocean_onl
             continue
 
         mmsi_int = int(r["mmsi"])
-        port_buckets[port_name].append({
-            "mmsi": mmsi_int,
-            "name": _str_or_none(r.get("name")),
-            "segment": _str_or_none(r.get("segment")),
-            "kind": _str_or_none(r.get("kind")),
-            "laden": laden_map.get(mmsi_int),
-            "eta_hours": round(eta_h, 1),
-            "distance_nm": round(dist_nm, 0),
-            "sog": round(sog_val, 1),
-            "destination_raw": _str_or_none(r.get("destination")),
-            "registry_risk": None,
-            "imo": _valid_imo(r.get("imo")),
-        })
+        port_buckets[port_name].append(
+            {
+                "mmsi": mmsi_int,
+                "name": _str_or_none(r.get("name")),
+                "segment": _str_or_none(r.get("segment")),
+                "kind": _str_or_none(r.get("kind")),
+                "laden": laden_map.get(mmsi_int),
+                "eta_hours": round(eta_h, 1),
+                "distance_nm": round(dist_nm, 0),
+                "sog": round(sog_val, 1),
+                "destination_raw": _str_or_none(r.get("destination")),
+                "registry_risk": None,
+                "imo": _valid_imo(r.get("imo")),
+            }
+        )
         total_inbound += 1
 
     # Enrich top vessels per port with registry risk
@@ -6078,8 +6597,7 @@ def analytics_port_arrivals(horizon_h: int = 48, kind: str = "tanker", ocean_onl
     risk_m: dict[int, int] = {}
     if all_imos:
         reg_df = db.pg_query(
-            "SELECT imo, risk_score FROM vessels "
-            "WHERE imo = ANY(%s) AND fetch_ok = true",
+            "SELECT imo, risk_score FROM vessels WHERE imo = ANY(%s) AND fetch_ok = true",
             [all_imos],
         )
         if not reg_df.empty:
@@ -6100,12 +6618,14 @@ def analytics_port_arrivals(horizon_h: int = 48, kind: str = "tanker", ocean_onl
             continue
         buckets.sort(key=lambda d: d["eta_hours"])
         vessels = [ArrivalVessel(**{k: v for k, v in d.items() if k != "imo"}) for d in buckets]
-        result_ports.append(PortArrivalForecast(
-            port=pname,
-            arrivals_24h=sum(1 for v in vessels if v.eta_hours <= 24),
-            arrivals_48h=len(vessels),
-            vessels=vessels[:20],  # cap to 20 per port for payload
-        ))
+        result_ports.append(
+            PortArrivalForecast(
+                port=pname,
+                arrivals_24h=sum(1 for v in vessels if v.eta_hours <= 24),
+                arrivals_48h=len(vessels),
+                vessels=vessels[:20],  # cap to 20 per port for payload
+            )
+        )
 
     result_ports.sort(key=lambda p: p.arrivals_48h, reverse=True)
 
@@ -6136,37 +6656,97 @@ _BBL_PER_TONNE = 7.33
 # ISO 2-letter country code to broad import/export region
 _CC_TO_REGION: dict[str, str] = {
     # Europe
-    "NL": "Europe", "BE": "Europe", "GB": "Europe", "DE": "Europe", "FR": "Europe",
-    "ES": "Europe", "IT": "Europe", "PT": "Europe", "GR": "Europe", "NO": "Europe",
-    "SE": "Europe", "DK": "Europe", "FI": "Europe", "PL": "Europe", "RO": "Europe",
-    "HR": "Europe", "SI": "Europe", "MT": "Europe", "CY": "Europe", "IE": "Europe",
-    "TR": "Europe", "LV": "Europe", "LT": "Europe", "EE": "Europe", "IS": "Europe",
-    "BG": "Europe", "AL": "Europe", "MK": "Europe", "ME": "Europe",
+    "NL": "Europe",
+    "BE": "Europe",
+    "GB": "Europe",
+    "DE": "Europe",
+    "FR": "Europe",
+    "ES": "Europe",
+    "IT": "Europe",
+    "PT": "Europe",
+    "GR": "Europe",
+    "NO": "Europe",
+    "SE": "Europe",
+    "DK": "Europe",
+    "FI": "Europe",
+    "PL": "Europe",
+    "RO": "Europe",
+    "HR": "Europe",
+    "SI": "Europe",
+    "MT": "Europe",
+    "CY": "Europe",
+    "IE": "Europe",
+    "TR": "Europe",
+    "LV": "Europe",
+    "LT": "Europe",
+    "EE": "Europe",
+    "IS": "Europe",
+    "BG": "Europe",
+    "AL": "Europe",
+    "MK": "Europe",
+    "ME": "Europe",
     # China
     "CN": "China",
     # NE Asia
-    "KR": "NE Asia", "JP": "NE Asia", "TW": "NE Asia",
+    "KR": "NE Asia",
+    "JP": "NE Asia",
+    "TW": "NE Asia",
     # India / S Asia
-    "IN": "India / S Asia", "PK": "India / S Asia", "BD": "India / S Asia",
+    "IN": "India / S Asia",
+    "PK": "India / S Asia",
+    "BD": "India / S Asia",
     "LK": "India / S Asia",
     # SE Asia
-    "SG": "SE Asia", "MY": "SE Asia", "TH": "SE Asia", "ID": "SE Asia",
-    "VN": "SE Asia", "PH": "SE Asia",
+    "SG": "SE Asia",
+    "MY": "SE Asia",
+    "TH": "SE Asia",
+    "ID": "SE Asia",
+    "VN": "SE Asia",
+    "PH": "SE Asia",
     # Americas
-    "US": "Americas", "CA": "Americas", "MX": "Americas", "BR": "Americas",
-    "AR": "Americas", "CL": "Americas", "PA": "Americas", "VE": "Americas",
-    "CO": "Americas", "PE": "Americas", "EC": "Americas", "UY": "Americas",
-    "TT": "Americas", "CU": "Americas",
+    "US": "Americas",
+    "CA": "Americas",
+    "MX": "Americas",
+    "BR": "Americas",
+    "AR": "Americas",
+    "CL": "Americas",
+    "PA": "Americas",
+    "VE": "Americas",
+    "CO": "Americas",
+    "PE": "Americas",
+    "EC": "Americas",
+    "UY": "Americas",
+    "TT": "Americas",
+    "CU": "Americas",
     # Middle East / Gulf
-    "SA": "Middle East", "AE": "Middle East", "IQ": "Middle East", "KW": "Middle East",
-    "OM": "Middle East", "QA": "Middle East", "BH": "Middle East", "YE": "Middle East",
+    "SA": "Middle East",
+    "AE": "Middle East",
+    "IQ": "Middle East",
+    "KW": "Middle East",
+    "OM": "Middle East",
+    "QA": "Middle East",
+    "BH": "Middle East",
+    "YE": "Middle East",
     "IR": "Middle East",
     # Africa
-    "ZA": "Africa", "NG": "Africa", "EG": "Africa", "DZ": "Africa", "LY": "Africa",
-    "MA": "Africa", "TZ": "Africa", "MZ": "Africa", "AO": "Africa", "CI": "Africa",
-    "SN": "Africa", "GH": "Africa", "GA": "Africa", "CM": "Africa", "KE": "Africa",
+    "ZA": "Africa",
+    "NG": "Africa",
+    "EG": "Africa",
+    "DZ": "Africa",
+    "LY": "Africa",
+    "MA": "Africa",
+    "TZ": "Africa",
+    "MZ": "Africa",
+    "AO": "Africa",
+    "CI": "Africa",
+    "SN": "Africa",
+    "GH": "Africa",
+    "GA": "Africa",
+    "CM": "Africa",
+    "KE": "Africa",
     # Oceania
-    "AU": "Oceania", "NZ": "Oceania",
+    "AU": "Oceania",
+    "NZ": "Oceania",
 }
 
 
@@ -6241,7 +6821,11 @@ def analytics_crude_on_water(crude_only: bool = True):
     segment_buckets: dict[str, dict] = {}
     for _, r in live_df.iterrows():
         raw_seg = r.get("segment")
-        seg = str(raw_seg) if raw_seg and not (isinstance(raw_seg, float) and pd.isna(raw_seg)) else "Small"
+        seg = (
+            str(raw_seg)
+            if raw_seg and not (isinstance(raw_seg, float) and pd.isna(raw_seg))
+            else "Small"
+        )
         if seg not in segment_buckets:
             segment_buckets[seg] = {"laden": 0, "ballast": 0, "unknown": 0}
         state = r.get("laden_state", "unknown")
@@ -6260,23 +6844,27 @@ def analytics_crude_on_water(crude_only: bool = True):
             continue
         b = segment_buckets[seg]
         est_mb = round(b["laden"] * _segment_mb(seg), 2)
-        by_segment_rows.append(CrudeSegmentRow(
-            segment=seg,
-            laden_count=b["laden"],
-            ballast_count=b["ballast"],
-            unknown_count=b["unknown"],
-            estimated_mb=est_mb,
-        ))
-    # Append any segments not in _SEGMENT_DWT (shouldn't happen, but be safe)
-    for seg, b in segment_buckets.items():
-        if seg not in seg_order:
-            by_segment_rows.append(CrudeSegmentRow(
+        by_segment_rows.append(
+            CrudeSegmentRow(
                 segment=seg,
                 laden_count=b["laden"],
                 ballast_count=b["ballast"],
                 unknown_count=b["unknown"],
-                estimated_mb=round(b["laden"] * _segment_mb(seg), 2),
-            ))
+                estimated_mb=est_mb,
+            )
+        )
+    # Append any segments not in _SEGMENT_DWT (shouldn't happen, but be safe)
+    for seg, b in segment_buckets.items():
+        if seg not in seg_order:
+            by_segment_rows.append(
+                CrudeSegmentRow(
+                    segment=seg,
+                    laden_count=b["laden"],
+                    ballast_count=b["ballast"],
+                    unknown_count=b["unknown"],
+                    estimated_mb=round(b["laden"] * _segment_mb(seg), 2),
+                )
+            )
 
     # 5. Destination region breakdown for laden vessels only
     laden_df = live_df[live_df["laden_state"] == "laden"]
@@ -6285,7 +6873,11 @@ def analytics_crude_on_water(crude_only: bool = True):
         dest = r.get("destination")
         region = _crude_import_region(str(dest) if dest is not None else None)
         raw_seg = r.get("segment")
-        seg = str(raw_seg) if raw_seg and not (isinstance(raw_seg, float) and pd.isna(raw_seg)) else "Small"
+        seg = (
+            str(raw_seg)
+            if raw_seg and not (isinstance(raw_seg, float) and pd.isna(raw_seg))
+            else "Small"
+        )
         if region not in region_buckets:
             region_buckets[region] = {"count": 0, "mb": 0.0, "segments": {}}
         region_buckets[region]["count"] += 1
@@ -6297,12 +6889,14 @@ def analytics_crude_on_water(crude_only: bool = True):
         if region == "Unknown":
             continue
         top_segs = sorted(b["segments"], key=lambda s: b["segments"][s], reverse=True)[:3]
-        inbound_rows.append(InboundRegionRow(
-            region=region,
-            vessel_count=b["count"],
-            estimated_mb=round(b["mb"], 2),
-            top_segments=top_segs,
-        ))
+        inbound_rows.append(
+            InboundRegionRow(
+                region=region,
+                vessel_count=b["count"],
+                estimated_mb=round(b["mb"], 2),
+                top_segments=top_segs,
+            )
+        )
     inbound_rows.sort(key=lambda r: r.estimated_mb, reverse=True)
 
     total_laden = int(live_df[live_df["laden_state"] == "laden"].shape[0])
@@ -6325,8 +6919,14 @@ def analytics_crude_on_water(crude_only: bool = True):
 
 # Ordered chokepoints to show (only major ones with transit tracking)
 _TRACKED_CHOKEPOINTS = [
-    "suez", "hormuz", "singapore_malacca", "dover_channel",
-    "bosphorus_dardanelles", "gibraltar", "cape_good_hope", "panama",
+    "suez",
+    "hormuz",
+    "singapore_malacca",
+    "dover_channel",
+    "bosphorus_dardanelles",
+    "gibraltar",
+    "cape_good_hope",
+    "panama",
 ]
 
 # Forward direction label per chokepoint (for fwd-direction %)
@@ -6364,7 +6964,11 @@ def analytics_chokepoint_status():
             if region not in _TRACKED_CHOKEPOINTS:
                 continue
             sog_val = r.get("sog")
-            sog = float(sog_val) if sog_val is not None and not (isinstance(sog_val, float) and pd.isna(sog_val)) else None
+            sog = (
+                float(sog_val)
+                if sog_val is not None and not (isinstance(sog_val, float) and pd.isna(sog_val))
+                else None
+            )
             if region not in live_by_region:
                 live_by_region[region] = {"total": 0, "transiting": 0, "waiting": 0}
             live_by_region[region]["total"] += 1
@@ -6416,16 +7020,18 @@ def analytics_chokepoint_status():
         n_7d = stats["n_7d"]
         pct_fwd = round(stats["n_fwd"] / n_7d * 100, 1) if n_7d > 0 else None
 
-        rows.append(ChokepointStatusRow(
-            chokepoint=cp,
-            live_total=live["total"],
-            live_transiting=live["transiting"],
-            live_waiting=live["waiting"],
-            avg_transit_h_7d=avg_h,
-            n_transits_24h=stats["n_24h"],
-            n_transits_7d=n_7d,
-            pct_fwd_direction=pct_fwd,
-        ))
+        rows.append(
+            ChokepointStatusRow(
+                chokepoint=cp,
+                live_total=live["total"],
+                live_transiting=live["transiting"],
+                live_waiting=live["waiting"],
+                avg_transit_h_7d=avg_h,
+                n_transits_24h=stats["n_24h"],
+                n_transits_7d=n_7d,
+                pct_fwd_direction=pct_fwd,
+            )
+        )
 
     return ChokepointStatusResponse(as_of=now_dt.isoformat(), rows=rows)
 
@@ -6480,32 +7086,35 @@ def get_pipelines(disrupted_only: bool = True):
         if route_json and isinstance(route_json, str):
             try:
                 import json as _json
+
                 route_coords = _json.loads(route_json)
             except Exception:
                 pass
 
-        rows.append(PipelineSegment(
-            id=str(r["id"]),
-            name=str(r["name"]),
-            commodity=str(r["commodity"]),
-            physical_state=str(r["physical_state"]),
-            capacity_mbd=_float(r.get("capacity_mbd")),
-            capacity_bcm_yr=_float(r.get("capacity_bcm_yr")),
-            from_country=str(r["from_country"]),
-            to_country=str(r["to_country"]),
-            start_lat=_float(r.get("start_lat")),
-            start_lon=_float(r.get("start_lon")),
-            end_lat=_float(r.get("end_lat")),
-            end_lon=_float(r.get("end_lon")),
-            disruption_description=_str(r.get("disruption_description")),
-            disruption_event_type=_str(r.get("disruption_event_type")),
-            disruption_since=str(r["disruption_since"]) if r.get("disruption_since") else None,
-            owner=_str(r.get("owner")),
-            length_miles=_float(r.get("length_miles")),
-            states_served=_str(r.get("states_served")),
-            data_source="worldmonitor",
-            route_coords=route_coords,
-        ))
+        rows.append(
+            PipelineSegment(
+                id=str(r["id"]),
+                name=str(r["name"]),
+                commodity=str(r["commodity"]),
+                physical_state=str(r["physical_state"]),
+                capacity_mbd=_float(r.get("capacity_mbd")),
+                capacity_bcm_yr=_float(r.get("capacity_bcm_yr")),
+                from_country=str(r["from_country"]),
+                to_country=str(r["to_country"]),
+                start_lat=_float(r.get("start_lat")),
+                start_lon=_float(r.get("start_lon")),
+                end_lat=_float(r.get("end_lat")),
+                end_lon=_float(r.get("end_lon")),
+                disruption_description=_str(r.get("disruption_description")),
+                disruption_event_type=_str(r.get("disruption_event_type")),
+                disruption_since=str(r["disruption_since"]) if r.get("disruption_since") else None,
+                owner=_str(r.get("owner")),
+                length_miles=_float(r.get("length_miles")),
+                states_served=_str(r.get("states_served")),
+                data_source="worldmonitor",
+                route_coords=route_coords,
+            )
+        )
 
     # Append RexTag-only US domestic pipelines (table-only, no GPS)
     if not disrupted_only:
@@ -6520,34 +7129,35 @@ def get_pipelines(disrupted_only: bool = True):
             if rt_route_json and isinstance(rt_route_json, str):
                 try:
                     import json as _json
+
                     rt_route_coords = _json.loads(rt_route_json)
                 except Exception:
                     pass
 
-            rows.append(PipelineSegment(
-                id=str(r["id"]),
-                name=str(r["name"]),
-                commodity="gas",
-                physical_state="flowing",
-                capacity_bcm_yr=None,
-                capacity_mbd=None,
-                capacity_bcfd=_float(r.get("capacity_bcfd")),
-                from_country="US",
-                to_country="US",
-                start_lat=None,
-                start_lon=None,
-                end_lat=None,
-                end_lon=None,
-                owner=_str(r.get("owner")),
-                length_miles=_float(r.get("length_miles")),
-                states_served=_str(r.get("states_served")),
-                data_source="rextag",
-                route_coords=rt_route_coords,
-            ))
+            rows.append(
+                PipelineSegment(
+                    id=str(r["id"]),
+                    name=str(r["name"]),
+                    commodity="gas",
+                    physical_state="flowing",
+                    capacity_bcm_yr=None,
+                    capacity_mbd=None,
+                    capacity_bcfd=_float(r.get("capacity_bcfd")),
+                    from_country="US",
+                    to_country="US",
+                    start_lat=None,
+                    start_lon=None,
+                    end_lat=None,
+                    end_lon=None,
+                    owner=_str(r.get("owner")),
+                    length_miles=_float(r.get("length_miles")),
+                    states_served=_str(r.get("states_served")),
+                    data_source="rextag",
+                    route_coords=rt_route_coords,
+                )
+            )
 
-    total_offline_mbd = sum(
-        (p.capacity_mbd or 0.0) for p in rows if p.physical_state == "offline"
-    )
+    total_offline_mbd = sum((p.capacity_mbd or 0.0) for p in rows if p.physical_state == "offline")
     total_offline_bcm = sum(
         (p.capacity_bcm_yr or 0.0) for p in rows if p.physical_state == "offline"
     )
@@ -6576,84 +7186,138 @@ def get_pipelines(disrupted_only: bool = True):
 _EUR_TERMINALS: dict[str, dict] = {
     # NW Europe
     "Rotterdam": {
-        "lat": 51.96, "lon": 4.10, "region": "NW Europe",
-        "aliases": ["NLRTM", "ROTTERDAM", "AMSTERDAM", "NLAMS", "NL RTM", "EUROPOORT",
-                    "DORDRECHT", "PERNIS", "BOTLEK"],
+        "lat": 51.96,
+        "lon": 4.10,
+        "region": "NW Europe",
+        "aliases": [
+            "NLRTM",
+            "ROTTERDAM",
+            "AMSTERDAM",
+            "NLAMS",
+            "NL RTM",
+            "EUROPOORT",
+            "DORDRECHT",
+            "PERNIS",
+            "BOTLEK",
+        ],
     },
     "Antwerp": {
-        "lat": 51.26, "lon": 4.40, "region": "NW Europe",
+        "lat": 51.26,
+        "lon": 4.40,
+        "region": "NW Europe",
         "aliases": ["BEANR", "ANTWERPEN", "ANTWERP", "GENT", "GHENT", "BE ANR"],
     },
     "Zeebrugge": {
-        "lat": 51.35, "lon": 3.20, "region": "NW Europe",
+        "lat": 51.35,
+        "lon": 3.20,
+        "region": "NW Europe",
         "aliases": ["BEZEE", "ZEEBRUGGE", "BE ZEE", "ZEEBRUGE"],
     },
     "Hamburg": {
-        "lat": 53.53, "lon": 9.97, "region": "NW Europe",
+        "lat": 53.53,
+        "lon": 9.97,
+        "region": "NW Europe",
         "aliases": ["DEHAM", "HAMBURG", "DE HAM", "BRUNSBUETEL", "BRUNSBÜTTEL"],
     },
     "Wilhelmshaven": {
-        "lat": 53.52, "lon": 8.16, "region": "NW Europe",
+        "lat": 53.52,
+        "lon": 8.16,
+        "region": "NW Europe",
         "aliases": ["DEWVN", "WILHELMSHAVEN", "WILHELMSH"],
     },
     "Le Havre": {
-        "lat": 49.49, "lon": 0.11, "region": "NW Europe",
+        "lat": 49.49,
+        "lon": 0.11,
+        "region": "NW Europe",
         "aliases": ["FRLEH", "LE HAVRE", "LEHAVRE", "HAVRE"],
     },
     "Milford Haven": {
-        "lat": 51.71, "lon": -5.03, "region": "NW Europe",
+        "lat": 51.71,
+        "lon": -5.03,
+        "region": "NW Europe",
         "aliases": ["GBMFH", "MILFORD HAVEN", "MILFORDHAVEN", "PEMBROKE", "SOUTH HOOK"],
     },
     # Mediterranean
     "Fos-Marseille": {
-        "lat": 43.40, "lon": 5.10, "region": "Mediterranean",
-        "aliases": ["FRFOS", "FOS SUR MER", "FOSSURMER", "FOS-SUR-MER",
-                    "MARSEILLE", "FRMRS", "LAVERA"],
+        "lat": 43.40,
+        "lon": 5.10,
+        "region": "Mediterranean",
+        "aliases": [
+            "FRFOS",
+            "FOS SUR MER",
+            "FOSSURMER",
+            "FOS-SUR-MER",
+            "MARSEILLE",
+            "FRMRS",
+            "LAVERA",
+        ],
     },
     "Barcelona": {
-        "lat": 41.32, "lon": 2.16, "region": "Mediterranean",
+        "lat": 41.32,
+        "lon": 2.16,
+        "region": "Mediterranean",
         "aliases": ["ESBCN", "BARCELONA"],
     },
     "Huelva": {
-        "lat": 37.26, "lon": -6.94, "region": "Mediterranean",
+        "lat": 37.26,
+        "lon": -6.94,
+        "region": "Mediterranean",
         "aliases": ["ESHUE", "HUELVA"],
     },
     "Sines": {
-        "lat": 37.95, "lon": -8.87, "region": "Mediterranean",
+        "lat": 37.95,
+        "lon": -8.87,
+        "region": "Mediterranean",
         "aliases": ["PTSIN", "SINES"],
     },
     "Genova": {
-        "lat": 44.40, "lon": 8.93, "region": "Mediterranean",
+        "lat": 44.40,
+        "lon": 8.93,
+        "region": "Mediterranean",
         "aliases": ["ITGOA", "GENOVA", "GENOA"],
     },
     "Trieste": {
-        "lat": 45.65, "lon": 13.76, "region": "Mediterranean",
+        "lat": 45.65,
+        "lon": 13.76,
+        "region": "Mediterranean",
         "aliases": ["ITTRS", "TRIESTE"],
     },
     "Augusta": {
-        "lat": 37.22, "lon": 15.22, "region": "Mediterranean",
+        "lat": 37.22,
+        "lon": 15.22,
+        "region": "Mediterranean",
         "aliases": ["ITAUG", "AUGUSTA", "MILAZZO"],
     },
     "Algeciras": {
-        "lat": 36.13, "lon": -5.45, "region": "Mediterranean",
+        "lat": 36.13,
+        "lon": -5.45,
+        "region": "Mediterranean",
         "aliases": ["ESALG", "ALGECIRAS"],
     },
     # Baltic
     "Gdansk": {
-        "lat": 54.40, "lon": 18.66, "region": "Baltic",
+        "lat": 54.40,
+        "lon": 18.66,
+        "region": "Baltic",
         "aliases": ["PLGDN", "GDANSK", "GDYNIA", "PL GDN", "GDYNIA"],
     },
     # UK terminals (LNG + crude)
     "Immingham": {
-        "lat": 53.62, "lon": -0.19, "region": "NW Europe",
+        "lat": 53.62,
+        "lon": -0.19,
+        "region": "NW Europe",
         "aliases": ["GBIMM", "IMMINGHAM", "HUMBER"],
     },
     "Grangemouth": {
-        "lat": 56.02, "lon": -3.72, "region": "NW Europe",
+        "lat": 56.02,
+        "lon": -3.72,
+        "region": "NW Europe",
         "aliases": ["GBGMO", "GRANGEMOUTH", "HOUND POINT", "FORTH"],
     },
     "Teesside": {
-        "lat": 54.62, "lon": -1.16, "region": "NW Europe",
+        "lat": 54.62,
+        "lon": -1.16,
+        "region": "NW Europe",
         "aliases": ["GBTES", "TEESSIDE", "TEES", "MIDDLESBROUGH"],
     },
 }
@@ -6685,33 +7349,69 @@ def _match_eur_port(destination: str | None) -> str | None:
 _ORIGIN_CHOKEPOINTS: list[dict] = [
     # chokepoint, direction (None = any), laden_required, label, via_label, lookback_days
     # Order matters: first match wins. Higher-confidence rules go first.
-    {"cp": "suez",                   "dir": "northbound", "laden": True,
-     "origin": "Middle East",        "via": "Suez NB",   "days": 21},
-    {"cp": "bosphorus_dardanelles",  "dir": "southbound", "laden": True,
-     "origin": "Black Sea",          "via": "Bosphorus S", "days": 14},
-    {"cp": "cape_good_hope",         "dir": "northbound", "laden": True,
-     "origin": "East / Long-haul",   "via": "Cape NB",   "days": 45},
-    {"cp": "singapore_malacca",      "dir": "westbound",  "laden": True,
-     "origin": "Asia Pacific",       "via": "Malacca W", "days": 35},
+    {
+        "cp": "suez",
+        "dir": "northbound",
+        "laden": True,
+        "origin": "Middle East",
+        "via": "Suez NB",
+        "days": 21,
+    },
+    {
+        "cp": "bosphorus_dardanelles",
+        "dir": "southbound",
+        "laden": True,
+        "origin": "Black Sea",
+        "via": "Bosphorus S",
+        "days": 14,
+    },
+    {
+        "cp": "cape_good_hope",
+        "dir": "northbound",
+        "laden": True,
+        "origin": "East / Long-haul",
+        "via": "Cape NB",
+        "days": 45,
+    },
+    {
+        "cp": "singapore_malacca",
+        "dir": "westbound",
+        "laden": True,
+        "origin": "Asia Pacific",
+        "via": "Malacca W",
+        "days": 35,
+    },
     # Gibraltar E = vessel entering Med from Atlantic -> Atlantic loading (Americas, W Africa)
-    {"cp": "gibraltar",              "dir": "eastbound",  "laden": True,
-     "origin": "Atlantic",           "via": "Gibraltar E","days": 8},
+    {
+        "cp": "gibraltar",
+        "dir": "eastbound",
+        "laden": True,
+        "origin": "Atlantic",
+        "via": "Gibraltar E",
+        "days": 8,
+    },
     # Dover Channel E (laden) = vessel entering North Sea from the Atlantic side
     # -> loaded in the Americas, West Africa, or directly from a North Atlantic field.
     # Less precise than Suez but useful when no other signal is available.
-    {"cp": "dover_channel",          "dir": "eastbound",  "laden": True,
-     "origin": "Atlantic",           "via": "Dover E",   "days": 3},
+    {
+        "cp": "dover_channel",
+        "dir": "eastbound",
+        "laden": True,
+        "origin": "Atlantic",
+        "via": "Dover E",
+        "days": 3,
+    },
 ]
 
 # AIS region -> origin label (fallback when no transit found)
 _REGION_TO_ORIGIN: dict[str, str] = {
-    "west_africa":   "West Africa",
-    "us_gulf":       "Americas",
+    "west_africa": "West Africa",
+    "us_gulf": "Americas",
     "us_east_coast": "Americas",
     "us_west_coast": "Americas",
-    "brazil":        "Americas",
-    "hormuz":        "Middle East",
-    "persian_gulf":  "Middle East",
+    "brazil": "Americas",
+    "hormuz": "Middle East",
+    "persian_gulf": "Middle East",
 }
 
 
@@ -6747,12 +7447,12 @@ def _infer_origins(mmsi_list: list[int]) -> dict[int, tuple[str | None, str | No
         mmsi_int = int(mmsi)
         for rule in _ORIGIN_CHOKEPOINTS:
             cutoff_rule = now_dt - timedelta(days=rule["days"])
-            mask = (grp["chokepoint"] == rule["cp"])
+            mask = grp["chokepoint"] == rule["cp"]
             if rule["dir"]:
-                mask &= (grp["direction"] == rule["dir"])
+                mask &= grp["direction"] == rule["dir"]
             if rule["laden"]:
-                mask &= (grp["laden"] == True)  # noqa: E712
-            mask &= (pd.to_datetime(grp["entered_ts"]) >= cutoff_rule)
+                mask &= grp["laden"] == True  # noqa: E712
+            mask &= pd.to_datetime(grp["entered_ts"]) >= cutoff_rule
             if mask.any():
                 result[mmsi_int] = (rule["origin"], rule["via"])
                 break  # highest-priority rule matched; stop checking
@@ -6763,12 +7463,19 @@ def _infer_origins(mmsi_list: list[int]) -> dict[int, tuple[str | None, str | No
 def _eur_dwt(segment: str | None) -> int | None:
     """DWT proxy for common tanker segments. Bulk carriers use similar ranges."""
     return {
-        "ULCC": 400_000, "VLCC": 300_000, "Suezmax": 157_000,
-        "Aframax": 105_000, "Panamax": 74_000, "LR2": 110_000,
-        "LR1": 75_000, "MR": 50_000, "Handysize": 35_000,
-        "Capesize": 180_000, "Post-Panamax": 120_000,
+        "ULCC": 400_000,
+        "VLCC": 300_000,
+        "Suezmax": 157_000,
+        "Aframax": 105_000,
+        "Panamax": 74_000,
+        "LR2": 110_000,
+        "LR1": 75_000,
+        "MR": 50_000,
+        "Handysize": 35_000,
+        "Capesize": 180_000,
+        "Post-Panamax": 120_000,
         "Small": 20_000,
-    }.get(segment or "", None)
+    }.get(segment or "")
 
 
 def _eta_bucket(h: float) -> str:
@@ -6797,7 +7504,9 @@ def analytics_eta(mmsi: int):
         mmsi=int(mmsi),
         as_of=now_iso,
         n=len(preds),
-        predictions=[EtaPrediction(**{k: p.get(k) for k in EtaPrediction.model_fields}) for p in preds],
+        predictions=[
+            EtaPrediction(**{k: p.get(k) for k in EtaPrediction.model_fields}) for p in preds
+        ],
     )
 
 
@@ -6814,13 +7523,18 @@ def analytics_destination(mmsi: int):
     """
     cands = _runner_destination.vessel_destination(mmsi)
     now_iso = datetime.now(UTC).replace(tzinfo=None, microsecond=0).isoformat()
-    disagrees = bool(cands) and not cands[0]["reported_match"] and any(c["reported_match"] for c in cands)
+    disagrees = (
+        bool(cands) and not cands[0]["reported_match"] and any(c["reported_match"] for c in cands)
+    )
     return DestinationResponse(
         mmsi=int(mmsi),
         as_of=now_iso,
         n=len(cands),
         disagrees_with_reported=disagrees,
-        candidates=[DestinationCandidate(**{k: c.get(k) for k in DestinationCandidate.model_fields}) for c in cands],
+        candidates=[
+            DestinationCandidate(**{k: c.get(k) for k in DestinationCandidate.model_fields})
+            for c in cands
+        ],
     )
 
 
@@ -6910,12 +7624,16 @@ def analytics_eta_accuracy(target_type: str = "all", lead_basis: str = "actual")
     rows.sort(key=lambda x: (model_rank.get(x.model, 99), lead_rank.get(x.lead_bucket, 99)))
 
     return EtaAccuracyResponse(
-        run_ts=run_ts, models=models, lead_order=_ETA_LEAD_ORDER, rows=rows,
-        lead_basis=lead_basis, drift=_eta_drift_alerts(),
+        run_ts=run_ts,
+        models=models,
+        lead_order=_ETA_LEAD_ORDER,
+        rows=rows,
+        lead_basis=lead_basis,
+        drift=_eta_drift_alerts(),
     )
 
 
-def _eta_drift_alerts() -> list["EtaDriftAlert"]:
+def _eta_drift_alerts() -> list[EtaDriftAlert]:
     """Active drift alerts from the most recent run (True ETA Phase G).
 
     Returns an empty list if the monitoring table does not exist yet (older DBs)
@@ -6976,6 +7694,7 @@ def analytics_eta_trend():
     points: list[EtaTrendPoint] = []
     for run_ts_val, g in grouped:
         by_model = g.set_index("model")
+
         def _mae(model_name: str) -> float | None:
             if model_name not in by_model.index:
                 return None
@@ -7035,9 +7754,7 @@ def analytics_eta_by_target():
             "SELECT target_id, name, target_type, is_canal FROM eta_targets",
             db=db.analytics_db_path(),
         )
-        target_meta = {
-            r["target_id"]: r for _, r in targets_df.iterrows()
-        }
+        target_meta = {r["target_id"]: r for _, r in targets_df.iterrows()}
     except Exception:
         target_meta = {}
 
@@ -7051,7 +7768,9 @@ def analytics_eta_by_target():
         naive_mae: float | None = None
         if tid in naive_rows.index:
             v = naive_rows.at[tid, "med_abs_err_h"]
-            naive_mae = float(v) if v is not None and not (isinstance(v, float) and v != v) else None
+            naive_mae = (
+                float(v) if v is not None and not (isinstance(v, float) and v != v) else None
+            )
 
         def _float(x) -> float | None:
             try:
@@ -7081,7 +7800,9 @@ def analytics_eta_by_target():
 
 
 @app.get("/api/analytics/eta-upcoming", response_model=UpcomingArrivalsResponse, tags=["analytics"])
-def analytics_eta_upcoming(horizon_h: int = 96, target_id: str | None = None, target_type: str = "all"):
+def analytics_eta_upcoming(
+    horizon_h: int = 96, target_id: str | None = None, target_type: str = "all"
+):
     """Predicted inbound vessels arriving within ``horizon_h`` hours.
 
     Reads live ``eta_predictions`` (updated hourly) and joins with ``eta_targets``
@@ -7092,8 +7813,7 @@ def analytics_eta_upcoming(horizon_h: int = 96, target_id: str | None = None, ta
     filters by type ('chokepoint' | 'port' | 'all').
     """
     try:
-        from datetime import timezone
-        now_dt = datetime.now(timezone.utc).replace(tzinfo=None)
+        now_dt = datetime.now(UTC).replace(tzinfo=None)
 
         pred_df = db.query(
             "SELECT p.mmsi, p.target_id, p.as_of, p.route_dist_nm, "
@@ -7226,31 +7946,36 @@ def analytics_eta_upcoming(horizon_h: int = 96, target_id: str | None = None, ta
         d_raw = ais.get("draught")
         d_f = float(d_raw) if d_raw is not None and str(d_raw) not in ("", "nan") else None
         from analytics.zones import DESIGN_DRAUGHT as _DD2
+
         design = float(_DD2.get(seg_s, 0) or 0)
         if d_f is not None and d_f > 0:
             if design > 0:
-                laden_b: bool | None = True if d_f >= 0.80 * design else (False if d_f <= 0.65 * design else None)
+                laden_b: bool | None = (
+                    True if d_f >= 0.80 * design else (False if d_f <= 0.65 * design else None)
+                )
             else:
                 laden_b = True if d_f > 5 else False
         else:
             laden_b = None
 
-        rows.append(UpcomingVessel(
-            mmsi=mmsi,
-            name=ais.get("name") or None,
-            segment=seg_s or None,
-            laden=laden_b,
-            target_id=tid,
-            target_name=str(meta.get("name", tid.split(":")[-1])),
-            target_type=str(meta.get("target_type", "port")),
-            remaining_h=rem if rem is not None else 0.0,
-            eta_p10_h=p10_rem,
-            eta_p90_h=p90_rem,
-            route_dist_nm=_fn(r["route_dist_nm"]),
-            sog=_fn(ais.get("sog")),
-            lat=_fn(ais.get("lat")),
-            lon=_fn(ais.get("lon")),
-        ))
+        rows.append(
+            UpcomingVessel(
+                mmsi=mmsi,
+                name=ais.get("name") or None,
+                segment=seg_s or None,
+                laden=laden_b,
+                target_id=tid,
+                target_name=str(meta.get("name", tid.split(":")[-1])),
+                target_type=str(meta.get("target_type", "port")),
+                remaining_h=rem if rem is not None else 0.0,
+                eta_p10_h=p10_rem,
+                eta_p90_h=p90_rem,
+                route_dist_nm=_fn(r["route_dist_nm"]),
+                sog=_fn(ais.get("sog")),
+                lat=_fn(ais.get("lat")),
+                lon=_fn(ais.get("lon")),
+            )
+        )
 
     # Sort by remaining hours ascending (soonest first)
     rows.sort(key=lambda v: v.remaining_h)
@@ -7311,8 +8036,12 @@ def analytics_arrivals(days: int = 14, target_type: str = "all", top_n: int = 20
     now_iso = datetime.now(UTC).replace(tzinfo=None, microsecond=0).isoformat()
     if df.empty:
         return ArrivalsResponse(
-            as_of=now_iso, window_days=days, target_type=target_type,
-            total_arrivals=0, total_vessels=0, rows=[],
+            as_of=now_iso,
+            window_days=days,
+            target_type=target_type,
+            total_arrivals=0,
+            total_vessels=0,
+            rows=[],
         )
 
     def _share(v):
@@ -7348,8 +8077,12 @@ def analytics_arrivals(days: int = 14, target_type: str = "all", top_n: int = 20
     total_vessels = int(tot.iloc[0]["vessels"]) if not tot.empty else 0
 
     return ArrivalsResponse(
-        as_of=now_iso, window_days=days, target_type=target_type,
-        total_arrivals=total_arrivals, total_vessels=total_vessels, rows=rows,
+        as_of=now_iso,
+        window_days=days,
+        target_type=target_type,
+        total_arrivals=total_arrivals,
+        total_vessels=total_vessels,
+        rows=rows,
     )
 
 
@@ -7374,14 +8107,31 @@ def analytics_european_inbound(horizon_h: int = 48, laden_only: bool = False):
             & fleet_df["segment"].notna()
             & (fleet_df["segment"] != "Small")
         ].copy()
-        needed = ["mmsi", "name", "lat", "lon", "sog", "destination", "segment", "kind", "imo", "region"]
+        needed = [
+            "mmsi",
+            "name",
+            "lat",
+            "lon",
+            "sog",
+            "destination",
+            "segment",
+            "kind",
+            "imo",
+            "region",
+        ]
         fleet_df = fleet_df[[c for c in needed if c in fleet_df.columns]]
 
     if fleet_df.empty:
         return EuropeanInboundResponse(
-            as_of=now_dt.isoformat(), horizon_h=horizon_h,
-            total_vessels=0, total_laden=0, total_dwt_laden=0,
-            vessels=[], by_origin={}, by_port={}, eta_buckets={},
+            as_of=now_dt.isoformat(),
+            horizon_h=horizon_h,
+            total_vessels=0,
+            total_laden=0,
+            total_dwt_laden=0,
+            vessels=[],
+            by_origin={},
+            by_port={},
+            eta_buckets={},
         )
 
     # Laden status from vessel_state
@@ -7402,7 +8152,9 @@ def analytics_european_inbound(horizon_h: int = 48, laden_only: bool = False):
             continue
         terminal = _EUR_TERMINALS[port_name]
         try:
-            dist_nm = _haversine_nm(float(r["lat"]), float(r["lon"]), terminal["lat"], terminal["lon"])
+            dist_nm = _haversine_nm(
+                float(r["lat"]), float(r["lon"]), terminal["lat"], terminal["lon"]
+            )
         except Exception:
             continue
         sog_val = float(r["sog"])
@@ -7417,29 +8169,37 @@ def analytics_european_inbound(horizon_h: int = 48, laden_only: bool = False):
         if laden_only and laden_status != "laden":
             continue
 
-        candidates.append({
-            "mmsi": mmsi_int,
-            "name": _str_or_none(r.get("name")),
-            "segment": _str_or_none(r.get("segment")),
-            "kind": _str_or_none(r.get("kind")),
-            "laden": laden_status,
-            "eta_hours": round(eta_h, 1),
-            "distance_nm": round(dist_nm, 0),
-            "sog": round(sog_val, 1),
-            "port": port_name,
-            "port_region": terminal["region"],
-            "terminal_lat": terminal["lat"],
-            "terminal_lon": terminal["lon"],
-            "destination_raw": _str_or_none(r.get("destination")),
-            "current_region": _str_or_none(r.get("region")),
-            "imo": _valid_imo(r.get("imo")),
-        })
+        candidates.append(
+            {
+                "mmsi": mmsi_int,
+                "name": _str_or_none(r.get("name")),
+                "segment": _str_or_none(r.get("segment")),
+                "kind": _str_or_none(r.get("kind")),
+                "laden": laden_status,
+                "eta_hours": round(eta_h, 1),
+                "distance_nm": round(dist_nm, 0),
+                "sog": round(sog_val, 1),
+                "port": port_name,
+                "port_region": terminal["region"],
+                "terminal_lat": terminal["lat"],
+                "terminal_lon": terminal["lon"],
+                "destination_raw": _str_or_none(r.get("destination")),
+                "current_region": _str_or_none(r.get("region")),
+                "imo": _valid_imo(r.get("imo")),
+            }
+        )
 
     if not candidates:
         return EuropeanInboundResponse(
-            as_of=now_dt.isoformat(), horizon_h=horizon_h,
-            total_vessels=0, total_laden=0, total_dwt_laden=0,
-            vessels=[], by_origin={}, by_port={}, eta_buckets={},
+            as_of=now_dt.isoformat(),
+            horizon_h=horizon_h,
+            total_vessels=0,
+            total_laden=0,
+            total_dwt_laden=0,
+            vessels=[],
+            by_origin={},
+            by_port={},
+            eta_buckets={},
         )
 
     # Infer cargo origins from transit history
@@ -7455,8 +8215,7 @@ def analytics_european_inbound(horizon_h: int = 48, laden_only: bool = False):
     risk_m: dict[int, int] = {}
     if all_imos:
         reg_df = db.pg_query(
-            "SELECT imo, risk_score FROM vessels "
-            "WHERE imo = ANY(%s) AND fetch_ok = true",
+            "SELECT imo, risk_score FROM vessels WHERE imo = ANY(%s) AND fetch_ok = true",
             [all_imos],
         )
         if not reg_df.empty:
@@ -7480,7 +8239,7 @@ def analytics_european_inbound(horizon_h: int = 48, laden_only: bool = False):
 
         # Fallback: use current AIS region as rough origin proxy
         if inferred_origin is None:
-            inferred_origin = _REGION_TO_ORIGIN.get(c.get("current_region") or "", None)
+            inferred_origin = _REGION_TO_ORIGIN.get(c.get("current_region") or "")
 
         dwt = _eur_dwt(c.get("segment"))
         laden_status = c["laden"]
@@ -7504,28 +8263,34 @@ def analytics_european_inbound(horizon_h: int = 48, laden_only: bool = False):
         bucket = _eta_bucket(primary_eta)
         eta_buckets[bucket] = eta_buckets.get(bucket, 0) + 1
 
-        vessels.append(EuropeanInboundVessel(
-            mmsi=mmsi_int,
-            name=c["name"],
-            segment=c["segment"],
-            kind=c["kind"],
-            laden=laden_status,
-            eta_hours=round(primary_eta, 1),
-            distance_nm=c["distance_nm"],
-            sog=c["sog"],
-            port=c["port"],
-            port_region=c["port_region"],
-            destination_raw=c["destination_raw"],
-            inferred_origin=inferred_origin,
-            inferred_via=inferred_via,
-            dwt_estimate=dwt,
-            registry_risk=risk_m.get(c["imo"]) if c.get("imo") else None,
-            eta_true_h=round(eta_true, 1) if eta_true is not None else None,
-            eta_low_h=round(pred["eta_low_h"], 1) if pred and pred.get("eta_low_h") is not None else None,
-            eta_high_h=round(pred["eta_high_h"], 1) if pred and pred.get("eta_high_h") is not None else None,
-            eta_naive_h=c["eta_hours"],
-            eta_method=pred["method"] if pred else None,
-        ))
+        vessels.append(
+            EuropeanInboundVessel(
+                mmsi=mmsi_int,
+                name=c["name"],
+                segment=c["segment"],
+                kind=c["kind"],
+                laden=laden_status,
+                eta_hours=round(primary_eta, 1),
+                distance_nm=c["distance_nm"],
+                sog=c["sog"],
+                port=c["port"],
+                port_region=c["port_region"],
+                destination_raw=c["destination_raw"],
+                inferred_origin=inferred_origin,
+                inferred_via=inferred_via,
+                dwt_estimate=dwt,
+                registry_risk=risk_m.get(c["imo"]) if c.get("imo") else None,
+                eta_true_h=round(eta_true, 1) if eta_true is not None else None,
+                eta_low_h=round(pred["eta_low_h"], 1)
+                if pred and pred.get("eta_low_h") is not None
+                else None,
+                eta_high_h=round(pred["eta_high_h"], 1)
+                if pred and pred.get("eta_high_h") is not None
+                else None,
+                eta_naive_h=c["eta_hours"],
+                eta_method=pred["method"] if pred else None,
+            )
+        )
 
     # Sort origins by count descending
     by_origin = dict(sorted(by_origin.items(), key=lambda x: x[1], reverse=True))
@@ -7553,91 +8318,135 @@ def analytics_european_inbound(horizon_h: int = 48, laden_only: bool = False):
 # European LNG import terminals (key regas facilities only)
 _LNG_EU_TERMINALS: dict[str, dict] = {
     "Gate LNG Rotterdam": {
-        "lat": 51.93, "lon": 3.95, "country": "Netherlands",
+        "lat": 51.93,
+        "lon": 3.95,
+        "country": "Netherlands",
         "aliases": ["NLRTM", "ROTTERDAM", "GATE", "MAASVLAKTE"],
     },
     "Zeebrugge": {
-        "lat": 51.36, "lon": 3.19, "country": "Belgium",
+        "lat": 51.36,
+        "lon": 3.19,
+        "country": "Belgium",
         "aliases": ["BEZEE", "BEEBRUGGE", "ZEEBRUGGE"],
     },
     "Dunkerque LNG": {
-        "lat": 51.03, "lon": 2.37, "country": "France",
+        "lat": 51.03,
+        "lon": 2.37,
+        "country": "France",
         "aliases": ["FRDKK", "DUNKERQUE", "DUNKIRK", "DUNKIRQUE"],
     },
     "Montoir de Bretagne": {
-        "lat": 47.26, "lon": -2.14, "country": "France",
+        "lat": 47.26,
+        "lon": -2.14,
+        "country": "France",
         "aliases": ["FRMTX", "MONTOIR", "NANTES", "SAINT NAZAIRE"],
     },
     "South Hook / Milford Haven": {
-        "lat": 51.70, "lon": -5.04, "country": "UK",
+        "lat": 51.70,
+        "lon": -5.04,
+        "country": "UK",
         "aliases": ["GBMIL", "MILFORD", "SOUTH HOOK", "SOUTHHOOK", "GBSWH"],
     },
     "Isle of Grain": {
-        "lat": 51.44, "lon": 0.72, "country": "UK",
+        "lat": 51.44,
+        "lon": 0.72,
+        "country": "UK",
         "aliases": ["GBGRA", "ISLE OF GRAIN", "GRAIN", "GBCAN", "CANVEY"],
     },
     "Dragon LNG": {
-        "lat": 51.69, "lon": -5.00, "country": "UK",
+        "lat": 51.69,
+        "lon": -5.00,
+        "country": "UK",
         "aliases": ["GBDRA", "DRAGON", "DRAGON LNG"],
     },
     "Eemshaven": {
-        "lat": 53.42, "lon": 6.85, "country": "Netherlands",
+        "lat": 53.42,
+        "lon": 6.85,
+        "country": "Netherlands",
         "aliases": ["NLEEM", "EEMSHAVEN", "EEMS"],
     },
     "Świnoujście": {
-        "lat": 53.93, "lon": 14.22, "country": "Poland",
+        "lat": 53.93,
+        "lon": 14.22,
+        "country": "Poland",
         "aliases": ["PLSWI", "SWINOUJSCIE", "SWINOUJŚCIE", "SWINEMUNDE", "POLAND LNG"],
     },
     "Revithoussa": {
-        "lat": 37.96, "lon": 23.37, "country": "Greece",
+        "lat": 37.96,
+        "lon": 23.37,
+        "country": "Greece",
         "aliases": ["GRREV", "REVITHOUSSA", "REVITHUSA", "PIRAEUS LNG"],
     },
     "Porto Levante": {
-        "lat": 44.99, "lon": 12.32, "country": "Italy",
+        "lat": 44.99,
+        "lon": 12.32,
+        "country": "Italy",
         "aliases": ["ITLEV", "PORTO LEVANTE", "ADRIA", "OLT"],
     },
     "Panigaglia": {
-        "lat": 44.10, "lon": 9.86, "country": "Italy",
+        "lat": 44.10,
+        "lon": 9.86,
+        "country": "Italy",
         "aliases": ["ITPAN", "PANIGAGLIA", "LA SPEZIA LNG"],
     },
     "Livorno FSRU": {
-        "lat": 43.57, "lon": 10.32, "country": "Italy",
+        "lat": 43.57,
+        "lon": 10.32,
+        "country": "Italy",
         "aliases": ["ITLIV", "LIVORNO", "TOSCANA LNG"],
     },
     "Barcelona LNG": {
-        "lat": 41.35, "lon": 2.18, "country": "Spain",
+        "lat": 41.35,
+        "lon": 2.18,
+        "country": "Spain",
         "aliases": ["ESBCN", "BARCELONA LNG", "BCN LNG"],
     },
     "Mugardos / Ferrol": {
-        "lat": 43.46, "lon": -8.23, "country": "Spain",
+        "lat": 43.46,
+        "lon": -8.23,
+        "country": "Spain",
         "aliases": ["ESFER", "MUGARDOS", "FERROL", "GNLC"],
     },
     "Huelva LNG": {
-        "lat": 37.24, "lon": -6.95, "country": "Spain",
+        "lat": 37.24,
+        "lon": -6.95,
+        "country": "Spain",
         "aliases": ["ESHUE", "ESHUV", "HUELVA", "ESHU"],
     },
     "Sagunto": {
-        "lat": 39.66, "lon": -0.23, "country": "Spain",
+        "lat": 39.66,
+        "lon": -0.23,
+        "country": "Spain",
         "aliases": ["ESSAG", "SAGUNTO"],
     },
     "Cartagena LNG": {
-        "lat": 37.60, "lon": -0.98, "country": "Spain",
+        "lat": 37.60,
+        "lon": -0.98,
+        "country": "Spain",
         "aliases": ["ESACT", "CARTAGENA LNG"],
     },
     "Krk FSRU": {
-        "lat": 45.10, "lon": 14.60, "country": "Croatia",
+        "lat": 45.10,
+        "lon": 14.60,
+        "country": "Croatia",
         "aliases": ["HRKRK", "KRK", "OMISALJ", "LNG CROATIA"],
     },
     "Klaipeda FSRU": {
-        "lat": 55.72, "lon": 21.13, "country": "Lithuania",
+        "lat": 55.72,
+        "lon": 21.13,
+        "country": "Lithuania",
         "aliases": ["LTKLA", "KLAIPEDA", "INDEPENDENCE", "LITGAS"],
     },
     "Nynashamn FSRU": {
-        "lat": 58.91, "lon": 17.95, "country": "Sweden",
+        "lat": 58.91,
+        "lon": 17.95,
+        "country": "Sweden",
         "aliases": ["SENYN", "NYNASHAMN", "NYNASHAM", "FSRU ENERGOS POWER"],
     },
     "Manga LNG": {
-        "lat": 65.03, "lon": 25.43, "country": "Finland",
+        "lat": 65.03,
+        "lon": 25.43,
+        "country": "Finland",
         "aliases": ["FIMNG", "MANGA", "MANGA LNG", "FITKU", "OULU"],
     },
 }
@@ -7677,14 +8486,49 @@ _US_LNG_TERMINAL_RADIUS_NM = 80.0  # generous radius to catch vessels in approac
 # Origin inference rules specific to LNG trade routes
 _LNG_ORIGIN_RULES: list[dict] = [
     # Qatar (Ras Laffan) -> Suez NB (no Bosphorus)
-    {"cp": "suez", "dir": "northbound", "laden": True, "origin": "Qatar / ME", "via": "Suez NB", "days": 21},
+    {
+        "cp": "suez",
+        "dir": "northbound",
+        "laden": True,
+        "origin": "Qatar / ME",
+        "via": "Suez NB",
+        "days": 21,
+    },
     # US Gulf (Sabine Pass, Corpus Christi, Freeport) -> Gibraltar E or Dover E
-    {"cp": "gibraltar", "dir": "eastbound", "laden": True, "origin": "US Gulf LNG", "via": "Gibraltar E", "days": 8},
-    {"cp": "dover_channel", "dir": "eastbound", "laden": True, "origin": "US Gulf LNG", "via": "Dover E", "days": 3},
+    {
+        "cp": "gibraltar",
+        "dir": "eastbound",
+        "laden": True,
+        "origin": "US Gulf LNG",
+        "via": "Gibraltar E",
+        "days": 8,
+    },
+    {
+        "cp": "dover_channel",
+        "dir": "eastbound",
+        "laden": True,
+        "origin": "US Gulf LNG",
+        "via": "Dover E",
+        "days": 3,
+    },
     # West Africa (Equatorial Guinea, Mozambique) or Angola -> Cape NB
-    {"cp": "cape_good_hope", "dir": "northbound", "laden": True, "origin": "Atlantic LNG", "via": "Cape NB", "days": 45},
+    {
+        "cp": "cape_good_hope",
+        "dir": "northbound",
+        "laden": True,
+        "origin": "Atlantic LNG",
+        "via": "Cape NB",
+        "days": 45,
+    },
     # Australia / SE Asia -> Malacca W -> (then Suez or Cape)
-    {"cp": "singapore_malacca", "dir": "westbound", "laden": True, "origin": "Asia Pacific LNG", "via": "Malacca W", "days": 35},
+    {
+        "cp": "singapore_malacca",
+        "dir": "westbound",
+        "laden": True,
+        "origin": "Asia Pacific LNG",
+        "via": "Malacca W",
+        "days": 35,
+    },
 ]
 
 # Supplement origin with live region heuristic for known loading zones
@@ -7711,7 +8555,7 @@ async def get_lng_inbound(horizon_h: int = 72):
     great-circle distance and current SOG. Origin is inferred from recent chokepoint
     transit history (Suez NB = Qatar, Gibraltar/Dover E laden = US Gulf, etc.).
     """
-    from math import radians, sin, cos, sqrt, atan2
+    from math import atan2, cos, radians, sin, sqrt
 
     def _haversine_nm(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
         R = 3440.065  # nautical miles
@@ -7729,7 +8573,9 @@ async def get_lng_inbound(horizon_h: int = 72):
         "SELECT imo, ship_name, owner, ship_type FROM vessels WHERE ship_type LIKE %s OR ship_type LIKE %s",
         ["%LNG%", "%Liquefied Gas%"],
     )
-    lng_imos: set[int] = set(reg_df["imo"].dropna().astype(int).tolist()) if not reg_df.empty else set()
+    lng_imos: set[int] = (
+        set(reg_df["imo"].dropna().astype(int).tolist()) if not reg_df.empty else set()
+    )
     reg_by_imo: dict[int, dict] = {}
     if not reg_df.empty:
         for _, row in reg_df.iterrows():
@@ -7790,7 +8636,7 @@ async def get_lng_inbound(horizon_h: int = 72):
     for rule in _LNG_ORIGIN_RULES:
         cutoff_t = now_dt - timedelta(days=rule["days"])
         clause = "laden = ?" if rule["laden"] else "1=1"
-        dir_clause = f"AND direction = ?" if rule["dir"] else ""
+        dir_clause = "AND direction = ?" if rule["dir"] else ""
         params: list = [mmsi_list_all, cutoff_t, rule["cp"]]
         if rule["dir"]:
             params.append(rule["dir"])
@@ -7825,9 +8671,7 @@ async def get_lng_inbound(horizon_h: int = 72):
 
     # --- 5. Match destination to EU LNG terminal and compute ETA ---
     # True ETA (Phase E): precomputed physics ETA + interval to the regas terminal.
-    preds_by_mmsi = _runner_eta.predictions_by_mmsi(
-        [int(m) for m in live_df["mmsi"].tolist()]
-    )
+    preds_by_mmsi = _runner_eta.predictions_by_mmsi([int(m) for m in live_df["mmsi"].tolist()])
     vessels: list[LngVessel] = []
     by_origin: dict[str, int] = {}
     by_terminal: dict[str, int] = {}
@@ -7889,33 +8733,45 @@ async def get_lng_inbound(horizon_h: int = 72):
             if bucket in eta_buckets:
                 eta_buckets[bucket] += 1
 
-        vessels.append(LngVessel(
-            mmsi=mmsi,
-            imo=imo,
-            name=str(row.get("name") or reg_info.get("name") or ""),
-            sog=round(sog, 1),
-            lat=round(lat, 4),
-            lon=round(lon, 4),
-            region=str(row.get("region") or "") or None,
-            destination_raw=dest_raw,
-            terminal=terminal,
-            terminal_country=terminal_country,
-            eta_hours=round(primary_eta, 1) if primary_eta is not None else None,
-            distance_nm=round(dist_nm, 0) if dist_nm is not None else None,
-            laden=laden_val,
-            inferred_origin=inferred_origin,
-            inferred_via=inferred_via,
-            registry_name=str(reg_info.get("name") or "") or None,
-            owner=str(reg_info.get("owner") or "") or None,
-            eta_true_h=round(eta_true, 1) if eta_true is not None else None,
-            eta_low_h=round(pred["eta_low_h"], 1) if pred and pred.get("eta_low_h") is not None else None,
-            eta_high_h=round(pred["eta_high_h"], 1) if pred and pred.get("eta_high_h") is not None else None,
-            eta_naive_h=round(eta_h, 1) if eta_h is not None else None,
-            eta_method=pred["method"] if pred else None,
-        ))
+        vessels.append(
+            LngVessel(
+                mmsi=mmsi,
+                imo=imo,
+                name=str(row.get("name") or reg_info.get("name") or ""),
+                sog=round(sog, 1),
+                lat=round(lat, 4),
+                lon=round(lon, 4),
+                region=str(row.get("region") or "") or None,
+                destination_raw=dest_raw,
+                terminal=terminal,
+                terminal_country=terminal_country,
+                eta_hours=round(primary_eta, 1) if primary_eta is not None else None,
+                distance_nm=round(dist_nm, 0) if dist_nm is not None else None,
+                laden=laden_val,
+                inferred_origin=inferred_origin,
+                inferred_via=inferred_via,
+                registry_name=str(reg_info.get("name") or "") or None,
+                owner=str(reg_info.get("owner") or "") or None,
+                eta_true_h=round(eta_true, 1) if eta_true is not None else None,
+                eta_low_h=round(pred["eta_low_h"], 1)
+                if pred and pred.get("eta_low_h") is not None
+                else None,
+                eta_high_h=round(pred["eta_high_h"], 1)
+                if pred and pred.get("eta_high_h") is not None
+                else None,
+                eta_naive_h=round(eta_h, 1) if eta_h is not None else None,
+                eta_method=pred["method"] if pred else None,
+            )
+        )
 
     # Sort: EU-bound first (by ETA), then others by name
-    vessels.sort(key=lambda v: (v.terminal is None, v.eta_hours if v.eta_hours is not None else 9999, v.name or ""))
+    vessels.sort(
+        key=lambda v: (
+            v.terminal is None,
+            v.eta_hours if v.eta_hours is not None else 9999,
+            v.name or "",
+        )
+    )
     inbound_to_europe = sum(1 for v in vessels if v.terminal is not None)
     bcm_inbound = round(inbound_to_europe * _LNG_BCM_PER_CARGO, 3)
     by_origin = dict(sorted(by_origin.items(), key=lambda x: x[1], reverse=True))
@@ -7950,18 +8806,20 @@ async def get_lng_inbound(horizon_h: int = 72):
         if status == "departing" and sog > 1:
             eu_eta_days = round(4700 / sog / 24, 1)
         reg_info = reg_by_imo.get(imo, {})
-        us_loading.append(LngLoadingVessel(
-            mmsi=mmsi,
-            imo=imo,
-            name=str(row.get("name") or reg_info.get("name") or ""),
-            sog=round(sog, 1),
-            lat=round(lat, 4),
-            lon=round(lon, 4),
-            terminal_name=nearest["name"],
-            status=status,
-            destination_raw=str(row.get("destination") or "") or None,
-            eu_terminal_eta_days=eu_eta_days,
-        ))
+        us_loading.append(
+            LngLoadingVessel(
+                mmsi=mmsi,
+                imo=imo,
+                name=str(row.get("name") or reg_info.get("name") or ""),
+                sog=round(sog, 1),
+                lat=round(lat, 4),
+                lon=round(lon, 4),
+                terminal_name=nearest["name"],
+                status=status,
+                destination_raw=str(row.get("destination") or "") or None,
+                eu_terminal_eta_days=eu_eta_days,
+            )
+        )
 
     us_loading.sort(key=lambda v: (v.status != "loading", v.name or ""))
 
@@ -8103,10 +8961,7 @@ def cycle_series(series: str = "BDI", years: int = 5):
     points = (
         []
         if s is None or s.empty
-        else [
-            CycleSeriesPoint(date=ts.date().isoformat(), value=float(v))
-            for ts, v in s.items()
-        ]
+        else [CycleSeriesPoint(date=ts.date().isoformat(), value=float(v)) for ts, v in s.items()]
     )
     return CycleSeriesResponse(
         series=key,

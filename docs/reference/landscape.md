@@ -62,27 +62,69 @@ The 2026-08-05 aisstream outage put the live tracker at zero for over a day with
 fallback. Single-source risk is now a known, demonstrated weakness rather than a
 theoretical one. See ROADMAP backlog for the actual work item.
 
-### AISHub - the leading candidate
+### The requirement that rules out most candidates
 
-Contributor model: you feed your own receiver's AIS data in, and get stream access
-out. This is what the aisstream community converged on during the outage
-(aisstream/issues#260) as the realistic free second source.
+**A fallback must carry vessel type and dimensions, not just positions.** Our
+`kind`/`segment` labels come from `ais.classify(ship_type, length_m)`, sourced from AIS
+`ShipStaticData`. A positions-only feed yields uncoloured dots and silently breaks
+everything keyed on segment: the tracker legend, the cycle board, the analytics tiles,
+and supply-nowcast's storage curve. Check this **first** on any provider, because it is
+the cheapest question to answer and it eliminates most of them.
 
-Genuinely independent of aisstream, which is the whole point - a mirror of the same
-upstream is worthless as redundancy. The cost is that it needs an actual AIS receiver
-(hardware within VHF range of traffic) or a partner willing to contribute on our
-behalf; there is no pure-consumer free tier.
+### AISHub - ruled out (verified 2026-08-09)
 
-**Unverified.** The contributor threshold, licensing, and whether a non-contributor
-tier exists at all have not been checked against AISHub's own terms. Do that before
-counting on it.
+Checked against AISHub's own join page rather than community hearsay, and it closes
+every door:
 
-### Also worth checking if this is pursued
+- *"AISHub is a contributor-based network. Applications without an operational AIS
+  station and feed will not be approved."* No consumer tier, at any price.
+- Third-party data is banned by name: no scraped data, and specifically no feeds
+  *"from publicly available AIS sources or services"* - so relaying our aisstream feed
+  back to qualify is prohibited by them, and would breach aisstream's terms too.
+- You cannot use someone else's station.
+- API access additionally requires, as 7-day averages: **>=10 vessels, >=90% uptime,
+  <10s message delay, <=60s sampling.**
 
-National open-data AIS feeds are genuinely independent and free, but each covers only
-its own waters, so they are a supplement rather than a replacement for a global feed.
-Norway (Kystverket/BarentsWatch) and Denmark (Danish Maritime Authority) both publish
-open AIS; neither has been verified here.
+Independently, the operator is in **Geneva** - landlocked. A receiver here would see
+Lake Geneva craft: almost certainly short of the 10-vessel bar, and the wrong data
+regardless, since none of it is tankers or bulkers. The only legitimate route is a
+receiver hosted by someone within VHF range of real traffic (~EUR 60 of RTL-SDR plus a
+standing favour), or one of the free-receiver programmes (MarineTraffic ships hardware
+to volunteers) which also require a coastal location. Not pursued.
+
+Worth knowing: another project hit this identically and wrote it up
+(`koala73/worldmonitor#6227`, "AIS has no fallback"), ruling AISHub out on the same
+sentence and pivoting to provider selection.
+
+### Data Docked - ruled out on pricing model, not on price (verified 2026-08-09)
+
+Evaluated because it advertises a free tier and full vessel particulars. Both true, and
+neither helps:
+
+- **Type is not inline with positions.** The area/bounding-box query returns position
+  fields; `shipType`, length and beam come from a separate *Vessel Particulars*
+  endpoint, one call per vessel. That fails the requirement above without a per-vessel
+  enrichment pass.
+- **It is credit-metered REST, not a stream.** Area query costs 10 credits per call
+  regardless of vessels returned; particulars cost 1 credit each. The free tier is
+  20 credits (100 on some listings); paid starts around EUR 80/mo.
+- **The arithmetic is not close.** Our collector watches 29 basins. Polling each even
+  once per 10 minutes is 29 x 10 x 144 = ~41,760 credits/day, before a single
+  particulars call, and enriching the 32k vessels we have seen is another 32,000. A
+  websocket firehose is simply a different product from a per-call API, and no plan
+  tier closes a gap of that shape.
+
+It could serve a *narrow* fallback - the 13 chokepoints only, at low frequency - which
+is the shape worldmonitor landed on with VesselFinder LiveData's fixed-area pricing. If
+redundancy is ever funded, scope it that way rather than as a like-for-like replacement.
+
+### Still unverified
+
+National open-data AIS feeds are genuinely independent, free, and need no hardware or
+contribution, but each covers only its own waters. Norway (Kystverket/BarentsWatch),
+Denmark (Danish Maritime Authority) and Finland (Fintraffic/Digitraffic) all publish
+open AIS. For us they would cover `skaw_danish_straits` and `primorsk_baltic`: about 3%
+of collected rows. A supplement, and an honest one, but not a replacement.
 
 ## Deliberately not pursued
 

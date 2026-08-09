@@ -1,5 +1,59 @@
 # Freight Hub Changelog
 
+## 2026-08-09 (session 22) - the site said nothing while it was broken; both free AIS fallbacks are now ruled out on their own terms
+
+The tracker had been serving an empty map since 2026-08-06 02:28 UTC and giving the
+visitor no reason for it. `/api/health` returned `ok: true, tracked: 0,
+last_update: null` throughout, which is the worst of both worlds: monitoring stayed
+green while the product was blank.
+
+**The reason `last_update` was null is worth writing down, because it defeats the
+obvious fix.** Every vessel read filters to `VISIBLE_HOURS` (24h), so past a day of
+outage they all return nothing. But the deeper problem is that the collector *prunes*
+`live_positions` once rows age out of its staleness window - so during a long outage
+that table empties completely and destroys the evidence of when the feed last worked.
+On inspection it held 0 rows while `ais_snapshots` held 25.2M and knew the feed died at
+02:28:54. `_feed_status()` therefore reads `live_positions` unfiltered and falls back to
+`max(snapshot_ts)`, and only calls the state `unknown` when both are empty. Without the
+fallback the banner would have said "no AIS positions have been collected yet" next to a
+25-million-row store.
+
+Four states (`live` / `stale` / `down` / `unknown`) ride along on `/api/meta`, which the
+frontend already polls on the 60s tier, so the banner costs no extra request. `ok` on
+`/api/health` deliberately stays `true` during an upstream outage: it is a statement
+about this service, uptime monitoring watches it, and paging for an aisstream failure no
+deploy of ours can fix would train the operator to ignore it. 14 tests.
+
+Verified in production: the banner reads *"Live AIS feed is down: no new positions for
+3 days. Last message Aug 6, 2026, 2:28 AM UTC. The upstream provider (aisstream.io) is
+accepting connections but sending no data; the map is empty for that reason, not because
+there are no ships. Historical analytics are unaffected."* Zero console errors. One bug
+caught only because the check was done from a UTC browser: the timestamp was formatted
+in the viewer's local zone and labelled UTC, which is wrong for everyone outside it and
+silently so. Pinned to `timeZone: 'UTC'`.
+
+**The outage itself is aisstream's, and that is now established rather than assumed.**
+The collector's new close-code logging reports `close=1011 keepalive ping timeout`: the
+server accepts the socket, then answers neither pings nor the subscription. A control
+probe with a deliberately invalid API key gets *identical* silence, so the key is not the
+problem. The recurring HTTP 429 was self-collision - one concurrent connection per key,
+and our own reconnects racing a half-open server connection.
+
+**Both free fallback candidates are now ruled out, checked against their own terms
+rather than community summary.** AISHub is contributor-only (*"applications without an
+operational AIS station and feed will not be approved"*), explicitly bans feeds "from
+publicly available AIS sources or services" so re-feeding aisstream to qualify is out,
+and gates API access behind >=10 vessels and >=90% uptime over 7 days; a receiver is not
+viable from Geneva regardless. Data Docked advertises a free tier and full particulars,
+and fails on shape rather than price: vessel type is not inline with area queries, and
+at 10 credits per area call our 29 basins would cost ~42k credits/day at 10-minute
+polling against a 20-credit free tier.
+
+The requirement that eliminated both, and the first thing to test on any future
+provider: **the feed must carry `ship_type` and dimensions**, because `classify()`
+derives every segment from them and every segment-keyed surface breaks without it.
+Recorded in `docs/reference/landscape.md` with the arithmetic.
+
 ## 2026-08-07 (session 21) - 80% of the analytics DB was empty space; the disk scare was never a capacity problem
 
 Session 20 restarted the analytics job by hand but never restarted its timer, so

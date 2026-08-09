@@ -2,6 +2,7 @@ import { createRootRoute, Link, Outlet } from '@tanstack/react-router'
 import { Ship } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useRecentEventCount } from '@/lib/api'
+import { FeedBanner } from '@/components/FeedBanner'
 
 function NavItem({ to, children, disabled }: { to?: string; children: React.ReactNode; disabled?: boolean }) {
   if (disabled) {
@@ -63,6 +64,7 @@ function RootLayout() {
           quant portfolio
         </a>
       </header>
+      <FeedBanner />
       <main className="min-h-0 flex-1">
         <Outlet />
       </main>

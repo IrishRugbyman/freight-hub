@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-
 # ---- AIS live vessel tracker ----
 
 
@@ -24,12 +23,12 @@ class Vessel(BaseModel):
     draught: float | None = None
     nav_status: int | None = None
     eta: str | None = None
-    flag: str | None = None          # country, derived from MMSI MID
-    flag_code: str | None = None     # ISO2
-    flag_foc: bool = False           # flag of convenience
-    flag_shadow: bool = False        # high shadow-fleet activity flag
-    stale: bool = False              # dark >STALE_HOURS but within VISIBLE_HOURS
-    age_minutes: int | None = None   # minutes since last AIS fix
+    flag: str | None = None  # country, derived from MMSI MID
+    flag_code: str | None = None  # ISO2
+    flag_foc: bool = False  # flag of convenience
+    flag_shadow: bool = False  # high shadow-fleet activity flag
+    stale: bool = False  # dark >STALE_HOURS but within VISIBLE_HOURS
+    age_minutes: int | None = None  # minutes since last AIS fix
 
 
 class TrackPoint(BaseModel):
@@ -47,12 +46,37 @@ class ChokepointCount(BaseModel):
     has_coverage: bool = True  # False = no terrestrial AIS receivers feed this basin
 
 
+class FeedStatus(BaseModel):
+    """Honest state of the upstream AIS feed.
+
+    Exists because `last_update` alone cannot distinguish "the feed is fine and
+    nothing moved" from "the feed died two days ago". Every vessel query filters
+    to VISIBLE_HOURS, so once an outage passes 24h the result set empties and
+    `last_update` goes null - the map renders blank with nothing to say why,
+    which reads as a broken site rather than an upstream failure. `last_seen` is
+    therefore read from live_positions **unfiltered**, so it survives the window
+    that hides everything else.
+    """
+
+    #: live = fresh within STALE_HOURS; stale = within VISIBLE_HOURS but ageing;
+    #: down = older than VISIBLE_HOURS, meaning the map is empty by construction;
+    #: unknown = the store has no rows at all (a fresh deployment).
+    state: str
+    #: Most recent position timestamp in the store, ignoring every freshness
+    #: filter. This is the number a visitor needs when the map is blank.
+    last_seen: str | None = None
+    age_minutes: float | None = None
+    stale_hours: float
+    visible_hours: float
+
+
 class Meta(BaseModel):
     kinds: list[str]
     segments: list[str]
     regions: list[str]
     total_tracked: int
     last_update: str | None = None
+    feed: FeedStatus | None = None
 
 
 # ---- Transport-arb routes ----
@@ -331,12 +355,14 @@ class OwnerRiskItem(BaseModel):
     ofac_count: int
     flags: list[str]
 
+
 class OwnerRiskResponse(BaseModel):
     as_of: str
     rows: list[OwnerRiskItem]
 
+
 class SpeedTrendPoint(BaseModel):
-    date: str          # YYYY-MM-DD
+    date: str  # YYYY-MM-DD
     avg_sog: float | None
     underway_count: int
     total_count: int
@@ -357,7 +383,7 @@ class FlagRiskRow(BaseModel):
     max_risk_score: int
     high_risk_count: int  # score >= 50
     ofac_count: int
-    paris_mou: str | None   # Black / Grey / White / None (most common for this flag)
+    paris_mou: str | None  # Black / Grey / White / None (most common for this flag)
     tokyo_mou: str | None
 
 
@@ -370,7 +396,7 @@ class FleetFlagRow(BaseModel):
     flag: str
     flag_code: str | None
     vessel_count: int
-    length_sum_m: float          # tonnage proxy (sum of length_m)
+    length_sum_m: float  # tonnage proxy (sum of length_m)
     is_foc: bool
     is_shadow: bool
     by_segment: dict[str, int]
@@ -379,10 +405,10 @@ class FleetFlagRow(BaseModel):
 class FleetFlagsResponse(BaseModel):
     as_of: str
     total_with_flag: int
-    total_unresolved: int        # live vessels whose MMSI did not resolve to a flag
-    foc_count: int               # vessels under any flag of convenience
-    shadow_count: int            # vessels under any high-shadow-activity flag
-    rows: list[FleetFlagRow]     # sorted by vessel_count desc
+    total_unresolved: int  # live vessels whose MMSI did not resolve to a flag
+    foc_count: int  # vessels under any flag of convenience
+    shadow_count: int  # vessels under any high-shadow-activity flag
+    rows: list[FleetFlagRow]  # sorted by vessel_count desc
 
 
 class FlagMismatchRow(BaseModel):
@@ -390,9 +416,9 @@ class FlagMismatchRow(BaseModel):
     imo: int | None
     name: str | None
     segment: str | None
-    mmsi_flag: str               # derived from the MMSI MID
+    mmsi_flag: str  # derived from the MMSI MID
     mmsi_flag_code: str | None
-    registry_flag: str           # from the Equasis registry
+    registry_flag: str  # from the Equasis registry
     registry_flag_code: str | None
 
 
@@ -422,13 +448,13 @@ class HighRiskPositionsResponse(BaseModel):
 class SpeedSegmentRow(BaseModel):
     segment: str
     kind: str
-    underway: int         # nav_status 0 (under way using engine)
-    anchored: int         # nav_status 1 (at anchor)
-    moored: int           # nav_status 5 (moored)
+    underway: int  # nav_status 0 (under way using engine)
+    anchored: int  # nav_status 1 (at anchor)
+    moored: int  # nav_status 5 (moored)
     other: int
     total: int
-    avg_sog_underway: float | None   # avg SOG for nav_status=0, SOG > 0.2
-    p50_sog: float | None            # median SOG all vessels
+    avg_sog_underway: float | None  # avg SOG for nav_status=0, SOG > 0.2
+    p50_sog: float | None  # median SOG all vessels
     pct_underway: float  # underway / total
 
 
@@ -490,8 +516,8 @@ class AnchoredVessel(BaseModel):
     kind: str | None
     segment: str | None
     start_ts: str
-    dwell_hours: float       # time anchored so far
-    laden: str | None        # laden / ballast / unknown from vessel_state
+    dwell_hours: float  # time anchored so far
+    laden: str | None  # laden / ballast / unknown from vessel_state
     risk_score: int | None
     ofac: bool
 
@@ -508,12 +534,12 @@ class CargoTransitionEvent(BaseModel):
     kind: str | None
     segment: str | None
     region: str | None
-    direction: str           # "loading" or "discharging"
-    draught_before: float    # median draught in bucket before the step change
-    draught_after: float     # median draught in bucket after the step change
-    change_m: float          # absolute draught change in metres
-    transition_ts: str       # start of the 6h bucket where the step occurred
-    lat: float | None        # vessel position at transition
+    direction: str  # "loading" or "discharging"
+    draught_before: float  # median draught in bucket before the step change
+    draught_after: float  # median draught in bucket after the step change
+    change_m: float  # absolute draught change in metres
+    transition_ts: str  # start of the 6h bucket where the step occurred
+    lat: float | None  # vessel position at transition
     lon: float | None
     risk_score: int | None
     ofac: bool
@@ -527,10 +553,10 @@ class CargoTransitionsResponse(BaseModel):
 
 
 class FleetAgeBand(BaseModel):
-    age_band: str            # "0-4", "5-9", "10-14", "15-19", "20-24", "25+"
+    age_band: str  # "0-4", "5-9", "10-14", "15-19", "20-24", "25+"
     vessel_count: int
     avg_risk_score: float | None
-    high_risk_count: int    # score >= 50
+    high_risk_count: int  # score >= 50
     avg_dwt: float | None
 
 
@@ -546,26 +572,26 @@ class SlowSteamerEvent(BaseModel):
     kind: str | None
     segment: str | None
     region: str | None
-    sog: float                  # current speed over ground (knots)
-    segment_median_sog: float   # median for this segment among underway vessels
-    pct_of_median: float        # sog / segment_median_sog * 100
+    sog: float  # current speed over ground (knots)
+    segment_median_sog: float  # median for this segment among underway vessels
+    pct_of_median: float  # sog / segment_median_sog * 100
     risk_score: int | None
     ofac: bool
 
 
 class SlowSteamersResponse(BaseModel):
     as_of: str
-    total_fleet_underway: int   # live vessels with sog > 0.5 and not anchored/moored
+    total_fleet_underway: int  # live vessels with sog > 0.5 and not anchored/moored
     rows: list[SlowSteamerEvent]
 
 
 class FleetUtilizationRow(BaseModel):
     segment: str
-    kind: str              # "tanker" | "bulk"
+    kind: str  # "tanker" | "bulk"
     total: int
-    underway_count: int    # sog > 2 and nav_status = 0 or None
-    idle_count: int        # sog < 0.5 or nav_status in (1, 5)
-    unknown_count: int     # everything else (slow but not confirmed anchored)
+    underway_count: int  # sog > 2 and nav_status = 0 or None
+    idle_count: int  # sog < 0.5 or nav_status in (1, 5)
+    unknown_count: int  # everything else (slow but not confirmed anchored)
     underway_pct: float
     idle_pct: float
     avg_sog_underway: float | None
@@ -613,18 +639,18 @@ class StsRiskEvent(BaseModel):
     name2: str | None
     duration_hours: float | None
     co_location_fixes: int | None
-    risk_score: int | None       # mmsi vessel
-    risk_score2: int | None      # mmsi2 vessel
+    risk_score: int | None  # mmsi vessel
+    risk_score2: int | None  # mmsi2 vessel
     ofac: bool
     ofac2: bool
-    max_risk: int                # max(risk_score, risk_score2, 0)
+    max_risk: int  # max(risk_score, risk_score2, 0)
 
 
 class StsRiskResponse(BaseModel):
     as_of: str
     days: int
     total_events: int
-    enriched_events: int         # events where at least one party has a risk score
+    enriched_events: int  # events where at least one party has a risk score
     rows: list[StsRiskEvent]
 
 
@@ -652,19 +678,19 @@ class RerouteRiskResponse(BaseModel):
 
 class FleetKPIs(BaseModel):
     as_of: str
-    total_registry: int          # all fetch_ok vessels
-    scored: int                  # have risk_score
-    elevated: int                # risk_score >= 25
-    high_risk: int               # risk_score >= 50
-    critical: int                # risk_score >= 75
+    total_registry: int  # all fetch_ok vessels
+    scored: int  # have risk_score
+    elevated: int  # risk_score >= 25
+    high_risk: int  # risk_score >= 50
+    critical: int  # risk_score >= 75
     ofac_count: int
     avg_risk_score: float | None  # among scored vessels
-    pct_scored: float            # scored / total_registry
+    pct_scored: float  # scored / total_registry
 
 
 class RiskEventItem(BaseModel):
     event_id: str
-    event_type: str              # "sts" | "reroute"
+    event_type: str  # "sts" | "reroute"
     event_ts: str
     mmsi: int
     name: str | None
@@ -739,9 +765,9 @@ class PortCongestionRow(BaseModel):
     kind: str | None
     current_vessels: int
     avg_current_dwell_hours: float | None  # hours for open episodes
-    baseline_avg_vessels: float | None     # avg simultaneous vessels over history
+    baseline_avg_vessels: float | None  # avg simultaneous vessels over history
     baseline_avg_dwell_hours: float | None
-    congestion_factor: float               # current_vessels / baseline_avg (or 1.0 if no baseline)
+    congestion_factor: float  # current_vessels / baseline_avg (or 1.0 if no baseline)
 
 
 class PortCongestionResponse(BaseModel):
@@ -755,9 +781,9 @@ class ChokepointCongestionRow(BaseModel):
     kind: str | None
     current_vessels: int
     avg_current_dwell_hours: float | None  # hours for open (in-progress) transits
-    baseline_avg_vessels: float | None     # avg simultaneous transiting vessels over history
+    baseline_avg_vessels: float | None  # avg simultaneous transiting vessels over history
     baseline_avg_dwell_hours: float | None  # avg completed-transit duration over history
-    congestion_factor: float               # current_vessels / baseline_avg (or 1.0 if no baseline)
+    congestion_factor: float  # current_vessels / baseline_avg (or 1.0 if no baseline)
 
 
 class ChokepointCongestionResponse(BaseModel):
@@ -780,15 +806,15 @@ class AnomalyWatchlistItem(BaseModel):
     lon: float | None
     sog: float | None
     destination: str | None
-    laden: str | None             # laden / ballast / unknown
-    total_score: int              # composite behavioral + registry
+    laden: str | None  # laden / ballast / unknown
+    total_score: int  # composite behavioral + registry
     behavioral_score: int
     registry_risk: int | None
     ofac: bool
-    risk_level: str               # Low / Elevated / High / Critical
+    risk_level: str  # Low / Elevated / High / Critical
     sts_count_7d: int
     reroute_count_7d: int
-    signals: list[str]            # human-readable signal descriptions
+    signals: list[str]  # human-readable signal descriptions
 
 
 class AnomalyWatchlistResponse(BaseModel):
@@ -804,14 +830,14 @@ class AnomalyWatchlistResponse(BaseModel):
 class VesselBehavioralRisk(BaseModel):
     mmsi: int
     imo: int | None
-    sts_count: int        # STS events (either party) in last days
-    reroute_count: int    # reroute events in last days
+    sts_count: int  # STS events (either party) in last days
+    reroute_count: int  # reroute events in last days
     days: int
-    behavioral_score: int   # 0-100 from events alone
+    behavioral_score: int  # 0-100 from events alone
     registry_risk: int | None
     ofac: bool
-    total_score: int        # 0-100 composite
-    risk_level: str         # "Low" | "Elevated" | "High" | "Critical"
+    total_score: int  # 0-100 composite
+    risk_level: str  # "Low" | "Elevated" | "High" | "Critical"
     recent_events: list[dict]  # last 5 sts/reroute events as minimal dicts
 
 
@@ -822,7 +848,7 @@ class TradeLaneCell(BaseModel):
     origin_region: str
     dest_region: str
     vessel_count: int
-    high_risk_count: int    # behavioral_score >= 50 OR registry_risk >= 50 OR ofac
+    high_risk_count: int  # behavioral_score >= 50 OR registry_risk >= 50 OR ofac
     laden_count: int
 
 
@@ -830,8 +856,8 @@ class TradeLaneMatrixResponse(BaseModel):
     as_of: str
     kind: str
     laden_only: bool
-    origin_regions: list[str]   # ordered by vessel_count desc
-    dest_regions: list[str]     # ordered by vessel_count desc
+    origin_regions: list[str]  # ordered by vessel_count desc
+    dest_regions: list[str]  # ordered by vessel_count desc
     cells: list[TradeLaneCell]
 
 
@@ -839,7 +865,7 @@ class TradeLaneMatrixResponse(BaseModel):
 
 
 class ChokepointHeatmapCell(BaseModel):
-    date: str          # YYYY-MM-DD
+    date: str  # YYYY-MM-DD
     chokepoint: str
     total: int
     tanker: int
@@ -849,7 +875,7 @@ class ChokepointHeatmapCell(BaseModel):
 class ChokepointHeatmapResponse(BaseModel):
     as_of: str
     days: int
-    kind: str          # "" | "tanker" | "bulk"
+    kind: str  # "" | "tanker" | "bulk"
     chokepoints: list[str]  # ordered by overall total desc
     cells: list[ChokepointHeatmapCell]
 
@@ -870,8 +896,8 @@ class VesselRiskRow(BaseModel):
     reroute_count: int
     registry_risk: int | None
     ofac: bool
-    behavioral_score: int   # 0-100 from event counts alone
-    total_score: int        # 0-100 composite (behavioral + registry + ofac bonus)
+    behavioral_score: int  # 0-100 from event counts alone
+    total_score: int  # 0-100 composite (behavioral + registry + ofac bonus)
 
 
 class VesselRiskResponse(BaseModel):
@@ -1176,8 +1202,8 @@ class CrudeOnWaterResponse(BaseModel):
 class ChokepointStatusRow(BaseModel):
     chokepoint: str
     live_total: int
-    live_transiting: int   # SOG > 4 kn
-    live_waiting: int      # SOG <= 0.5 kn
+    live_transiting: int  # SOG > 4 kn
+    live_waiting: int  # SOG <= 0.5 kn
     avg_transit_h_7d: float | None
     n_transits_24h: int
     n_transits_7d: int
@@ -1191,7 +1217,7 @@ class ChokepointStatusResponse(BaseModel):
 
 # Phase 51: Fleet trend time-series
 class FleetTrendDay(BaseModel):
-    date: str          # YYYY-MM-DD
+    date: str  # YYYY-MM-DD
     laden: int
     ballast: int
     unknown: int
@@ -1269,7 +1295,7 @@ class PipelinesResponse(BaseModel):
 
 class OwnerFleetStatusRow(BaseModel):
     owner: str
-    live_count: int          # vessels currently in live feed (joined via IMO)
+    live_count: int  # vessels currently in live feed (joined via IMO)
     laden: int
     ballast: int
     unknown: int
@@ -1293,22 +1319,22 @@ class EuropeanInboundVessel(BaseModel):
     segment: str | None
     kind: str | None
     laden: str | None
-    eta_hours: float              # primary ETA shown: true (physics) when available, else naive
+    eta_hours: float  # primary ETA shown: true (physics) when available, else naive
     distance_nm: float
     sog: float
     port: str
     port_region: str  # "NW Europe" | "Mediterranean" | "Baltic"
     destination_raw: str | None
-    inferred_origin: str | None   # "Middle East", "Black Sea", "W Africa", etc.
-    inferred_via: str | None      # chokepoint transit that gave origin, e.g. "Suez NB"
-    dwt_estimate: int | None      # proxy from segment
+    inferred_origin: str | None  # "Middle East", "Black Sea", "W Africa", etc.
+    inferred_via: str | None  # chokepoint transit that gave origin, e.g. "Suez NB"
+    dwt_estimate: int | None  # proxy from segment
     registry_risk: int | None
     # True ETA (Phase E): physics estimate + calibrated band + honest naive baseline
-    eta_true_h: float | None = None    # physics P50 (None when no resolved prediction)
-    eta_low_h: float | None = None     # calibrated P10
-    eta_high_h: float | None = None    # calibrated P90
-    eta_naive_h: float | None = None   # great-circle / SOG baseline
-    eta_method: str | None = None      # 'ml' | 'physics' | 'naive'
+    eta_true_h: float | None = None  # physics P50 (None when no resolved prediction)
+    eta_low_h: float | None = None  # calibrated P10
+    eta_high_h: float | None = None  # calibrated P90
+    eta_naive_h: float | None = None  # great-circle / SOG baseline
+    eta_method: str | None = None  # 'ml' | 'physics' | 'naive'
 
 
 class EuropeanInboundResponse(BaseModel):
@@ -1316,11 +1342,11 @@ class EuropeanInboundResponse(BaseModel):
     horizon_h: int
     total_vessels: int
     total_laden: int
-    total_dwt_laden: int          # sum of DWT estimates for laden vessels
+    total_dwt_laden: int  # sum of DWT estimates for laden vessels
     vessels: list[EuropeanInboundVessel]
-    by_origin: dict[str, int]     # origin label -> vessel count
-    by_port: dict[str, int]       # port name -> vessel count
-    eta_buckets: dict[str, int]   # "0-6h", "6-12h", "12-24h", "24-48h" -> count
+    by_origin: dict[str, int]  # origin label -> vessel count
+    by_port: dict[str, int]  # port name -> vessel count
+    eta_buckets: dict[str, int]  # "0-6h", "6-12h", "12-24h", "24-48h" -> count
 
 
 # Phase 55: LNG Intelligence
@@ -1336,11 +1362,11 @@ class LngVessel(BaseModel):
     # null when the vessel is outbound / in transit without an EU terminal destination
     terminal: str | None
     terminal_country: str | None
-    eta_hours: float | None       # primary ETA: true (physics) when available, else naive
+    eta_hours: float | None  # primary ETA: true (physics) when available, else naive
     distance_nm: float | None
-    laden: str | None             # laden / ballast / unknown
-    inferred_origin: str | None   # Qatar / US Gulf / Norway / Australia / etc.
-    inferred_via: str | None      # Suez NB, Gibraltar E, Cape NB, etc.
+    laden: str | None  # laden / ballast / unknown
+    inferred_origin: str | None  # Qatar / US Gulf / Norway / Australia / etc.
+    inferred_via: str | None  # Suez NB, Gibraltar E, Cape NB, etc.
     registry_name: str | None
     owner: str | None
     # True ETA (Phase E)
@@ -1358,17 +1384,17 @@ class LngLoadingVessel(BaseModel):
     sog: float
     lat: float
     lon: float
-    terminal_name: str            # nearest US loading terminal
-    status: str                   # "loading" (SOG < 1.5kn) or "departing" (SOG >= 1.5kn)
+    terminal_name: str  # nearest US loading terminal
+    status: str  # "loading" (SOG < 1.5kn) or "departing" (SOG >= 1.5kn)
     destination_raw: str | None
-    eu_terminal_eta_days: float | None   # ETA to nearest EU terminal after loading (~14-18d)
+    eu_terminal_eta_days: float | None  # ETA to nearest EU terminal after loading (~14-18d)
 
 
 class LngInboundResponse(BaseModel):
     as_of: str
-    total_lng_visible: int        # all LNG tankers in live AIS
-    inbound_to_europe: int        # vessels with EU terminal ETA inside horizon
-    bcm_inbound: float            # rough bcm estimate (assuming 3.5 bcf cargo = 0.10 bcm)
+    total_lng_visible: int  # all LNG tankers in live AIS
+    inbound_to_europe: int  # vessels with EU terminal ETA inside horizon
+    bcm_inbound: float  # rough bcm estimate (assuming 3.5 bcf cargo = 0.10 bcm)
     vessels: list[LngVessel]
     by_origin: dict[str, int]
     by_terminal: dict[str, int]
@@ -1382,18 +1408,18 @@ class EtaPrediction(BaseModel):
 
     target_id: str
     target_name: str | None
-    target_type: str | None        # 'chokepoint' | 'port'
+    target_type: str | None  # 'chokepoint' | 'port'
     target_lat: float | None
     target_lon: float | None
-    eta_p50_h: float | None        # point estimate (hours)
-    eta_low_h: float | None        # calibrated P10
-    eta_high_h: float | None       # calibrated P90
-    eta_naive_h: float | None      # great-circle / SOG baseline (for honesty)
-    method: str | None             # 'ml' | 'physics' | 'naive'
-    eta_arrival_ts: str | None     # ISO timestamp = as_of + p50
-    route_dist_nm: float | None    # sea-route distance sailed
-    gc_dist_nm: float | None       # great-circle distance
-    route_method: str | None       # 'searoute' | 'gc'
+    eta_p50_h: float | None  # point estimate (hours)
+    eta_low_h: float | None  # calibrated P10
+    eta_high_h: float | None  # calibrated P90
+    eta_naive_h: float | None  # great-circle / SOG baseline (for honesty)
+    method: str | None  # 'ml' | 'physics' | 'naive'
+    eta_arrival_ts: str | None  # ISO timestamp = as_of + p50
+    route_dist_nm: float | None  # sea-route distance sailed
+    gc_dist_nm: float | None  # great-circle distance
+    route_method: str | None  # 'searoute' | 'gc'
     sog: float | None
     segment: str | None
     laden: bool | None
@@ -1402,17 +1428,17 @@ class EtaPrediction(BaseModel):
 class EtaResponse(BaseModel):
     mmsi: int
     as_of: str
-    n: int                          # number of resolvable targets scored
+    n: int  # number of resolvable targets scored
     predictions: list[EtaPrediction]
 
 
 class EtaAccuracyRow(BaseModel):
     """One backtest metric cell: a model's error in a lead bucket / target type."""
 
-    model: str                      # 'naive' | 'naive+route' | 'physics_v1'
-    lead_bucket: str                # '0-6h' | '6-12h' | '12-24h' | '24-48h' | '48h+' | 'all'
-    target_type: str                # 'chokepoint' | 'port' | 'all'
-    lead_basis: str = "actual"      # 'actual' | 'predicted' (per-bucket); 'all' for overall rows
+    model: str  # 'naive' | 'naive+route' | 'physics_v1'
+    lead_bucket: str  # '0-6h' | '6-12h' | '12-24h' | '24-48h' | '48h+' | 'all'
+    target_type: str  # 'chokepoint' | 'port' | 'all'
+    lead_basis: str = "actual"  # 'actual' | 'predicted' (per-bucket); 'all' for overall rows
     n: int
     med_abs_err_h: float | None
     bias_h: float | None
@@ -1423,20 +1449,20 @@ class EtaAccuracyRow(BaseModel):
 class EtaDriftAlert(BaseModel):
     """A persisted champion-accuracy degradation flag (True ETA Phase G)."""
 
-    run_ts: str                     # ISO timestamp of the run that tripped it
-    model: str                      # champion model the alert is about
-    kind: str                       # 'coverage' | 'med_abs_err'
-    severity: str                   # 'warn' | 'alert'
-    metric: float                   # observed value that tripped the check
-    reference: float                # band edge / trailing median compared against
-    detail: str                     # human-readable message
+    run_ts: str  # ISO timestamp of the run that tripped it
+    model: str  # champion model the alert is about
+    kind: str  # 'coverage' | 'med_abs_err'
+    severity: str  # 'warn' | 'alert'
+    metric: float  # observed value that tripped the check
+    reference: float  # band edge / trailing median compared against
+    detail: str  # human-readable message
 
 
 class EtaAccuracyResponse(BaseModel):
-    run_ts: str | None              # ISO timestamp of the latest scored run
-    models: list[str]               # models present, baseline-first order
-    lead_order: list[str]           # lead buckets in chronological order
-    lead_basis: str = "actual"      # conditioning basis applied to per-bucket rows
+    run_ts: str | None  # ISO timestamp of the latest scored run
+    models: list[str]  # models present, baseline-first order
+    lead_order: list[str]  # lead buckets in chronological order
+    lead_basis: str = "actual"  # conditioning basis applied to per-bucket rows
     rows: list[EtaAccuracyRow]
     drift: list[EtaDriftAlert] = []  # active drift alerts from the latest run
 
@@ -1444,9 +1470,9 @@ class EtaAccuracyResponse(BaseModel):
 class EtaByTargetRow(BaseModel):
     """Per-target accuracy row for one model."""
 
-    target_id: str                  # e.g. 'cp:suez', 'zone:rotterdam'
+    target_id: str  # e.g. 'cp:suez', 'zone:rotterdam'
     name: str
-    target_type: str                # 'chokepoint' | 'port'
+    target_type: str  # 'chokepoint' | 'port'
     is_canal: bool
     n: int
     med_abs_err_h: float | None
@@ -1459,7 +1485,7 @@ class EtaByTargetRow(BaseModel):
 
 class EtaByTargetResponse(BaseModel):
     run_ts: str | None
-    rows: list[EtaByTargetRow]      # physics_v1 rows, sorted best -> worst by med_abs_err_h
+    rows: list[EtaByTargetRow]  # physics_v1 rows, sorted best -> worst by med_abs_err_h
 
 
 class EtaTrendPoint(BaseModel):
@@ -1469,11 +1495,11 @@ class EtaTrendPoint(BaseModel):
     naive_mae: float | None
     route_mae: float | None
     physics_mae: float | None
-    n: int                          # sample count for the physics row (grows over time)
+    n: int  # sample count for the physics row (grows over time)
 
 
 class EtaTrendResponse(BaseModel):
-    points: list[EtaTrendPoint]     # chronological, one per distinct run
+    points: list[EtaTrendPoint]  # chronological, one per distinct run
 
 
 # Destination predictor: candidate ports ranked by predicted probability
@@ -1482,20 +1508,20 @@ class DestinationCandidate(BaseModel):
 
     target_id: str
     target_name: str | None
-    target_type: str | None        # 'chokepoint' | 'port' | 'destination'
+    target_type: str | None  # 'chokepoint' | 'port' | 'destination'
     target_lat: float | None
     target_lon: float | None
-    prob: float | None             # predicted probability this is the true destination
-    method: str | None             # 'heuristic' | 'ml'
-    reported_match: bool           # True if this candidate matches the resolved AIS destination
+    prob: float | None  # predicted probability this is the true destination
+    method: str | None  # 'heuristic' | 'ml'
+    reported_match: bool  # True if this candidate matches the resolved AIS destination
     gc_dist_nm: float | None
 
 
 class DestinationResponse(BaseModel):
     mmsi: int
     as_of: str
-    n: int                              # number of candidates scored
-    disagrees_with_reported: bool       # True if the top candidate is NOT the reported destination
+    n: int  # number of candidates scored
+    disagrees_with_reported: bool  # True if the top candidate is NOT the reported destination
     candidates: list[DestinationCandidate]  # ranked most-likely-first
 
 
@@ -1508,10 +1534,10 @@ class UpcomingVessel(BaseModel):
     laden: bool | None
     target_id: str
     target_name: str
-    target_type: str              # 'chokepoint' | 'port'
-    remaining_h: float            # hours remaining until P50 arrival (from now)
-    eta_p10_h: float | None       # hours remaining until P10 (optimistic)
-    eta_p90_h: float | None       # hours remaining until P90 (pessimistic)
+    target_type: str  # 'chokepoint' | 'port'
+    remaining_h: float  # hours remaining until P50 arrival (from now)
+    eta_p10_h: float | None  # hours remaining until P10 (optimistic)
+    eta_p90_h: float | None  # hours remaining until P90 (pessimistic)
     route_dist_nm: float | None
     sog: float | None
     lat: float | None
@@ -1523,7 +1549,7 @@ class UpcomingArrivalsResponse(BaseModel):
 
     as_of: str
     horizon_h: int
-    target_id: str | None         # None = all targets
+    target_id: str | None  # None = all targets
     total: int
     rows: list[UpcomingVessel]
 
@@ -1531,15 +1557,15 @@ class UpcomingArrivalsResponse(BaseModel):
 class ArrivalTarget(BaseModel):
     """Ground-truth arrival activity at one resolved target over the window."""
 
-    target_id: str                  # e.g. 'cp:suez', 'zone:rotterdam'
+    target_id: str  # e.g. 'cp:suez', 'zone:rotterdam'
     name: str
-    target_type: str                # 'chokepoint' | 'port'
+    target_type: str  # 'chokepoint' | 'port'
     is_canal: bool
-    arrivals: int                   # closest-approach arrivals in the window
-    vessels: int                    # distinct MMSI that arrived
-    laden_share: float | None       # share of arrivals with known laden=True (None if no laden signal)
-    top_segment: str | None         # most common vessel segment among arrivals
-    last_arrival_ts: str | None     # ISO timestamp of the most recent arrival
+    arrivals: int  # closest-approach arrivals in the window
+    vessels: int  # distinct MMSI that arrived
+    laden_share: float | None  # share of arrivals with known laden=True (None if no laden signal)
+    top_segment: str | None  # most common vessel segment among arrivals
+    last_arrival_ts: str | None  # ISO timestamp of the most recent arrival
 
 
 class ArrivalsResponse(BaseModel):
@@ -1547,11 +1573,10 @@ class ArrivalsResponse(BaseModel):
 
     as_of: str
     window_days: int
-    target_type: str                # filter echoed back: 'all' | 'chokepoint' | 'port'
+    target_type: str  # filter echoed back: 'all' | 'chokepoint' | 'port'
     total_arrivals: int
-    total_vessels: int              # distinct vessels arriving anywhere in the window
+    total_vessels: int  # distinct vessels arriving anywhere in the window
     rows: list[ArrivalTarget]
-
 
 
 class MstVoyage(BaseModel):
