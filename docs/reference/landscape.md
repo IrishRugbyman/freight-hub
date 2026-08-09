@@ -29,6 +29,33 @@ useful fact about it.
 
 Worth watching for what they build, not for what we can take.
 
+**Their Sources page is the genuinely valuable part** (read 2026-08-07), and not
+because it is theirs to give: the 18 lists it names are public primary sources with
+permissive licences, so anything we wanted from them we would ingest from the
+originals. OFAC SDN (public domain), Ukraine GUR, EU Annex XLII (public sector),
+Canada SEMA (official gov XML), UK FCDO (Open Government Licence), Australia DFAT and
+NZ MFAT (CC BY 4.0), Switzerland SECO, Paris MoU port bans, UN Security Council 1718,
+the RFMO IUU fishing blacklists (EU/ICCAT/WCPFC), and Tokyo / Black Sea / Abuja MoU
+detention lists. Treat the page as a bibliography.
+
+Their headline figures, for calibration: 2,658 deduplicated sanctioned-or-banned
+vessels against a ~1,400 RUSI/Windward estimate of the Russian shadow fleet (theirs is
+larger because it also spans Iran, Venezuela and North Korea), and 8,942 once
+port-state detentions are added.
+
+The methodological point worth stealing is the one they are careful about: a sanctions
+or port-ban designation and a port-state-control detention are different kinds of
+claim, and they count them separately - detentions are "corroboration only, not
+designations." Any version of this we built would have to hold that line.
+
+**But note the standing decision against building this at all.** The root `CLAUDE.md`
+lists "External sanctions lists ingestion" under Deliberately Not Building: risk
+scoring here uses only owned data and public registry facts, because matching named
+sanctioned entities is a legal-grade exercise this project should not pretend to do.
+Nothing above overturns that - the data being free and well-licensed was never the
+obstacle. The obstacle is that a false positive against a named vessel is a
+consequential claim. Reopen deliberately or not at all.
+
 ## Alternative AIS sources (redundancy)
 
 The 2026-08-05 aisstream outage put the live tracker at zero for over a day with no
