@@ -1,33 +1,60 @@
-# freight-analytics -- hourly analytics batch job for the freight hub.
+# freight-analytics -- HOURLY incremental pass for the freight hub.
+#
+# This unit runs the cheap half only: the incremental detectors over the snapshot
+# window since the watermark (transits, anchorages, density, reroutes, gaps,
+# loitering, STS, spoofing, dark voyages). The expensive full-history ETA and
+# destination stages (7b-7f) are handled by freight-analytics-derived.service on
+# a daily schedule.
+#
+# Why the split (2026-08-09). Run as one job, this took 42 minutes of CPU and
+# peaked at 4.0-4.1 GB against a 5 GB cap, on an HOURLY timer - so it ran
+# essentially back to back and left the box permanently busy. The derived stages
+# are the whole of that cost, and they do not depend on the incremental window:
+# _run_derived_stages says so in its own docstring, and each run overwrites the
+# last, so only their final state matters. Hourly freshness of transit/anchorage
+# detection is worth having; hourly re-derivation of the ETA scoreboard is not.
 #
 # Install:
-#   sudo cp ~/quant/freight/backend/freight-analytics.service /etc/systemd/system/
-#   sudo cp ~/quant/freight/backend/freight-analytics.timer  /etc/systemd/system/
-#   sudo systemctl daemon-reload && sudo systemctl enable --now freight-analytics.timer
+#   sudo cp ~/quant/freight/backend/freight-analytics*.service /etc/systemd/system/
+#   sudo cp ~/quant/freight/backend/freight-analytics*.timer   /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now freight-analytics.timer freight-analytics-derived.timer
 # Check:
-#   systemctl status freight-analytics.service freight-analytics.timer
+#   systemctl list-timers 'freight-analytics*'    # NOT status: see the note below
 #   journalctl -u freight-analytics.service -n 50 --no-pager
+#
+# Note, and it has caught three sessions running: `systemctl stop freight-analytics`
+# also stops freight-analytics.timer, because the timer Requires= the service.
+# After any hand-run, restart the TIMER and confirm with `systemctl list-timers`.
+# A green service status says nothing about whether anything is scheduled.
 
 [Unit]
-Description=Freight hub analytics batch job (transit/anchored/density detection)
+Description=Freight hub analytics incremental pass (transit/anchored/density detection)
 After=network-online.target
 
 [Service]
 Type=oneshot
 User=lbzgiu
 WorkingDirectory=/home/lbzgiu/quant/freight/backend
-ExecStart=/home/lbzgiu/quant/freight/backend/.venv/bin/python -m analytics.build
+ExecStart=/home/lbzgiu/quant/freight/backend/.venv/bin/python -m analytics.build --skip-derived
 StandardOutput=journal
 StandardError=journal
 
-# Memory guard. This job was OOM-killed three times (2026-07-20, 2026-07-26 x2) at
-# 4.0-5.0 GB RSS on a 7.6 GB box; each was a GLOBAL OOM, where the kernel picks the
-# largest process on the machine as the victim - postgres, the AIS collector and every
-# other live service were in the blast radius. MemoryMax confines an overrun to a cgroup
-# OOM that kills only this job. Swap is deliberately left unlimited: thrashing to a
-# slow finish beats dying. Raise only alongside a real fix to the ETA stage's footprint.
+# Memory guard. The full job was OOM-killed three times (2026-07-20, 2026-07-26 x2)
+# and then on every run of 2026-08-09 at 4.0-5.2 GB on a 7.6 GB box; each was a
+# GLOBAL OOM, where the kernel picks the largest process on the machine as the
+# victim - postgres, the AIS collector and every other live service were in the
+# blast radius. MemoryMax confines an overrun to a cgroup OOM that kills only this
+# job. Swap is deliberately left unlimited: thrashing to a slow finish beats dying.
+#
+# 3 GB rather than 5: without the derived stages this pass handles one snapshot
+# window (~150k rows) and measured 962 MB RSS / 6m31s. The cap is not set at 1 GB
+# because systemd's cgroup accounting runs above RSS - it counts the page cache
+# for the ~516 MB scratch DB copy, and on the full job it read 4.0-4.5 GB where
+# /usr/bin/time reported 3.87 GB. 3 GB leaves room for that and still guarantees
+# the hourly pass is never the machine's largest process.
 MemoryAccounting=yes
-MemoryMax=5G
+MemoryMax=3G
 
 [Install]
 WantedBy=multi-user.target

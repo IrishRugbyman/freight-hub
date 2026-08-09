@@ -1,0 +1,22 @@
+# Daily trigger for the full-history ETA/destination stages.
+#
+# 03:20 UTC: clear of the Equasis registry crawler (04:30) and the
+# MyShipTracking crawler (05:00), both of which are also long-running and would
+# otherwise contend for a 7.6 GB box. The odd minute avoids the top-of-hour
+# pile-up with the hourly incremental pass.
+#
+# Persistent=true so a run missed while the machine was down happens on the next
+# boot rather than being skipped for a day. RandomizedDelaySec is deliberately
+# not set: nothing else competes at this hour and a predictable start time makes
+# a failure easier to correlate in the journal.
+
+[Unit]
+Description=Run freight hub analytics derived stages daily
+Requires=freight-analytics-derived.service
+
+[Timer]
+OnCalendar=*-*-* 03:20:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

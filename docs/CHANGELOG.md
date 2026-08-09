@@ -44,6 +44,19 @@ credits it with a saving it does not deliver. An earlier note in this session cl
 ~1.4 GB peak was wrong: that came from 60-second RSS sampling that missed the peak
 between polls.
 
+**Split hourly/daily, which is the structural half of the fix.** Under systemd's own
+cgroup accounting - authoritative, and higher than `/usr/bin/time` RSS because it counts
+the page cache for the ~516 MB scratch DB copy - two consecutive successful runs read
+**4.0 GB and 4.1 GB against the 5 GB cap**, each consuming **42 minutes of CPU**, on an
+*hourly* timer: 14:38-15:14, then 15:14-15:50. The job was running essentially back to
+back and the box was never idle. The derived stages are the entire cost and they do not
+depend on the incremental window, so `freight-analytics.service` now runs
+`--skip-derived` hourly (**6m31s, 962 MB**, identical detector output: anchored 1065,
+density 1344, dark 25, spoof 285) and a new `freight-analytics-derived.service` runs the
+full pass daily at 03:20 UTC, clear of the registry (04:30) and MyShipTracking (05:00)
+crawlers. Hourly cap dropped to 3 GB so the frequent job can never be the machine's
+largest process; the daily one keeps 5 GB.
+
 **The honest read on headroom.** 3.87 GB against a 5 GB cap leaves 1.13 GB, which is not
 comfortable. Worse, in both runs `7d eta_serving` and `7f destination_serving` reported
 0.0s because the AIS feed was dead and no live vessel could be scored; in normal

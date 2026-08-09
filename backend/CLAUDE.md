@@ -61,9 +61,22 @@ Use `_fresh_cutoff()` / `_visible_cutoff()` in `main.py` rather than re-deriving
 | Unit | Cadence | Writes |
 |---|---|---|
 | `freight-api.service` | always on, `:8003` | nothing |
-| `freight-analytics.timer` | hourly | `data/freight_analytics.duckdb` |
+| `freight-analytics.timer` | hourly, `--skip-derived` | `data/freight_analytics.duckdb` |
+| `freight-analytics-derived.timer` | 03:20 daily, full pass | `data/freight_analytics.duckdb` |
 | `freight-registry.timer` | 04:30 daily | `data/vessel_registry.duckdb` + PG `vessels` |
 | `freight-mst.timer` | 05:00 daily | `data/mst.duckdb` |
+
+**The analytics job is split hourly/daily and the split is load-bearing.** The hourly pass
+runs the incremental detectors only (6m31s, 962 MB); the daily one adds the full-history
+ETA/destination stages 7b-7f (42 min CPU, 4.0-4.1 GB against a 5 GB cap). Run as one job
+on an hourly timer it ran back to back and the box was never idle. Do not fold them back
+together, and do not move the derived stages onto a shorter cadence without re-measuring:
+each run overwrites the last, so only their final state matters.
+
+**Check `systemctl list-timers 'freight-analytics*'`, never the service status.**
+`systemctl stop freight-analytics` also stops its timer, because the timer `Requires=` the
+service. Three separate sessions have left the timer inactive after hand-running the job
+and not noticed, because the service itself looked fine.
 
 `analytics/build.py` is incremental off a `meta_watermark` row with a 6 h overlap, idempotent
 (`INSERT OR REPLACE`), and writes to `freight_analytics.new.duckdb` before an atomic rename, so
@@ -82,10 +95,23 @@ and dies sooner. Recover a backlog with bounded passes, then one full run:
 
 `--skip-derived` skips `_run_derived_stages()` (7b-7e: ETA labels/samples/serving, destination,
 drift). Those read the **full AIS history** regardless of the watermark, so they dominate the
-footprint and grow daily; only their final state matters, so intermediate passes skip them.
-The unit carries `MemoryMax=5G` to keep an overrun a contained cgroup OOM rather than a global
-one that could pick postgres or the collector as its victim. Do not raise it without fixing the
-underlying footprint.
+footprint; only their final state matters, so intermediate passes skip them. It is now also the
+hourly unit's normal mode - see the split above.
+
+**Watch for the ratchet, because it has appeared twice in different places.** A window whose
+lower bound is a *minimum over accumulated history* grows by a day for every day the collector
+runs, even when the work per item is bounded. It killed the watermark loop in Aug 2026, and it
+was independently sitting in `eta_backtest.build_samples`, which took `min(arrival_ts) - 72h`
+over every arrival as its scan bound and so loaded all 25.2M snapshot rows to use 72-hour
+slices of them. That one is fixed by chunking (`_TRACK_CHUNK_DAYS`), with a test asserting the
+chunked output is frame-identical to the unchunked. If a stage's memory grows with calendar
+time rather than with workload, look for this shape first.
+
+`MemoryMax` keeps an overrun a contained cgroup OOM rather than a global one that could pick
+postgres or the collector as its victim: 3G hourly, 5G daily. Do not raise either without
+fixing the underlying footprint - and note systemd's cgroup accounting reads roughly 1.17x
+above `/usr/bin/time` RSS here, because it counts the page cache for the ~516 MB scratch copy,
+so size caps against `MemoryPeak` rather than against an RSS measurement.
 
 Per-account quotas on the crawlers are not tuning knobs: raising the Equasis rate locks the
 account for 7 days, and MyShipTracking is anonymous but IP-rate-limited. See the root CLAUDE.md.

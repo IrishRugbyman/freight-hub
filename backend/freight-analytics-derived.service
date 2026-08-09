@@ -1,0 +1,43 @@
+# freight-analytics-derived -- DAILY full-history pass for the freight hub.
+#
+# Runs the expensive half: stages 7b-7f (ETA label mining, destination labels,
+# ETA samples + sea-route enrichment + physics scoring, ETA serving, destination
+# serving, ETA drift watch). These read the whole AIS history rather than the
+# incremental window, and each run overwrites the last, so only their final state
+# matters - which is exactly why they do not need to run hourly.
+#
+# It invokes analytics.build with no flags, so it also performs the incremental
+# pass. That is deliberate and not duplicated work: the hourly job will already
+# have advanced the watermark, so this run's window is small, and running the
+# whole pipeline in one process keeps the atomic scratch->live swap covering both
+# halves. Splitting the swap would be the actual risk.
+#
+# Cost, measured 2026-08-09: 42 min CPU, 4.0-4.1 GB peak, dominated by stage 7c
+# (eta_samples, ~994s). Scheduled at 03:20 UTC, clear of the registry crawler
+# (04:30) and the MyShipTracking crawler (05:00).
+#
+# Install / check: see freight-analytics.service.
+
+[Unit]
+Description=Freight hub analytics derived stages (ETA + destination, full history)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=lbzgiu
+WorkingDirectory=/home/lbzgiu/quant/freight/backend
+ExecStart=/home/lbzgiu/quant/freight/backend/.venv/bin/python -m analytics.build
+StandardOutput=journal
+StandardError=journal
+
+# 5 GB, as the combined job had. Measured peak is 4.0-4.1 GB, so the margin is
+# under a gigabyte and it is not comfortable: where the remaining footprint sits
+# has not been instrumented (the two obvious candidates were checked and ruled
+# out - see docs/CHANGELOG.md 2026-08-09). Treat a cgroup OOM here as a signal to
+# measure, not to raise the number. Running daily and off-peak is what buys the
+# room to do that without the site degrading meanwhile.
+MemoryAccounting=yes
+MemoryMax=5G
+
+[Install]
+WantedBy=multi-user.target
