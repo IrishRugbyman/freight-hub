@@ -9,10 +9,12 @@ The live dispersion series reads ais_vessel_dispersion from commo.duckdb via loa
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json as _json
 import os
 import re as _re
 import tempfile
+import threading as _threading
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
@@ -508,8 +510,6 @@ def _canonical_origin(raw: str | None) -> str | None:
     return _canonical_port(origin) if origin else None
 
 
-import threading as _threading
-
 # In-process cache for the full live_positions DataFrame.
 # The AIS collector writes every ~150s holding a brief write lock. When the
 # Analytics page loads it fires ~15 simultaneous DB queries; without a cache
@@ -944,7 +944,6 @@ def vessel_state_endpoint(mmsi: int):
         [mmsi, datetime.now(UTC).replace(tzinfo=None) - timedelta(days=60)],
     )
     if not snap_df.empty:
-        rows = snap_df.itertuples()
         streak_start = None
         for row in snap_df.itertuples():
             ns = row.nav_status
@@ -1627,10 +1626,8 @@ def analytics_sts_risk(days: int = 30, min_risk: int = 0):
     for _, ev in events_df.iterrows():
         det = {}
         if ev.get("details"):
-            try:
+            with contextlib.suppress(Exception):
                 det = _json.loads(ev["details"])
-            except Exception:
-                pass
 
         mmsi_val = int(ev["mmsi"])
         mmsi2_val = int(ev["mmsi2"]) if ev.get("mmsi2") and str(ev["mmsi2"]) != "nan" else None
@@ -1818,7 +1815,7 @@ def analytics_reroutes(
         )
 
     # MMSI -> name + risk from live_positions then vessels
-    all_mmsis = list(set(int(m) for m in events_df["mmsi"].dropna().tolist()))
+    all_mmsis = list({int(m) for m in events_df["mmsi"].dropna().tolist()})
     mmsi_info: dict[int, dict] = {}
     if all_mmsis:
         ph = ",".join("?" * len(all_mmsis))
@@ -1837,7 +1834,7 @@ def analytics_reroutes(
 
     imo_risk: dict[int, dict] = {}
     _rr_imos = [_valid_imo(v.get("imo")) for v in mmsi_info.values()]
-    known_imos = list(set(i for i in _rr_imos if i is not None))
+    known_imos = list({i for i in _rr_imos if i is not None})
     if known_imos:
         reg_df = db.pg_query(
             "SELECT imo, risk_score, COALESCE(ofac_sanctioned, false) AS ofac_sanctioned "
@@ -1854,10 +1851,8 @@ def analytics_reroutes(
     for _, ev in events_df.iterrows():
         det = {}
         if ev.get("details"):
-            try:
+            with contextlib.suppress(Exception):
                 det = _json.loads(ev["details"])
-            except Exception:
-                pass
 
         mmsi_val = int(ev["mmsi"])
         info = mmsi_info.get(mmsi_val, {})
@@ -2286,7 +2281,7 @@ def analytics_transit_risk(chokepoint: str = "hormuz", days: int = 30, min_risk:
             rows=[],
         )
 
-    all_mmsis = list(set(int(m) for m in df["mmsi"].dropna().tolist()))
+    all_mmsis = list({int(m) for m in df["mmsi"].dropna().tolist()})
     mmsi_info: dict[int, dict] = {}
     if all_mmsis:
         ph = ",".join("?" * len(all_mmsis))
@@ -2306,7 +2301,7 @@ def analytics_transit_risk(chokepoint: str = "hormuz", days: int = 30, min_risk:
                 }
 
     imo_risk: dict[int, dict] = {}
-    known_imos = list(set(i for i in (_valid_imo(v.get("imo")) for v in mmsi_info.values()) if i))
+    known_imos = list({i for i in (_valid_imo(v.get("imo")) for v in mmsi_info.values()) if i})
     if known_imos:
         reg_df = db.pg_query(
             "SELECT imo, risk_score, COALESCE(ofac_sanctioned, false) AS ofac_sanctioned "
@@ -2472,7 +2467,7 @@ def analytics_anchorage_dwell(zone: str = "singapore_west", limit: int = 50):
         if m not in mmsi_imo:
             mmsi_imo[m] = None
 
-    known_imos = list(set(i for i in mmsi_imo.values() if i))
+    known_imos = list({i for i in mmsi_imo.values() if i})
     imo_risk: dict[int, dict] = {}
     if known_imos:
         reg_df = db.pg_query(
@@ -2670,7 +2665,7 @@ def analytics_cargo_transitions(days: int = 7, min_change: float = 2.0, segment:
         if m not in mmsi_imo:
             mmsi_imo[m] = None
 
-    known_imos = list(set(i for i in mmsi_imo.values() if i))
+    known_imos = list({i for i in mmsi_imo.values() if i})
     imo_risk: dict[int, dict] = {}
     if known_imos:
         reg_df = db.pg_query(
@@ -3863,7 +3858,7 @@ def analytics_slow_steamers(kind: str = "", limit: int = 50):
         )
 
     # Enrich with risk scores
-    all_imos = list(set(c["imo"] for c in candidates if c["imo"]))
+    all_imos = list({c["imo"] for c in candidates if c["imo"]})
     imo_risk: dict[int, dict] = {}
     if all_imos:
         reg_df = db.pg_query(
@@ -3961,7 +3956,7 @@ def analytics_market_summary():
     if not lp_df.empty:
         for (segment, kind), grp in lp_df.groupby(["segment", "kind"]):
             seg_total = len(grp)
-            seg_mmsis = set(int(m) for m in grp["mmsi"])
+            seg_mmsis = {int(m) for m in grp["mmsi"]}
             seg_laden = len(seg_mmsis & laden_mmsi)
             seg_ballast = len(seg_mmsis & ballast_mmsi)
             seg_unknown = seg_total - seg_laden - seg_ballast
@@ -4272,10 +4267,8 @@ def analytics_risk_events(min_risk: int = 25, days: int = 2, limit: int = 50):
 
         det: dict = {}
         if ev.get("details"):
-            try:
+            with contextlib.suppress(Exception):
                 det = _json.loads(ev["details"])
-            except Exception:
-                pass
 
         lat_val: float | None = None
         lon_val: float | None = None
@@ -5098,8 +5091,6 @@ def analytics_trade_lane_matrix(
             dest_regions=[],
             cells=[],
         )
-
-    fleet_mmsis = {int(r["mmsi"]) for _, r in lp_df.iterrows()}
 
     # Step 2: laden filter via vessel_state
     laden_mmsi: set[int] = set()
@@ -6170,7 +6161,6 @@ def analytics_cargo_state_changes(
             continue
 
         # Find nearest snapshot to start and end (within 2 hours)
-        snap_ts_arr = v_snaps["snapshot_ts"].values
         start_ts_ns = pd.Timestamp(start_ts)
         end_ts_ns = pd.Timestamp(end_ts)
 
@@ -6792,9 +6782,9 @@ def analytics_crude_on_water(crude_only: bool = True):
     if not vs_df.empty:
         for _, r in vs_df.iterrows():
             m = r.get("mmsi")
-            l = r.get("laden")
-            if m is not None and l is not None:
-                laden_map[int(m)] = str(l)
+            laden_val = r.get("laden")
+            if m is not None and laden_val is not None:
+                laden_map[int(m)] = str(laden_val)
 
     # 2. Get live tankers (use cache to avoid DB lock contention)
     live_df = _live_all()
@@ -7695,7 +7685,12 @@ def analytics_eta_trend():
     for run_ts_val, g in grouped:
         by_model = g.set_index("model")
 
-        def _mae(model_name: str) -> float | None:
+        # by_model is bound as a default rather than closed over: it is rebound
+        # every iteration, and a closure that captured it by reference would read
+        # whichever group happened to be current at call time. Correct today only
+        # because every call happens inside the same iteration - which is exactly
+        # the kind of accident that survives until someone defers the call.
+        def _mae(model_name: str, by_model: pd.DataFrame = by_model) -> float | None:
             if model_name not in by_model.index:
                 return None
             v = by_model.at[model_name, "med_abs_err_h"]
@@ -7954,7 +7949,7 @@ def analytics_eta_upcoming(
                     True if d_f >= 0.80 * design else (False if d_f <= 0.65 * design else None)
                 )
             else:
-                laden_b = True if d_f > 5 else False
+                laden_b = d_f > 5
         else:
             laden_b = None
 
