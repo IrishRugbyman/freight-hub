@@ -54,6 +54,13 @@ Promote to a phase only with a written plan:
   (c) national open feeds (Norway, Denmark, Finland) as an honest partial - about 3% of
   our rows, so a supplement and nothing more.
 
+- **Stop the analytics job nearly overlapping itself.** A full run takes 30-45 minutes on
+  an hourly timer, and the derived ETA stages (7b-7f) are what make it slow: they read the
+  full AIS history while the incremental detectors read only the window. The shape that
+  fits is `--max-window-hours` on the hourly incremental pass plus a separate daily pass
+  for the derived stages, which `_run_derived_stages` already supports via `skip_derived`.
+  Both flags exist and neither is wired into the unit.
+
 ---
 
 ## Deliberately Not Building

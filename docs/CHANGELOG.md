@@ -1,5 +1,86 @@
 # Freight Hub Changelog
 
+## 2026-08-09 (session 23) - the hourly analytics job was OOM-killed every run; the same ratchet as session 20, in a different place
+
+`freight-analytics` failed with `oom-kill` on every run of 2026-08-09 (08:33, 09:32,
+10:32, 11:19, 12:32), reaching ~5.2 GB against its 5 GB cgroup. Session 21 had pinned
+DuckDB to 2 GB and that limit was being applied correctly; the overrun was in pandas,
+which that fix explicitly did not cover.
+
+**Locating it.** The journal puts the kill after `destination_labels` logs its counts and
+before `eta_samples` (stage 7c) logs anything - it ran 14 minutes in silence, then died.
+`_run_derived_stages` says in its own docstring that 7b-7e read the full AIS history and
+are "the most memory-hungry part of the job", and the timer invokes `analytics.build`
+with neither `--max-window-hours` nor `skip_derived`, so every hourly run does all of it.
+
+**The bug, and it is the session-20 bug wearing a different hat.** Every arrival needs
+only its trailing `_MAX_LEAD_H` (72h) of track. But `build_samples` took
+`min(arrival_ts) - 72h` over the *entire* arrivals table as its scan lower bound. That
+bound only ever moves backwards, so the scan grew by one day for every day the collector
+ran while the data actually used stayed at 72 hours per arrival. With 117,067 arrivals
+spanning 2026-06-09 to 2026-07-26, it was loading all 25.2M snapshot rows into pandas to
+use 72-hour slices of them. Exactly the ratchet the watermark fix killed in session 20:
+a window whose lower bound is a minimum over accumulated history.
+
+Two costs compounded it. The **mmsi filter ran in pandas after the load**
+(`tracks[tracks["mmsi"].isin(mmsis)].copy()`), so every vessel's rows were materialised
+before ~19% of them were discarded - and the `.copy()` doubled the peak at that moment.
+And `rows` accumulated **2.4M Python dicts** of ~19 fields each across the whole build,
+which is several GB of interpreter objects before pandas ever sees them.
+
+**Fixed** by chunking the track load over arrival time (`_TRACK_CHUNK_DAYS`, 7 by
+default, env-overridable) and pushing both time bounds *and* the mmsi filter into SQL.
+Peak memory now scales with the chunk width rather than with the length of collected
+history, which is the property that was missing.
+
+**Measured, including the part that did not work.** Two full production runs. Chunking
+alone: completes, 39m01s wall, **peak 3.84 GB**, stage 7c builds and persists 3,095,683
+approach samples where every prior run that day died in that stage without logging a
+line. A second change - converting each chunk to columnar form instead of accumulating
+3.1M Python dicts - was expected to cut the peak substantially and **did not**: 35m24s,
+**peak 3.87 GB**, statistically identical. It is kept because holding millions of dicts
+is worse practice regardless, but it is documented in code as measured-neutral so nobody
+credits it with a saving it does not deliver. An earlier note in this session claiming a
+~1.4 GB peak was wrong: that came from 60-second RSS sampling that missed the peak
+between polls.
+
+**The honest read on headroom.** 3.87 GB against a 5 GB cap leaves 1.13 GB, which is not
+comfortable. Worse, in both runs `7d eta_serving` and `7f destination_serving` reported
+0.0s because the AIS feed was dead and no live vessel could be scored; in normal
+operation they add work on top of that peak. Where the remaining 3.87 GB sits has **not**
+been measured - the obvious candidates (the dict list, the metrics concat) were both
+checked and neither is it - so the next person should instrument rather than guess. The
+structural answer is the cadence split filed in ROADMAP: the derived stages do not need
+to run hourly.
+
+**This changes when rows are read, never which.** The central test asserts
+`pd.testing.assert_frame_equal` between the chunked build and the pre-fix whole-history
+loader on a fixture whose arrivals span five weeks, plus a parametrised check that chunk
+widths of 1, 3, 7 and 400 days all produce identical frames - the width is a memory knob
+and must never be a correctness one. 11 tests in `tests/test_eta_sample_chunking.py`.
+
+**Checked the neighbours for the same pattern**, since one instance of a ratchet suggests
+others: `eta_serving._trailing_speed` is bounded by `_TRAIL_H`, and `eta_labels`
+bbox-filters per target before reading. Neither shares it.
+
+**Also cleared 37 accumulated ruff errors in `app/main.py`**, which had made the
+pre-commit hook unusable on that file - every change touching it went in with
+`--no-verify`, silently disabling the check for everything else in the same commit. Most
+were mechanical, three were dead code (including a `fleet_mmsis` set built by `iterrows()`
+over the whole live-positions frame and never read, so its removal takes a full-frame
+Python-level scan out of that endpoint), and two were `B023` closure-binding warnings that
+turn out to be correct only by accident of call ordering, now bound explicitly.
+
+**Operational note, third occurrence.** `systemctl stop freight-analytics` also stops
+`freight-analytics.timer`. Sessions 20 and 21 both left the timer inactive after
+hand-running the job, and this session reproduced it. Restart the timer explicitly, and
+check `systemctl list-timers` rather than the service status.
+
+**Still open.** A full run takes 30-45 minutes on an hourly timer, so the job nearly
+overlaps itself and is why the box sat at load 21 during this session. The derived ETA
+stages almost certainly do not need to run hourly; `--max-window-hours` on the incremental
+pass plus a daily derived pass is the obvious shape, and it is not built.
+
 ## 2026-08-09 (session 22) - the site said nothing while it was broken; both free AIS fallbacks are now ruled out on their own terms
 
 The tracker had been serving an empty map since 2026-08-06 02:28 UTC and giving the

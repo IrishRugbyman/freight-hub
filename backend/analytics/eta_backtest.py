@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import logging
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -39,6 +40,13 @@ log = logging.getLogger(__name__)
 # Observation sampling.
 _MAX_LEAD_H = 72.0  # ignore fixes more than this long before arrival
 _SAMPLE_CADENCE_H = 1.0  # thin the approach track to ~1 fix per hour
+
+#: Width, in days of arrival time, of one track-loading chunk. Peak memory in
+#: `build_samples` scales with this rather than with the length of collected
+#: history, which is what stopped the hourly job being OOM-killed. Lower it if
+#: the box shrinks; raising it buys very little, since the per-chunk load is
+#: already a single ordered range scan.
+_TRACK_CHUNK_DAYS = float(os.environ.get("FREIGHT_ETA_TRACK_CHUNK_DAYS", "7"))
 _MIN_SOG_KN = 1.0  # a sample must be underway for a kinematic ETA
 
 # Lead buckets keyed to the roadmap's table (by ACTUAL remaining time).
@@ -147,24 +155,91 @@ def build_samples(
     arrivals["arrival_ts"] = pd.to_datetime(arrivals["arrival_ts"])
     arrivals["approach_start_ts"] = pd.to_datetime(arrivals["approach_start_ts"])
 
-    # Bulk-load every relevant vessel track in a SINGLE scan, then slice per
-    # arrival in pandas. Per-mmsi queries would be one full-table scan each
-    # (~15k scans at production scale); this is one scan + an in-memory groupby.
-    earliest_global = (arrivals["arrival_ts"] - pd.Timedelta(hours=_MAX_LEAD_H)).min()
-    mmsis = arrivals["mmsi"].astype("int64").unique().tolist()
+    # Each chunk is converted to columnar form immediately rather than
+    # accumulating one flat list of ~3.1M dicts. Measured on the full production
+    # history this made **no difference to peak RSS** (3.84 GB before, 3.87 GB
+    # after), so it is not the memory fix - the chunked track load below is. It
+    # is kept because holding millions of dicts is worse practice regardless, and
+    # it reduces allocator churn; it is documented here as measured-neutral so
+    # nobody credits it with a saving it does not deliver.
+    frames: list[pd.DataFrame] = []
+    for chunk in _arrival_chunks(arrivals):
+        track_by_mmsi = _load_tracks(ais_query, chunk)
+        if not track_by_mmsi:
+            continue
+        rows = _samples_for_chunk(chunk, track_by_mmsi)
+        del track_by_mmsi  # the frames are the memory; do not hold two chunks
+        if rows:
+            frames.append(pd.DataFrame(rows))
+        del rows
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
+
+
+def _arrival_chunks(arrivals: pd.DataFrame):
+    """Yield arrivals in contiguous `_TRACK_CHUNK_DAYS` slices of arrival time.
+
+    Why this exists: every arrival needs only its own trailing `_MAX_LEAD_H`
+    (72h) of track, but the loader used to take the *minimum* arrival time over
+    the whole table as its lower bound and scan from there. That bound only ever
+    moves backwards as history accumulates, so the scan grew by a day for every
+    day the collector ran while the data actually used stayed at 72h per
+    arrival. By 2026-08 it was pulling all 25.2M snapshot rows into pandas to
+    use 72-hour slices of them, and the job was OOM-killed every hour against
+    its 5 GB cgroup - the same ratchet shape as the 2026-08-05 watermark bug,
+    in a different place.
+
+    Chunking bounds peak memory by the chunk width rather than by the length of
+    history, and the total scanned rows stay the same. Output is unchanged: each
+    arrival still sees its complete 72h window, because the chunk's track load
+    extends `_MAX_LEAD_H` before the chunk's earliest arrival.
+    """
+    if arrivals.empty:
+        return
+    span = pd.Timedelta(days=_TRACK_CHUNK_DAYS)
+    lo = arrivals["arrival_ts"].min()
+    end = arrivals["arrival_ts"].max()
+    while lo <= end:
+        hi = lo + span
+        chunk = arrivals[(arrivals["arrival_ts"] >= lo) & (arrivals["arrival_ts"] < hi)]
+        if not chunk.empty:
+            yield chunk
+        lo = hi
+
+
+def _load_tracks(ais_query, chunk: pd.DataFrame) -> dict[int, pd.DataFrame]:
+    """Fixes for this chunk's vessels over this chunk's window, keyed by mmsi.
+
+    Both bounds are pushed into SQL. The mmsi filter used to run in pandas after
+    the load, which meant every vessel's rows were materialised only to throw
+    most of them away.
+    """
+    mmsis = chunk["mmsi"].astype("int64").unique().tolist()
+    if not mmsis:
+        return {}
+    lo = (chunk["arrival_ts"].min() - pd.Timedelta(hours=_MAX_LEAD_H)).to_pydatetime()
+    hi = chunk["arrival_ts"].max().to_pydatetime()
+    # mmsis come from the DB as int64 and are cast again here, so the inlined
+    # list cannot carry anything but digits. DuckDB has no list-parameter form
+    # that works across both the real and the test query helpers.
+    in_list = ",".join(str(int(m)) for m in mmsis)
     tracks = ais_query(
         "SELECT mmsi, snapshot_ts, lat, lon, sog, draught FROM ais_snapshots "
-        "WHERE snapshot_ts >= ? ORDER BY mmsi, snapshot_ts",
-        [earliest_global.to_pydatetime()],
+        f"WHERE snapshot_ts >= ? AND snapshot_ts <= ? AND mmsi IN ({in_list}) "
+        "ORDER BY mmsi, snapshot_ts",
+        [lo, hi],
     )
     if tracks is None or tracks.empty:
-        return pd.DataFrame()
-    tracks = tracks[tracks["mmsi"].isin(mmsis)].copy()
+        return {}
     tracks["snapshot_ts"] = pd.to_datetime(tracks["snapshot_ts"])
-    track_by_mmsi = {int(m): g for m, g in tracks.groupby("mmsi", sort=False)}
+    return {int(m): g for m, g in tracks.groupby("mmsi", sort=False)}
 
+
+def _samples_for_chunk(chunk: pd.DataFrame, track_by_mmsi: dict[int, pd.DataFrame]) -> list[dict]:
+    """Per-observation rows for one chunk of arrivals. Pure; no I/O."""
     rows: list[dict] = []
-    for mmsi, mgrp in arrivals.groupby("mmsi", sort=False):
+    for mmsi, mgrp in chunk.groupby("mmsi", sort=False):
         track = track_by_mmsi.get(int(mmsi))
         if track is None or track.empty:
             continue
@@ -181,9 +256,7 @@ def build_samples(
             # Trailing 6h median SOG at each fix (denoised speed feature). Computed
             # on the full window (time-ordered) before thinning so the trailing
             # window sees every fix, not just the kept ~hourly ones.
-            trail_full = (
-                window.set_index("snapshot_ts")["sog"].rolling("6h").median().to_numpy()
-            )
+            trail_full = window.set_index("snapshot_ts")["sog"].rolling("6h").median().to_numpy()
             # Thin to ~1 fix per cadence bucket (keep first fix in each bucket).
             bucket = np.floor(remaining_h / _SAMPLE_CADENCE_H).astype(int)
             keep = np.concatenate(([True], np.diff(bucket) != 0))
@@ -219,7 +292,7 @@ def build_samples(
                         "lead_bucket": lead_bucket(float(rem[j])),
                     }
                 )
-    return pd.DataFrame(rows)
+    return rows
 
 
 # ---------------------------------------------------------------------------
@@ -311,9 +384,7 @@ def _metric_rows(scored: pd.DataFrame, model: str, run_ts: datetime) -> list[dic
     return out
 
 
-def _apply_eta_fn(
-    samples: pd.DataFrame, eta_fn, has_interval: bool
-) -> pd.DataFrame:
+def _apply_eta_fn(samples: pd.DataFrame, eta_fn, has_interval: bool) -> pd.DataFrame:
     """Run eta_fn over every row of samples; return the scored frame.
 
     The returned frame has ``pred_h``, ``err_h``, and ``covered`` columns added.
@@ -372,9 +443,7 @@ def score(
     return pd.DataFrame(_metric_rows(scored, model, run_ts))
 
 
-def _metric_rows_by_target(
-    scored: pd.DataFrame, model: str, run_ts: datetime
-) -> list[dict]:
+def _metric_rows_by_target(scored: pd.DataFrame, model: str, run_ts: datetime) -> list[dict]:
     """Compute per-target_id accuracy metrics from a pre-scored frame."""
     out: list[dict] = []
     if scored.empty or "target_id" not in scored.columns:
@@ -438,15 +507,21 @@ def score_by_target(
     return _metric_rows_by_target(scored, model, run_ts)
 
 
-def write_metrics_by_target(
-    conn: duckdb.DuckDBPyConnection, metrics: list[dict]
-) -> None:
+def write_metrics_by_target(conn: duckdb.DuckDBPyConnection, metrics: list[dict]) -> None:
     """Persist per-target metric rows into eta_metrics_by_target."""
     conn.execute(_TARGET_METRICS_SCHEMA)
     rows = [
-        (r["run_ts"], r["model"], r["target_id"], r["n"],
-         r["med_abs_err_h"], r["bias_h"], r["mape"],
-         r["p90_abs_err_h"], r["interval_coverage"])
+        (
+            r["run_ts"],
+            r["model"],
+            r["target_id"],
+            r["n"],
+            r["med_abs_err_h"],
+            r["bias_h"],
+            r["mape"],
+            r["p90_abs_err_h"],
+            r["interval_coverage"],
+        )
         for r in metrics
     ]
     conn.executemany(
