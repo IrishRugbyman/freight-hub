@@ -31,4 +31,4 @@ jobs:
             npm run build
 
             echo "=== Done ==="
-            sudo systemctl is-active freight-api
+            systemctl is-active freight-api
