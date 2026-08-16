@@ -12,7 +12,9 @@
 
 [Unit]
 Description=Run freight hub analytics derived stages daily
-Requires=freight-analytics-derived.service
+# NO Requires= here. It would make this timer start its service at boot as
+# well as on schedule - see ~/ops/fix-timer-requires.sh. [Timer] Unit= already
+# defaults to the same-named .service.
 
 [Timer]
 OnCalendar=*-*-* 03:20:00

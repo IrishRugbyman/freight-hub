@@ -1,6 +1,8 @@
 [Unit]
 Description=Run Equasis registry crawler once daily
-Requires=freight-registry.service
+# NO Requires= here. It would make this timer start its service at boot as
+# well as on schedule - see ~/ops/fix-timer-requires.sh. [Timer] Unit= already
+# defaults to the same-named .service.
 
 [Timer]
 OnBootSec=15min

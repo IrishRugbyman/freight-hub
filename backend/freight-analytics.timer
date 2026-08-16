@@ -3,7 +3,9 @@
 
 [Unit]
 Description=Run freight hub analytics batch job hourly
-Requires=freight-analytics.service
+# NO Requires= here. It would make this timer start its service at boot as
+# well as on schedule - see ~/ops/fix-timer-requires.sh. [Timer] Unit= already
+# defaults to the same-named .service.
 
 [Timer]
 OnCalendar=hourly

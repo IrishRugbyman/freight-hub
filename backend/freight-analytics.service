@@ -36,7 +36,7 @@ After=network-online.target
 Type=oneshot
 User=lbzgiu
 WorkingDirectory=/home/lbzgiu/quant/freight/backend
-ExecStart=/home/lbzgiu/quant/freight/backend/.venv/bin/python -m analytics.build --skip-derived
+ExecStart=/usr/bin/flock -w 3600 /home/lbzgiu/quant/freight/backend/data/.analytics.lock /home/lbzgiu/quant/freight/backend/.venv/bin/python -m analytics.build --skip-derived
 StandardOutput=journal
 StandardError=journal
 
