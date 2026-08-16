@@ -17,7 +17,6 @@ import heapq
 import json
 import math
 import sys
-import tempfile
 import zipfile
 from pathlib import Path
 
@@ -27,15 +26,20 @@ TMP_DIR = Path(__file__).parent / "data" / "eu_pipelines_tmp"
 
 # ---- Haversine ----
 
+
 def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     R = 6371.0
     dlat = math.radians(lat2 - lat1)
     dlon = math.radians(lon2 - lon1)
-    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
+    a = (
+        math.sin(dlat / 2) ** 2
+        + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
+    )
     return 2 * R * math.asin(math.sqrt(a))
 
 
 # ---- RDP simplification (same as EIA ingest) ----
+
 
 def _perp_dist(p: tuple, a: tuple, b: tuple) -> float:
     if a == b:
@@ -72,6 +76,7 @@ def simplify_polyline(coords: list[tuple], epsilon: float = 0.02) -> list[tuple]
 
 
 # ---- Build graph from IGGIELGN ----
+
 
 def load_iggielgn(geojson_path: Path) -> dict:
     """Parse IGGIELGN_PipeSegments.geojson into a routing graph.
@@ -137,8 +142,10 @@ def load_iggielgn(geojson_path: Path) -> dict:
 
 # ---- KD-tree for nearest-node lookup ----
 
+
 def _build_kdtree(pts: list[tuple]) -> list:
     """Simple k-d tree on (lat, lon) pairs. Returns the root node."""
+
     # Each node: [point_idx, left, right]
     def build(idxs: list[int], depth: int):
         if not idxs:
@@ -146,7 +153,8 @@ def _build_kdtree(pts: list[tuple]) -> list:
         axis = depth % 2  # 0=lat, 1=lon
         idxs.sort(key=lambda i: pts[i][axis])
         mid = len(idxs) // 2
-        return [idxs[mid], build(idxs[:mid], depth + 1), build(idxs[mid + 1:], depth + 1)]
+        return [idxs[mid], build(idxs[:mid], depth + 1), build(idxs[mid + 1 :], depth + 1)]
+
     return build(list(range(len(pts))), 0)
 
 
@@ -167,7 +175,7 @@ def _kd_nearest(tree, pts: list[tuple], query: tuple):
         diff = query[axis] - pt[axis]
         first, second = (left, right) if diff <= 0 else (right, left)
         search(first, depth + 1)
-        if diff ** 2 < best[1]:
+        if diff**2 < best[1]:
             search(second, depth + 1)
 
     search(tree, 0)
@@ -175,6 +183,7 @@ def _kd_nearest(tree, pts: list[tuple], query: tuple):
 
 
 # ---- Dijkstra ----
+
 
 def dijkstra(adj: dict, start: int, end: int) -> list[int] | None:
     """Return list of segment indices forming shortest path start->end, or None."""
@@ -206,6 +215,7 @@ def dijkstra(adj: dict, start: int, end: int) -> list[int] | None:
 
 # ---- Reconstruct polyline from path ----
 
+
 def path_to_coords(path: list[int], segments: list[dict], start_node: int) -> list[tuple]:
     """Build an ordered (lat, lon) polyline from a list of segment indices."""
     coords: list[tuple] = []
@@ -231,9 +241,9 @@ def path_to_coords(path: list[int], segments: list[dict], start_node: int) -> li
 
 # ---- WM pipeline loading ----
 
+
 def load_wm_eu_pipelines() -> list[dict]:
     """Load World Monitor EU pipelines with start/end coordinates."""
-    import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "shared" / "market-data"))
     from loaders.worldmonitor import load_pipeline_registry
 
@@ -241,10 +251,50 @@ def load_wm_eu_pipelines() -> list[dict]:
     df = df.dropna(subset=["start_lat", "start_lon", "end_lat", "end_lon"])
 
     eu_countries = {
-        "DE", "FR", "GB", "IT", "ES", "NL", "BE", "AT", "CH", "PL", "CZ", "SK",
-        "HU", "RO", "BG", "GR", "RS", "HR", "TR", "NO", "SE", "DK", "FI", "PT",
-        "UA", "BY", "MD", "AL", "MK", "BA", "ME", "SI", "LT", "LV", "EE", "LU",
-        "IE", "MT", "CY", "AZ", "GE", "DZ", "LY", "RU",
+        "DE",
+        "FR",
+        "GB",
+        "IT",
+        "ES",
+        "NL",
+        "BE",
+        "AT",
+        "CH",
+        "PL",
+        "CZ",
+        "SK",
+        "HU",
+        "RO",
+        "BG",
+        "GR",
+        "RS",
+        "HR",
+        "TR",
+        "NO",
+        "SE",
+        "DK",
+        "FI",
+        "PT",
+        "UA",
+        "BY",
+        "MD",
+        "AL",
+        "MK",
+        "BA",
+        "ME",
+        "SI",
+        "LT",
+        "LV",
+        "EE",
+        "LU",
+        "IE",
+        "MT",
+        "CY",
+        "AZ",
+        "GE",
+        "DZ",
+        "LY",
+        "RU",
     }
     mask = df["from_country"].isin(eu_countries) | df["to_country"].isin(eu_countries)
     eu = df[mask]
@@ -268,6 +318,7 @@ def load_wm_eu_pipelines() -> list[dict]:
 
 # ---- Download helper ----
 
+
 def download_iggielgn(tmp_dir: Path) -> Path:
     """Download and extract IGGIELGN_PipeSegments.geojson; return path to file."""
     geojson_path = tmp_dir / "IGGIELGN_PipeSegments.geojson"
@@ -279,7 +330,8 @@ def download_iggielgn(tmp_dir: Path) -> Path:
     zip_path = tmp_dir / "IGGIELGN.zip"
 
     import urllib.request
-    print(f"Downloading IGGIELGN.zip from Zenodo (~21 MB)...")
+
+    print("Downloading IGGIELGN.zip from Zenodo (~21 MB)...")
     urllib.request.urlretrieve(IGGIELGN_URL, zip_path)
     print(f"  Downloaded {zip_path.stat().st_size // 1024 // 1024} MB")
 
@@ -296,6 +348,7 @@ def download_iggielgn(tmp_dir: Path) -> Path:
 
 
 # ---- Main ----
+
 
 def main():
     import duckdb
@@ -346,7 +399,9 @@ def main():
         # Skip if nearest nodes are very far from WM coords (data gap)
         MAX_SNAP_KM = 150
         if dist_to_start > MAX_SNAP_KM and dist_to_end > MAX_SNAP_KM:
-            print(f"  SKIP {wm_id}: snap dist too large ({dist_to_start:.0f}km to start, {dist_to_end:.0f}km to end)")
+            print(
+                f"  SKIP {wm_id}: snap dist too large ({dist_to_start:.0f}km to start, {dist_to_end:.0f}km to end)"
+            )
             skipped += 1
             continue
 
@@ -407,13 +462,21 @@ def main():
     for r in results:
         con.execute(
             "INSERT INTO eu_pipeline_routes VALUES (?,?,?,?,?,?)",
-            [r["wm_id"], r["n_points"], r["path_km"], r["snap_km_start"], r["snap_km_end"], r["route_json"]],
+            [
+                r["wm_id"],
+                r["n_points"],
+                r["path_km"],
+                r["snap_km_start"],
+                r["snap_km_end"],
+                r["route_json"],
+            ],
         )
     con.close()
     print(f"Stored {len(results)} EU pipeline routes.")
 
     # Cleanup tmp dir
     import shutil
+
     if TMP_DIR.exists():
         shutil.rmtree(TMP_DIR)
         print(f"Cleaned up {TMP_DIR}")

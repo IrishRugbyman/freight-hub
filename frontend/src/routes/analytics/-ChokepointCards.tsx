@@ -368,7 +368,8 @@ export function TransitRateTimelineCard() {
     if (!data?.points.length) return []
     const pts = data.points
     const hours_set: Set<string> = new Set(pts.map(p => p.hour))
-    const sorted_hours = [...hours_set].sort()
+    // hour is an ISO timestamp, so lexicographic order is chronological order.
+    const sorted_hours = [...hours_set].sort((a, b) => a.localeCompare(b))
     return sorted_hours.map(h => {
       const row: Record<string, string | number> = {
         hour: new Date(h).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit' }),
@@ -475,7 +476,7 @@ export function TransitsCard() {
       if (!byDate[row.date]) byDate[row.date] = {}
       byDate[row.date][row.direction] = (byDate[row.date][row.direction] ?? 0) + row.count
     }
-    for (const [date, dirs] of Object.entries(byDate).sort()) {
+    for (const [date, dirs] of Object.entries(byDate).sort(([a], [b]) => a.localeCompare(b))) {
       chartData.push({ date: date.slice(5), ...dirs })
     }
   }

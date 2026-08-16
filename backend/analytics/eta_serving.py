@@ -279,7 +279,7 @@ def _candidate_pairs(
     for vi, v in enumerate(live.itertuples()):
         lat, lon = float(v.lat), float(v.lon)
         gc = haversine_nm_vec(t_lat, t_lon, lat, lon)
-        cand_idx = np.where(gc <= _MAX_PRED_GC_NM)[0]
+        cand_idx = np.nonzero(gc <= _MAX_PRED_GC_NM)[0]
         if cand_idx.size == 0:
             continue
         course = None
@@ -535,16 +535,20 @@ def build_predictions(
     interval = _fit_interval(conn)
     ml_model = ETAModel.load()  # None if no promoted artifact -> physics-only serving
     if ml_model is not None:
-        log.info("build_predictions: loaded ETA ML model (%d promoted cells)",
-                 len(ml_model.champion_map))
+        log.info(
+            "build_predictions: loaded ETA ML model (%d promoted cells)", len(ml_model.champion_map)
+        )
     laden_by_mmsi = _laden_map(conn)
     trail_by_mmsi = _trailing_speed(ais_query, live["mmsi"].astype("int64").unique().tolist(), now)
     cache = RouteCache(conn)
 
     # Pass 1: collect candidates and pre-warm route cache for all unique pairs
     pairs = _candidate_pairs(live, targets)
-    log.info("build_predictions: %d candidate (vessel, target) pairs for %d live vessels",
-             len(pairs), len(live))
+    log.info(
+        "build_predictions: %d candidate (vessel, target) pairs for %d live vessels",
+        len(pairs),
+        len(live),
+    )
     # unique_cells: maps (clat, clon, tid) -> target dict (for cache.distance)
     unique_cell_target: dict[tuple[float, float, str], dict] = {}
     for _vi, lat, lon, _gc, ti in pairs:
@@ -557,13 +561,18 @@ def build_predictions(
                 "lat": float(t["lat"]),
                 "lon": float(t["lon"]),
             }
-    log.info("build_predictions: pre-warming route cache for %d unique (cell, target) pairs",
-             len(unique_cell_target))
+    log.info(
+        "build_predictions: pre-warming route cache for %d unique (cell, target) pairs",
+        len(unique_cell_target),
+    )
     for (clat, clon, _tid), target_dict in unique_cell_target.items():
         cache.distance(clat, clon, target_dict)
     cache.flush()
-    log.info("build_predictions: route cache pre-warm done (%d hits, %d misses)",
-             cache.hits, cache.misses)
+    log.info(
+        "build_predictions: route cache pre-warm done (%d hits, %d misses)",
+        cache.hits,
+        cache.misses,
+    )
 
     # Pass 2: assemble a per-pair observation frame with the full feature set
     # (route/gc distance, effective-speed inputs, and the Phase-C/-D features the

@@ -32,40 +32,41 @@ ANALYTICS_DB = Path(__file__).parent / "data" / "freight_analytics.duckdb"
 # Split large regions to stay within Overpass response limits.
 REGIONS = [
     # Middle East
-    ("gulf_states",     10.0,  24.0,  35.0,  60.0),
-    ("iran_east",       25.0,  44.0,  42.0,  65.0),
+    ("gulf_states", 10.0, 24.0, 35.0, 60.0),
+    ("iran_east", 25.0, 44.0, 42.0, 65.0),
     # Russia east (IGGIELGN only covers to ~60E)
-    ("russia_east",     45.0,  55.0,  75.0, 100.0),
-    ("russia_far_east", 40.0,  90.0,  75.0, 180.0),
+    ("russia_east", 45.0, 55.0, 75.0, 100.0),
+    ("russia_far_east", 40.0, 90.0, 75.0, 180.0),
     # Central + South Asia
-    ("central_asia_e",  30.0,  55.0,  50.0,  80.0),
-    ("south_asia",       5.0,  60.0,  37.0, 100.0),
+    ("central_asia_e", 30.0, 55.0, 50.0, 80.0),
+    ("south_asia", 5.0, 60.0, 37.0, 100.0),
     # Southeast + East Asia
-    ("southeast_asia", -15.0,  90.0,  25.0, 145.0),
-    ("east_asia",       15.0,  95.0,  55.0, 145.0),
+    ("southeast_asia", -15.0, 90.0, 25.0, 145.0),
+    ("east_asia", 15.0, 95.0, 55.0, 145.0),
     # Africa
-    ("africa_north",    10.0, -18.0,  38.0,  25.0),
-    ("africa_east",    -35.0,  24.0,  15.0,  55.0),
-    ("africa_west",    -10.0, -18.0,  20.0,  25.0),
+    ("africa_north", 10.0, -18.0, 38.0, 25.0),
+    ("africa_east", -35.0, 24.0, 15.0, 55.0),
+    ("africa_west", -10.0, -18.0, 20.0, 25.0),
     # Americas - North
-    ("alaska_canada_w",  48.0, -170.0, 73.0, -100.0),
-    ("canada_east",      42.0, -100.0, 65.0,  -52.0),
-    ("us_west",          24.0, -130.0, 50.0,  -100.0),
-    ("us_central",       24.0, -100.0, 50.0,   -86.0),
-    ("us_east",          24.0,  -86.0, 50.0,   -55.0),
-    ("mexico_central_am", 5.0,  -95.0, 34.0,   -75.0),
+    ("alaska_canada_w", 48.0, -170.0, 73.0, -100.0),
+    ("canada_east", 42.0, -100.0, 65.0, -52.0),
+    ("us_west", 24.0, -130.0, 50.0, -100.0),
+    ("us_central", 24.0, -100.0, 50.0, -86.0),
+    ("us_east", 24.0, -86.0, 50.0, -55.0),
+    ("mexico_central_am", 5.0, -95.0, 34.0, -75.0),
     # South America
-    ("south_america_n",   -5.0, -85.0, 15.0,  -50.0),
-    ("south_america_s",  -60.0, -80.0,  -5.0,  -30.0),
+    ("south_america_n", -5.0, -85.0, 15.0, -50.0),
+    ("south_america_s", -60.0, -80.0, -5.0, -30.0),
     # Oceania
-    ("australia",        -50.0, 105.0,   0.0, 180.0),
+    ("australia", -50.0, 105.0, 0.0, 180.0),
 ]
 
 # OSM substance/pipeline-type filters that indicate energy pipelines
-_OIL_GAS_FILTER = "~\"gas|oil|petroleum|crude|fuel|lpg|ngl|condensate\""
+_OIL_GAS_FILTER = '~"gas|oil|petroleum|crude|fuel|lpg|ngl|condensate"'
 
 
 # ---- Haversine ----
+
 
 def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     R = 6371.0
@@ -79,6 +80,7 @@ def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 # ---- RDP simplification ----
+
 
 def _perp_dist(p: tuple, a: tuple, b: tuple) -> float:
     if a == b:
@@ -128,7 +130,8 @@ def _wait_for_slot(max_wait: int = 120) -> None:
     while waited < max_wait:
         r = subprocess.run(
             ["curl", "-s", "--max-time", "10", "https://overpass-api.de/api/status"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
         if "Slot available after:" in r.stdout:
             # Extract seconds to wait
@@ -155,7 +158,7 @@ def _overpass_query(ql: str, timeout_s: int = 180) -> list[dict] | None:
     for attempt in range(3):
         endpoint = _OVERPASS_ENDPOINTS[_ep_idx % len(_OVERPASS_ENDPOINTS)]
         result = subprocess.run(
-            ["curl", "-s", f"--max-time", str(timeout_s + 15), "-X", "POST", endpoint, "--data", ql],
+            ["curl", "-s", "--max-time", str(timeout_s + 15), "-X", "POST", endpoint, "--data", ql],
             capture_output=True,
             text=True,
         )
@@ -186,8 +189,8 @@ def fetch_pipeline_ways(south: float, west: float, north: float, east: float) ->
     ql = (
         f"[out:json][timeout:180];"
         f"("
-        f"way[\"man_made\"=\"pipeline\"][\"substance\"{_OIL_GAS_FILTER}]({bbox});"
-        f"way[\"man_made\"=\"pipeline\"][\"pipeline\"{_OIL_GAS_FILTER}]({bbox});"
+        f'way["man_made"="pipeline"]["substance"{_OIL_GAS_FILTER}]({bbox});'
+        f'way["man_made"="pipeline"]["pipeline"{_OIL_GAS_FILTER}]({bbox});'
         f");"
         f"out geom;"
     )
@@ -213,6 +216,7 @@ def fetch_pipeline_ways(south: float, west: float, north: float, east: float) ->
 
 
 # ---- Build routing graph ----
+
 
 def build_graph(ways: list[dict]) -> dict:
     """Build adjacency graph from OSM ways.
@@ -247,6 +251,7 @@ def build_graph(ways: list[dict]) -> dict:
 
 # ---- KD-tree ----
 
+
 def build_kdtree(pts: list[tuple]) -> list:
     def build(idxs: list[int], depth: int):
         if not idxs:
@@ -255,6 +260,7 @@ def build_kdtree(pts: list[tuple]) -> list:
         idxs.sort(key=lambda i: pts[i][axis])
         mid = len(idxs) // 2
         return [idxs[mid], build(idxs[:mid], depth + 1), build(idxs[mid + 1 :], depth + 1)]
+
     return build(list(range(len(pts))), 0)
 
 
@@ -276,7 +282,7 @@ def kd_nearest(tree, pts: list[tuple], query: tuple) -> int | None:
         diff = query[axis] - pt[axis]
         first, second = (left, right) if diff <= 0 else (right, left)
         search(first, depth + 1)
-        if diff ** 2 < best[1]:
+        if diff**2 < best[1]:
             search(second, depth + 1)
 
     search(tree, 0)
@@ -284,6 +290,7 @@ def kd_nearest(tree, pts: list[tuple], query: tuple) -> int | None:
 
 
 # ---- Dijkstra ----
+
 
 def dijkstra(adj: dict, start: int, end: int) -> list[int] | None:
     dist = {start: 0.0}
@@ -310,7 +317,9 @@ def dijkstra(adj: dict, start: int, end: int) -> list[int] | None:
     return None
 
 
-def path_to_coords(path: list[int], ways: list[dict], start_node_idx: int, endpoints: list[tuple]) -> list[tuple]:
+def path_to_coords(
+    path: list[int], ways: list[dict], start_node_idx: int, endpoints: list[tuple]
+) -> list[tuple]:
     coords: list[tuple] = []
     cur_ep = endpoints[start_node_idx]
 
@@ -334,6 +343,7 @@ def path_to_coords(path: list[int], ways: list[dict], start_node_idx: int, endpo
 
 
 # ---- Load unrouted WM pipelines ----
+
 
 def load_unrouted_wm() -> list[dict]:
     sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "shared" / "market-data"))
@@ -430,6 +440,7 @@ def route_pipelines_on_graph(graph: dict, pipes: list[dict]) -> list[dict]:
 
 # ---- RexTag-only OSM name match ----
 
+
 def route_rextag_by_name(slugs: list[dict]) -> list[dict]:
     """Try to find each RexTag pipeline in OSM by name and return its geometry."""
     results = []
@@ -438,9 +449,9 @@ def route_rextag_by_name(slugs: list[dict]) -> list[dict]:
         # Query OSM for pipeline ways with this name in the continental US
         safe_name = name.replace('"', '\\"').replace("&", "and")
         ql = (
-            f'[out:json][timeout:30];'
+            f"[out:json][timeout:30];"
             f'way["man_made"="pipeline"]["name"~"{safe_name}",i](20,-130,55,-65);'
-            f'out geom;'
+            f"out geom;"
         )
         elements = _overpass_query(ql, timeout_s=30)
         if not elements:
@@ -476,6 +487,7 @@ def route_rextag_by_name(slugs: list[dict]) -> list[dict]:
 
 
 # ---- Main ----
+
 
 def main():
     import duckdb
@@ -519,10 +531,17 @@ def main():
         # Filter pipelines whose start OR end falls in or near this region (2-degree padding)
         pad = 2.0
         regional_pipes = [
-            p for p in unrouted_wm
+            p
+            for p in unrouted_wm
             if (
-                (south - pad <= p["start_lat"] <= north + pad and west - pad <= p["start_lon"] <= east + pad)
-                or (south - pad <= p["end_lat"] <= north + pad and west - pad <= p["end_lon"] <= east + pad)
+                (
+                    south - pad <= p["start_lat"] <= north + pad
+                    and west - pad <= p["start_lon"] <= east + pad
+                )
+                or (
+                    south - pad <= p["end_lat"] <= north + pad
+                    and west - pad <= p["end_lon"] <= east + pad
+                )
             )
         ]
         if not regional_pipes:
@@ -537,7 +556,7 @@ def main():
         print(f"  Got {len(ways)} OSM pipeline ways")
 
         if len(ways) < 5:
-            print(f"  Too sparse - skip")
+            print("  Too sparse - skip")
             continue
 
         graph = build_graph(ways)
@@ -561,7 +580,14 @@ def main():
                 try:
                     con_tmp.execute(
                         "INSERT OR REPLACE INTO global_pipeline_routes VALUES (?,?,?,?,?,?)",
-                        [r["wm_id"], r["n_points"], r["path_km"], r["snap_km_start"], r["snap_km_end"], r["route_json"]],
+                        [
+                            r["wm_id"],
+                            r["n_points"],
+                            r["path_km"],
+                            r["snap_km_start"],
+                            r["snap_km_end"],
+                            r["route_json"],
+                        ],
                     )
                 except Exception as exc:
                     print(f"  WARN: {r['wm_id']}: {exc}")
@@ -590,7 +616,14 @@ def main():
                 try:
                     con_rt.execute(
                         "INSERT OR REPLACE INTO global_pipeline_routes VALUES (?,?,?,?,?,?)",
-                        [r["wm_id"], r["n_points"], r["path_km"], r["snap_km_start"], r["snap_km_end"], r["route_json"]],
+                        [
+                            r["wm_id"],
+                            r["n_points"],
+                            r["path_km"],
+                            r["snap_km_start"],
+                            r["snap_km_end"],
+                            r["route_json"],
+                        ],
                     )
                 except Exception as exc:
                     print(f"  WARN: {r['wm_id']}: {exc}")

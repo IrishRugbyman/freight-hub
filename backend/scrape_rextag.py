@@ -27,13 +27,29 @@ DELAY = 1.5
 
 # Slugs that are NOT pipeline pages (marketing, legal, dataset product pages)
 _NON_PIPELINE_PREFIXES = (
-    "accelerating-", "cutting-", "infrastructure-data-",
-    "upstream-", "power-renewables-", "crude-oil-dataset",
-    "telecommunications-", "other-", "refined-", "energy-datalink-",
-    "natural-gas-pipelines-informational-", "natural-gas-dataset",
-    "american-gas-", "services", "about-us", "faq", "contact-us",
-    "rextag-directory", "oil-gas-production", "terms-conditions",
-    "rextag-energy-datalink-", "privacy-policy", "return-policy",
+    "accelerating-",
+    "cutting-",
+    "infrastructure-data-",
+    "upstream-",
+    "power-renewables-",
+    "crude-oil-dataset",
+    "telecommunications-",
+    "other-",
+    "refined-",
+    "energy-datalink-",
+    "natural-gas-pipelines-informational-",
+    "natural-gas-dataset",
+    "american-gas-",
+    "services",
+    "about-us",
+    "faq",
+    "contact-us",
+    "rextag-directory",
+    "oil-gas-production",
+    "terms-conditions",
+    "rextag-energy-datalink-",
+    "privacy-policy",
+    "return-policy",
 )
 
 _LABEL_MAP = {
@@ -48,13 +64,13 @@ _LABEL_MAP = {
 
 # US state abbreviations for extracting states_served from description text
 _STATE_RE = re.compile(
-    r'\b(Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|'
-    r'Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|Louisiana|'
-    r'Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|Missouri|Montana|'
-    r'Nebraska|Nevada|New Hampshire|New Jersey|New Mexico|New York|North Carolina|'
-    r'North Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|South Carolina|'
-    r'South Dakota|Tennessee|Texas|Utah|Vermont|Virginia|Washington|West Virginia|'
-    r'Wisconsin|Wyoming)\b'
+    r"\b(Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|"
+    r"Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|Louisiana|"
+    r"Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|Missouri|Montana|"
+    r"Nebraska|Nevada|New Hampshire|New Jersey|New Mexico|New York|North Carolina|"
+    r"North Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|South Carolina|"
+    r"South Dakota|Tennessee|Texas|Utah|Vermont|Virginia|Washington|West Virginia|"
+    r"Wisconsin|Wyoming)\b"
 )
 
 
@@ -76,7 +92,7 @@ def fetch_slugs(session: requests.Session) -> list[tuple[str, str]]:
         href = a["href"]
         if not href.startswith("/pages/"):
             continue
-        slug = href[len("/pages/"):]
+        slug = href[len("/pages/") :]
         if not slug or slug in seen:
             continue
         seen.add(slug)
@@ -97,14 +113,23 @@ def parse_pipeline_page(soup: BeautifulSoup, name: str, slug: str) -> dict:
             # Skip if the next line is itself a label
             if val.lower() in _LABEL_MAP:
                 continue
-            if label_key in ("length_miles", "capacity_bcfd", "seasonal_storage", "compressor_stations"):
+            if label_key in (
+                "length_miles",
+                "capacity_bcfd",
+                "seasonal_storage",
+                "compressor_stations",
+            ):
                 m = re.search(r"[\d.]+", val.replace(",", ""))
                 record[label_key] = float(m.group()) if m else None
             else:
                 record.setdefault(label_key, val)
 
     # Extract states from the description paragraph
-    desc_match = re.search(r"Pipeline Description:\s*(.+?)(?:\n|Major Receipt)", "\n".join(lines))
+    # \s*? then \S pins where the capture starts, so the two quantifiers cannot
+    # both claim the same run of whitespace (that ambiguity is what backtracks).
+    desc_match = re.search(
+        r"Pipeline Description:\s*?(\S[^\n]*?)(?:\n|Major Receipt)", "\n".join(lines)
+    )
     if desc_match:
         desc = desc_match.group(1)
         states = sorted(set(_STATE_RE.findall(desc)))
@@ -115,13 +140,38 @@ def parse_pipeline_page(soup: BeautifulSoup, name: str, slug: str) -> dict:
     return record
 
 
+_BASE_DIR = Path(__file__).resolve().parent
+
+
+def _resolve_out_path(raw: str) -> Path:
+    """Resolve --out under the backend directory, refusing paths that escape it.
+
+    Args:
+        raw: The raw --out value, absolute or relative to the backend directory.
+
+    Returns:
+        The resolved, contained output path.
+
+    Raises:
+        SystemExit: If the resolved path falls outside the backend directory.
+    """
+    candidate = Path(raw)
+    candidate = (
+        candidate.resolve() if candidate.is_absolute() else (_BASE_DIR / candidate).resolve()
+    )
+    if not candidate.is_relative_to(_BASE_DIR):
+        raise SystemExit(f"--out must stay inside {_BASE_DIR}, got {candidate}")
+    return candidate
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", default="data/rextag_pipelines.json")
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
 
-    out_path = Path(args.out)
+    out_path = _resolve_out_path(args.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     existing: dict[str, dict] = {}
     if args.resume and out_path.exists():
         for rec in json.loads(out_path.read_text()):
@@ -149,7 +199,7 @@ def main():
             print(
                 f"    -> cap={record.get('capacity_bcfd')} Bcf/d  "
                 f"len={record.get('length_miles')} mi  "
-                f"owner={str(record.get('owner',''))[:40]}"
+                f"owner={str(record.get('owner', ''))[:40]}"
             )
         except Exception as exc:
             print(f"    ERROR: {exc}")

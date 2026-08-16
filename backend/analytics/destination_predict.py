@@ -467,7 +467,7 @@ def build_training_candidates(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
             align = bearing_alignment_vec(lat, lon, course, t_lat, t_lon)
 
             order = np.argsort(gc)
-            true_idx = np.where(t_ids == true_target)[0]
+            true_idx = np.nonzero(t_ids == true_target)[0]
             chosen: list[int] = list(true_idx[:1])
             for j in order:
                 if len(chosen) >= _MAX_NEG_PER_OBS + 1:

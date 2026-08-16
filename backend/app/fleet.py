@@ -19,9 +19,21 @@ from .schemas import FleetFacetItem, FleetFacets, FleetResponse, FleetRow, Fleet
 _PAGE_SIZE = 100
 
 _SORT_COLS = {
-    "ship_name", "flag", "ship_type", "year_built", "gross_tonnage", "dwt",
-    "owner", "class_society", "detention_rate_pct", "paris_mou", "tokyo_mou",
-    "sog", "region", "segment", "risk_score",
+    "ship_name",
+    "flag",
+    "ship_type",
+    "year_built",
+    "gross_tonnage",
+    "dwt",
+    "owner",
+    "class_society",
+    "detention_rate_pct",
+    "paris_mou",
+    "tokyo_mou",
+    "sog",
+    "region",
+    "segment",
+    "risk_score",
 }
 
 
@@ -171,13 +183,26 @@ def query_fleet(
     page: int = 1,
 ) -> FleetResponse:
     reg_df = _load_registry(
-        q, flag, owner, class_society, pi_club, paris_mou, tokyo_mou,
-        built_min, built_max, dwt_min, dwt_max, detention_min, risk_min,
+        q,
+        flag,
+        owner,
+        class_society,
+        pi_club,
+        paris_mou,
+        tokyo_mou,
+        built_min,
+        built_max,
+        dwt_min,
+        dwt_max,
+        detention_min,
+        risk_min,
     )
 
     if reg_df.empty:
         return FleetResponse(
-            total=0, page=page, page_size=_PAGE_SIZE,
+            total=0,
+            page=page,
+            page_size=_PAGE_SIZE,
             summary=FleetSummary(total=0, top_flags=[], top_owners=[]),
             rows=[],
         )
@@ -188,8 +213,12 @@ def query_fleet(
         "FROM live_positions WHERE imo >= 1000000 AND imo <= 9999999 AND updated_ts > ?",
         [_fresh_cutoff()],
     )
-    live_df = live_df.rename(columns={"name": "live_name"}) if not live_df.empty else pd.DataFrame(
-        columns=["imo", "mmsi", "live_name", "lat", "lon", "sog", "region", "kind", "segment"]
+    live_df = (
+        live_df.rename(columns={"name": "live_name"})
+        if not live_df.empty
+        else pd.DataFrame(
+            columns=["imo", "mmsi", "live_name", "lat", "lon", "sog", "region", "kind", "segment"]
+        )
     )
 
     # Merge: registry LEFT JOIN live on imo
@@ -205,13 +234,15 @@ def query_fleet(
     # Apply q filter to MMSI too (live name search when q is numeric)
     if q and not merged.empty and q.isdigit():
         merged = merged[
-            merged["imo"].astype(str).str.contains(q, na=False) |
-            merged["mmsi"].astype(str).str.contains(q, na=False)
+            merged["imo"].astype(str).str.contains(q, na=False)
+            | merged["mmsi"].astype(str).str.contains(q, na=False)
         ]
 
     if merged.empty:
         return FleetResponse(
-            total=0, page=page, page_size=_PAGE_SIZE,
+            total=0,
+            page=page,
+            page_size=_PAGE_SIZE,
             summary=FleetSummary(total=0, top_flags=[], top_owners=[]),
             rows=[],
         )
@@ -223,20 +254,34 @@ def query_fleet(
     avg_age = round(float(ages.mean()), 1) if len(ages) > 0 else None
 
     top_flags = (
-        merged["flag"].dropna().value_counts().head(5)
-        .reset_index().rename(columns={"flag": "value", "count": "count"})
+        merged["flag"]
+        .dropna()
+        .value_counts()
+        .head(5)
+        .reset_index()
+        .rename(columns={"flag": "value", "count": "count"})
     )
     top_owners = (
-        merged["owner"].dropna().value_counts().head(5)
-        .reset_index().rename(columns={"owner": "value", "count": "count"})
+        merged["owner"]
+        .dropna()
+        .value_counts()
+        .head(5)
+        .reset_index()
+        .rename(columns={"owner": "value", "count": "count"})
     )
 
     summary = FleetSummary(
         total=len(merged),
         total_dwt=int(total_dwt_val) if total_dwt_val else None,
         avg_age_years=avg_age,
-        top_flags=[FleetFacetItem(value=str(r["value"]), count=int(r["count"])) for _, r in top_flags.iterrows()],
-        top_owners=[FleetFacetItem(value=str(r["value"]), count=int(r["count"])) for _, r in top_owners.iterrows()],
+        top_flags=[
+            FleetFacetItem(value=str(r["value"]), count=int(r["count"]))
+            for _, r in top_flags.iterrows()
+        ],
+        top_owners=[
+            FleetFacetItem(value=str(r["value"]), count=int(r["count"]))
+            for _, r in top_owners.iterrows()
+        ],
     )
 
     # Sort
@@ -247,7 +292,7 @@ def query_fleet(
     # Paginate
     page = max(1, page)
     offset = (page - 1) * _PAGE_SIZE
-    page_df = merged.iloc[offset: offset + _PAGE_SIZE]
+    page_df = merged.iloc[offset : offset + _PAGE_SIZE]
 
     cols = set(page_df.columns)
     rows = []
@@ -257,37 +302,45 @@ def query_fleet(
             ri = json.loads(ri_raw) if ri_raw else None
         except (ValueError, TypeError):
             ri = None
-        rows.append(FleetRow(
-            imo=int(r.imo),
-            ship_name=_safe_str(r.ship_name),
-            flag=_safe_str(r.flag),
-            flag_code=_safe_str(r.flag_code),
-            ship_type=_safe_str(r.ship_type),
-            year_built=_safe_int(r.year_built),
-            gross_tonnage=_safe_int(r.gross_tonnage),
-            dwt=_safe_int(r.dwt),
-            owner=_safe_str(r.owner),
-            ism_manager=_safe_str(r.ism_manager),
-            class_society=_safe_str(r.class_society),
-            pi_club=_safe_str(r.pi_club),
-            detention_rate_pct=_safe_float(r.detention_rate_pct),
-            paris_mou=_safe_str(r.paris_mou),
-            tokyo_mou=_safe_str(r.tokyo_mou),
-            ship_status=_safe_str(r.ship_status),
-            risk_score=_safe_int(getattr(r, "risk_score", None)) if "risk_score" in cols else None,
-            risk_indicators=ri,
-            ofac_sanctioned=_safe_bool(getattr(r, "ofac_sanctioned", None)) if "ofac_sanctioned" in cols else None,
-            mmsi=_safe_int(r.mmsi),
-            live_name=_safe_str(r.live_name),
-            lat=_safe_float(r.lat),
-            lon=_safe_float(r.lon),
-            sog=_safe_float(r.sog),
-            region=_safe_str(r.region),
-            kind=_safe_str(r.kind),
-            segment=_safe_str(r.segment),
-        ))
+        rows.append(
+            FleetRow(
+                imo=int(r.imo),
+                ship_name=_safe_str(r.ship_name),
+                flag=_safe_str(r.flag),
+                flag_code=_safe_str(r.flag_code),
+                ship_type=_safe_str(r.ship_type),
+                year_built=_safe_int(r.year_built),
+                gross_tonnage=_safe_int(r.gross_tonnage),
+                dwt=_safe_int(r.dwt),
+                owner=_safe_str(r.owner),
+                ism_manager=_safe_str(r.ism_manager),
+                class_society=_safe_str(r.class_society),
+                pi_club=_safe_str(r.pi_club),
+                detention_rate_pct=_safe_float(r.detention_rate_pct),
+                paris_mou=_safe_str(r.paris_mou),
+                tokyo_mou=_safe_str(r.tokyo_mou),
+                ship_status=_safe_str(r.ship_status),
+                risk_score=_safe_int(getattr(r, "risk_score", None))
+                if "risk_score" in cols
+                else None,
+                risk_indicators=ri,
+                ofac_sanctioned=_safe_bool(getattr(r, "ofac_sanctioned", None))
+                if "ofac_sanctioned" in cols
+                else None,
+                mmsi=_safe_int(r.mmsi),
+                live_name=_safe_str(r.live_name),
+                lat=_safe_float(r.lat),
+                lon=_safe_float(r.lon),
+                sog=_safe_float(r.sog),
+                region=_safe_str(r.region),
+                kind=_safe_str(r.kind),
+                segment=_safe_str(r.segment),
+            )
+        )
 
-    return FleetResponse(total=len(merged), page=page, page_size=_PAGE_SIZE, summary=summary, rows=rows)
+    return FleetResponse(
+        total=len(merged), page=page, page_size=_PAGE_SIZE, summary=summary, rows=rows
+    )
 
 
 def query_facets() -> FleetFacets:
@@ -296,19 +349,18 @@ def query_facets() -> FleetFacets:
         "FROM vessels WHERE fetch_ok = true",
     )
 
-    live_df = db.query(
-        "SELECT DISTINCT kind, segment FROM live_positions WHERE updated_ts > ?",
-        [_fresh_cutoff()],
-    )
-
-    def _top(series: "pd.Series", n: int = 50) -> list[FleetFacetItem]:
+    def _top(series: pd.Series, n: int = 50) -> list[FleetFacetItem]:
         vc = series.dropna().value_counts().head(n)
         return [FleetFacetItem(value=str(v), count=int(c)) for v, c in vc.items()]
 
     if reg_df.empty:
         return FleetFacets(
-            flags=[], class_societies=[], pi_clubs=[],
-            paris_mou=[], tokyo_mou=[], owners=[],
+            flags=[],
+            class_societies=[],
+            pi_clubs=[],
+            paris_mou=[],
+            tokyo_mou=[],
+            owners=[],
         )
 
     return FleetFacets(
@@ -341,8 +393,19 @@ def export_csv(
 ) -> str:
     # Reuse query_fleet but fetch all pages at once
     reg_df = _load_registry(
-        q, flag, owner, class_society, pi_club, paris_mou, tokyo_mou,
-        built_min, built_max, dwt_min, dwt_max, detention_min, risk_min,
+        q,
+        flag,
+        owner,
+        class_society,
+        pi_club,
+        paris_mou,
+        tokyo_mou,
+        built_min,
+        built_max,
+        dwt_min,
+        dwt_max,
+        detention_min,
+        risk_min,
     )
     if reg_df.empty:
         return "imo,ship_name,flag,owner\n"

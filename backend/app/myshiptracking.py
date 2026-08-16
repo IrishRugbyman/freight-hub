@@ -67,7 +67,9 @@ def _num(text: str | None) -> float | None:
     """First number in a string ('30,201 Tons' -> 30201.0, '11.1 m' -> 11.1)."""
     if not text:
         return None
-    m = re.search(r"-?[\d,]*\.?\d+", text.replace(",", ""))
+    # Commas are stripped first, so the pattern only has to cover plain decimals.
+    # Written without overlapping quantifiers to keep matching linear.
+    m = re.search(r"-?(?:\d+(?:\.\d+)?|\.\d+)", text.replace(",", ""))
     return float(m.group()) if m else None
 
 
@@ -213,7 +215,8 @@ def parse(html: str, mmsi: int | None = None) -> VesselSnapshot:
     # particulars table also has a <th>Status</th> ("Active" = registry status), so
     # the merged dict would shadow the navigational status ("At anchor", "Under way").
     pos_card = soup.select_one("#ft-position")
-    pos = _th_td(pos_card.find("table")) if (pos_card and pos_card.find("table")) else flat
+    pos_table = pos_card.find("table") if pos_card else None
+    pos = _th_td(pos_table) if pos_table else flat
     snap.status = _clean(pos.get("Status"))
     snap.course = _num(pos.get("Course"))
     snap.area = _clean(pos.get("Area"))
@@ -235,7 +238,10 @@ def parse(html: str, mmsi: int | None = None) -> VesselSnapshot:
 
     # exact lat/lon: position table masks them ('---') for anonymous visitors, but
     # they leak in the contributorMap.php ajax URL embedded in the page.
-    m = re.search(r"contributorMap\.php\?lat=([0-9.-]+)&lng=([0-9.-]+)", html)
+    m = re.search(
+        r"contributorMap\.php\?lat=(-?\d+(?:\.\d+)?)&lng=(-?\d+(?:\.\d+)?)",
+        html,
+    )
     if m:
         snap.lat = float(m.group(1))
         snap.lon = float(m.group(2))
@@ -318,9 +324,7 @@ def fetch_html(mmsi: int | str, imo: int | str = "", *, client: httpx.Client | N
             client.close()
 
 
-def get_vessel(
-    mmsi: int, imo: int | str = "", *, use_cache: bool = True
-) -> VesselSnapshot | None:
+def get_vessel(mmsi: int, imo: int | str = "", *, use_cache: bool = True) -> VesselSnapshot | None:
     """Fetch + parse a vessel by MMSI. Returns None on a non-vessel page.
 
     Raises MyShipTrackingBlocked on a rate-limit / bot-wall page so the caller can

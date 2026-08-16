@@ -564,7 +564,8 @@ export function AnchorageOccupancyCard() {
   const chartData = React.useMemo(() => {
     if (!data?.points.length) return []
     const hourSet: Set<string> = new Set(data.points.map(p => p.hour))
-    const sortedHours = [...hourSet].sort()
+    // hour is an ISO timestamp, so lexicographic order is chronological order.
+    const sortedHours = [...hourSet].sort((a, b) => a.localeCompare(b))
     return sortedHours.map(h => {
       const row: Record<string, string | number> = {
         hour: new Date(h).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit' }),
@@ -1065,7 +1066,9 @@ export function DensityCard() {
     byDate[d].ballast += row.ballast_count
     byDate[d].unknown += row.unknown_count
   }
-  const chartData = Object.entries(byDate).sort().map(([date, v]) => ({ date, ...v }))
+  const chartData = Object.entries(byDate)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, v]) => ({ date, ...v }))
 
   return (
     <Card>

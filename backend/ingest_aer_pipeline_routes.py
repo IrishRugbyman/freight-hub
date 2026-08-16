@@ -38,8 +38,7 @@ import duckdb
 DB_DEFAULT = Path(__file__).parent / "data" / "freight_analytics.duckdb"
 
 AER_URL = (
-    "https://gis.energy.gov.ab.ca/arcgis/rest/services"
-    "/Geoview/ERCB_Ext_PROD/MapServer/10/query"
+    "https://gis.energy.gov.ab.ca/arcgis/rest/services/Geoview/ERCB_Ext_PROD/MapServer/10/query"
 )
 
 RDP_EPSILON = 0.05  # ~5 km default
@@ -60,7 +59,7 @@ _SOURCES: dict[str, dict] = {
             " AND SubstanceCode1 = 'Crude Oil'"
             " AND PipelineStatus = 'Operating'"
         ),
-        "min_km": 15.0,   # 282 raw paths; drop short spurs to keep main trunk
+        "min_km": 15.0,  # 282 raw paths; drop short spurs to keep main trunk
         "epsilon": 0.05,
     },
     "grand-rapids-oil-pipeline-ca": {
@@ -70,7 +69,7 @@ _SOURCES: dict[str, dict] = {
             " AND SubstanceCode1 = 'Crude Oil'"
             " AND PipelineStatus = 'Operating'"
         ),
-        "min_km": 12.0,   # keeps ~15 main segments (top segment 63.5 km)
+        "min_km": 12.0,  # keeps ~15 main segments (top segment 63.5 km)
         "epsilon": 0.05,
     },
     "cold-lake-pipeline-system-ca": {
@@ -115,15 +114,14 @@ _SOURCES: dict[str, dict] = {
 # Geometry utilities (same as ingest_cer_pipeline_routes.py)
 # ---------------------------------------------------------------------------
 
+
 def _hav(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     R = 6371.0
     dlat = math.radians(lat2 - lat1)
     dlon = math.radians(lon2 - lon1)
     a = (
         math.sin(dlat / 2) ** 2
-        + math.cos(math.radians(lat1))
-        * math.cos(math.radians(lat2))
-        * math.sin(dlon / 2) ** 2
+        + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
     )
     return R * 2 * math.asin(math.sqrt(a))
 
@@ -180,6 +178,7 @@ def _path_km(segments: list) -> float:
 # AER fetch (paginated)
 # ---------------------------------------------------------------------------
 
+
 def fetch_aer_paths(
     where: str,
     bbox: dict | None = None,
@@ -205,16 +204,18 @@ def fetch_aer_paths(
         }
 
     while True:
-        params = urllib.parse.urlencode({
-            "where": where,
-            "outFields": "OBJECTID",
-            "returnGeometry": "true",
-            "outSR": "4326",
-            "resultRecordCount": MAX_RECORDS,
-            "resultOffset": offset,
-            "f": "json",
-            **geo_params,
-        })
+        params = urllib.parse.urlencode(
+            {
+                "where": where,
+                "outFields": "OBJECTID",
+                "returnGeometry": "true",
+                "outSR": "4326",
+                "resultRecordCount": MAX_RECORDS,
+                "resultOffset": offset,
+                "f": "json",
+                **geo_params,
+            }
+        )
         with urllib.request.urlopen(f"{AER_URL}?{params}", timeout=60) as resp:
             data = json.loads(resp.read())
 
@@ -236,6 +237,7 @@ def fetch_aer_paths(
 # ---------------------------------------------------------------------------
 # DB helpers
 # ---------------------------------------------------------------------------
+
 
 def _already_routed(con: duckdb.DuckDBPyConnection) -> set[str]:
     rows = con.execute("SELECT wm_id FROM global_pipeline_routes").fetchall()
@@ -259,12 +261,14 @@ def _ensure_table(con: duckdb.DuckDBPyConnection) -> None:
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--db", default=str(DB_DEFAULT))
     ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--force", action="store_true",
-                    help="Overwrite routes for already-routed WM IDs")
+    ap.add_argument(
+        "--force", action="store_true", help="Overwrite routes for already-routed WM IDs"
+    )
     args = ap.parse_args()
 
     print("=== AER Pipeline Routes Ingest ===\n")
@@ -311,7 +315,7 @@ def main() -> None:
             )
             total_stored += 1
             already_routed.add(wm_id)
-            print(f"  Stored.\n", flush=True)
+            print("  Stored.\n", flush=True)
         except Exception as exc:
             print(f"  WARN: {exc}\n", flush=True)
 

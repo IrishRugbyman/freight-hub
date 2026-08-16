@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json as _json
+import math
 import os
 import re as _re
 import tempfile
@@ -852,7 +853,6 @@ def vessel_track(mmsi: int, hours: int = 24):
     last one). Genuinely moving points are distance-thinned to ~200m for size.
     The most recent fix is always included.
     """
-    import math
 
     h = max(1, min(hours, 336))
     cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=h)
@@ -4800,7 +4800,7 @@ def analytics_sts_proximity(max_dist_m: float = 2000, max_sog: float = 3.0):
     )
     dists = 2 * R * np.arcsin(np.sqrt(np.clip(a, 0, 1)))
     mask = np.triu(dists < d_m, k=1)
-    ii, jj = np.where(mask)
+    ii, jj = np.nonzero(mask)
 
     pairs: list[StsProximityPair] = []
     for i_idx, j_idx in zip(ii.tolist(), jj.tolist(), strict=False):
@@ -5943,7 +5943,6 @@ def analytics_chokepoint_anomaly(window_hours: int = 6, baseline_hours: int = 48
     baseline_hours: historical period for baseline (default 48h).
     Returns Z-score and pct_change per chokepoint; flags high/low/normal.
     """
-    import math
 
     window_hours = max(1, min(window_hours, 24))
     baseline_hours = max(6, min(baseline_hours, 336))
@@ -6494,7 +6493,6 @@ def _match_port(destination: str | None) -> str | None:
 
 def _haversine_nm(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Great-circle distance in nautical miles."""
-    import math
 
     R = 3440.065  # Earth radius in nautical miles
     phi1, phi2 = math.radians(lat1), math.radians(lat2)
@@ -7042,7 +7040,6 @@ def get_pipelines(disrupted_only: bool = True):
     World Monitor records that match RexTag are enriched with owner/length/states.
     Data sources: World Monitor (CC-BY 4.0) + RexTag.com (public informational pages).
     """
-    import math
     import time
 
     import pandas as pd
@@ -7764,13 +7761,13 @@ def analytics_eta_by_target():
         if tid in naive_rows.index:
             v = naive_rows.at[tid, "med_abs_err_h"]
             naive_mae = (
-                float(v) if v is not None and not (isinstance(v, float) and v != v) else None
+                float(v) if v is not None and not (isinstance(v, float) and math.isnan(v)) else None
             )
 
         def _float(x) -> float | None:
             try:
                 v = float(x)
-                return None if v != v else v  # NaN -> None
+                return None if math.isnan(v) else v
             except (TypeError, ValueError):
                 return None
 
@@ -7917,7 +7914,7 @@ def analytics_eta_upcoming(
         def _fn(x) -> float | None:
             try:
                 v = float(x)
-                return None if v != v else v
+                return None if math.isnan(v) else v
             except (TypeError, ValueError):
                 return None
 

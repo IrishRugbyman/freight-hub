@@ -195,7 +195,9 @@ def test_analytics_transits_with_data(analytics_client):
 
 
 def test_analytics_congestion_with_data(analytics_client):
-    r = analytics_client.get("/api/analytics/congestion", params={"zone": "singapore_east", "days": 30})
+    r = analytics_client.get(
+        "/api/analytics/congestion", params={"zone": "singapore_east", "days": 30}
+    )
     assert r.status_code == 200
     body = r.json()
     assert body["zone"] == "singapore_east"
@@ -229,8 +231,8 @@ def test_analytics_zones(analytics_client):
     assert r.status_code == 200
     zones = r.json()
     names = {z["name"] for z in zones}
-    assert "singapore_east" in names   # anchorage zone
-    assert "hormuz" in names           # chokepoint region
+    assert "singapore_east" in names  # anchorage zone
+    assert "hormuz" in names  # chokepoint region
     types = {z["type"] for z in zones}
     assert "anchorage" in types
     assert "chokepoint" in types
@@ -244,6 +246,7 @@ def test_analytics_days_clamped(analytics_client):
 
 
 # --- /api/events tests -------------------------------------------------------
+
 
 def test_events_all(analytics_client):
     r = analytics_client.get("/api/events")
@@ -294,6 +297,7 @@ def test_events_empty_outside_days(analytics_client):
 
 
 # ---- /api/feed.xml + /api/feed.json (syndication) ----
+
 
 def test_feed_atom_well_formed(analytics_client):
     import xml.etree.ElementTree as ET
@@ -367,6 +371,7 @@ def test_feed_empty_db_valid(client, tmp_path, monkeypatch):
 
 # ---- /api/vessels/{mmsi}/state ----
 
+
 def test_vessel_state_known(analytics_client):
     r = analytics_client.get("/api/vessels/1003/state")
     assert r.status_code == 200
@@ -385,6 +390,7 @@ def test_vessel_state_unknown_returns_null(analytics_client):
 
 
 # ---- /api/vessels/{mmsi}/voyages ----
+
 
 def test_vessel_voyages_returns_structure(analytics_client):
     r = analytics_client.get("/api/vessels/1003/voyages", params={"days": 30})
@@ -437,6 +443,7 @@ def test_vessel_voyages_unknown_mmsi(analytics_client):
 
 # ---- /api/analytics/ports ----
 
+
 def test_analytics_ports_structure(analytics_client):
     r = analytics_client.get("/api/analytics/ports")
     assert r.status_code == 200
@@ -475,6 +482,7 @@ def test_analytics_ports_top_n_clamped(analytics_client):
 
 
 # ---- /api/analytics/speed ----
+
 
 def test_analytics_speed_structure(client):
     r = client.get("/api/analytics/speed")
@@ -530,6 +538,7 @@ def test_analytics_speed_total_vessels(client):
 
 # ---- /api/analytics/region-util ----
 
+
 def test_region_util_structure(client):
     r = client.get("/api/analytics/region-util")
     assert r.status_code == 200
@@ -567,6 +576,7 @@ def test_region_util_excludes_null_region(client):
 
 
 # ---- /api/analytics/speed-trend ----
+
 
 def test_speed_trend_structure(analytics_client):
     r = analytics_client.get("/api/analytics/speed-trend?kind=tanker&segment=VLCC")
@@ -667,8 +677,9 @@ def test_sts_risk_min_risk_filter(analytics_client):
 @pytest.fixture
 def reroute_client(tmp_path, monkeypatch):
     """Client with AIS DB + analytics DB seeded with reroute events."""
-    import duckdb
     from datetime import UTC, datetime, timedelta
+
+    import duckdb
     from fastapi.testclient import TestClient
 
     _now = datetime.now(UTC).replace(tzinfo=None)
@@ -740,19 +751,26 @@ def reroute_client(tmp_path, monkeypatch):
     an_conn.execute(an_schema)
     an_conn.execute(
         "INSERT INTO ais_events VALUES ('rr0000001','reroute',5001,NULL,?,?,25.0,56.0,'hormuz','tanker','VLCC',?)",
-        [_now - timedelta(hours=5), _now - timedelta(hours=5),
-         '{"old_destination":"AEFJR","new_destination":"PKQCT","fixes_at_old":40}'],
+        [
+            _now - timedelta(hours=5),
+            _now - timedelta(hours=5),
+            '{"old_destination":"AEFJR","new_destination":"PKQCT","fixes_at_old":40}',
+        ],
     )
     an_conn.execute(
         "INSERT INTO ais_events VALUES ('rr0000002','reroute',5001,NULL,?,?,25.1,56.1,'hormuz','tanker','VLCC',?)",
-        [_now - timedelta(hours=2), _now - timedelta(hours=2),
-         '{"old_destination":"PKQCT","new_destination":"IRBIK","fixes_at_old":25}'],
+        [
+            _now - timedelta(hours=2),
+            _now - timedelta(hours=2),
+            '{"old_destination":"PKQCT","new_destination":"IRBIK","fixes_at_old":25}',
+        ],
     )
     an_conn.close()
 
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
     monkeypatch.setenv("ANALYTICS_DB", str(an_file))
     from app.main import app
+
     return TestClient(app)
 
 
@@ -845,8 +863,9 @@ def test_transit_risk_days_clamped(analytics_client):
 @pytest.fixture
 def dwell_client(tmp_path, monkeypatch):
     """Client with an open anchored episode at singapore_west."""
-    import duckdb
     from datetime import UTC, datetime, timedelta
+
+    import duckdb
     from fastapi.testclient import TestClient
 
     _now = datetime.now(UTC).replace(tzinfo=None)
@@ -938,6 +957,7 @@ def dwell_client(tmp_path, monkeypatch):
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
     monkeypatch.setenv("ANALYTICS_DB", str(an_file))
     from app.main import app
+
     return TestClient(app)
 
 
@@ -950,8 +970,18 @@ def test_anchorage_dwell_structure(dwell_client):
     assert d["zone"] == "singapore_west"
     assert "rows" in d
     for row in d["rows"]:
-        for key in ("mmsi", "name", "zone", "kind", "segment", "start_ts",
-                    "dwell_hours", "laden", "risk_score", "ofac"):
+        for key in (
+            "mmsi",
+            "name",
+            "zone",
+            "kind",
+            "segment",
+            "start_ts",
+            "dwell_hours",
+            "laden",
+            "risk_score",
+            "ofac",
+        ):
             assert key in row
 
 
@@ -994,6 +1024,7 @@ def test_anchorage_dwell_wrong_zone(dwell_client):
 # Phase 22: cargo transition detection (loading / discharge events)
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def cargo_client(tmp_path, monkeypatch):
     """AIS DB seeded with two vessels showing clear draught step-changes.
@@ -1004,8 +1035,9 @@ def cargo_client(tmp_path, monkeypatch):
     All snapshots placed across two distinct 6h buckets (15h apart) to guarantee
     bucket separation regardless of when the tests run.
     """
-    import duckdb
     from datetime import UTC, datetime, timedelta
+
+    import duckdb
     from fastapi.testclient import TestClient
 
     _now = datetime.now(UTC).replace(tzinfo=None)
@@ -1089,6 +1121,7 @@ def cargo_client(tmp_path, monkeypatch):
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
     monkeypatch.setenv("ANALYTICS_DB", str(tmp_path / "analytics.duckdb"))
     from app.main import app
+
     return TestClient(app)
 
 
@@ -1148,6 +1181,7 @@ def test_cargo_transitions_sorted_by_change(cargo_client):
 # Phase 24: slow steamer detection (fleet speed anomaly)
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def slow_client(tmp_path, monkeypatch):
     """Client with live_positions seeded to have clear slow-steaming outliers.
@@ -1156,8 +1190,9 @@ def slow_client(tmp_path, monkeypatch):
     Segment 'VLCC' (tanker): 8 vessels at 13-14 kn, one at 3 kn (slow).
     Vessel marked MOORED (nav_status=5) at 0.5 kn is excluded.
     """
-    import duckdb
     from datetime import UTC, datetime
+
+    import duckdb
     from fastapi.testclient import TestClient
 
     now = datetime.now(UTC).replace(tzinfo=None)
@@ -1220,6 +1255,7 @@ def slow_client(tmp_path, monkeypatch):
     monkeypatch.setenv("AIS_POSITIONS_DB", str(f))
     monkeypatch.setenv("ANALYTICS_DB", str(tmp_path / "analytics.duckdb"))
     from app.main import app
+
     return TestClient(app)
 
 
@@ -1277,6 +1313,7 @@ def test_slow_steamers_pct_of_median(slow_client):
 # Phase 25: fleet utilization (underway vs idle by segment)
 # ---------------------------------------------------------------------------
 
+
 def test_fleet_utilization_structure(slow_client):
     """Reuse slow_client fixture which has a suitable live_positions seed."""
     r = slow_client.get("/api/analytics/fleet-utilization")
@@ -1319,6 +1356,7 @@ def test_fleet_utilization_capesize_detected(slow_client):
 # Phase 26: high-risk vessel alert feed
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def risk_events_client(tmp_path, monkeypatch):
     """Three-DB fixture for /api/analytics/risk-events.
@@ -1333,8 +1371,9 @@ def risk_events_client(tmp_path, monkeypatch):
       - Reroute for 9802 (high risk, OFAC)
       - Reroute for 9803 alone (low risk -> excluded at min_risk=25)
     """
-    import duckdb
     from datetime import UTC, datetime, timedelta
+
+    import duckdb
     from fastapi.testclient import TestClient
 
     now = datetime.now(UTC).replace(tzinfo=None)
@@ -1402,11 +1441,15 @@ def risk_events_client(tmp_path, monkeypatch):
     ais_conn.close()
 
     from conftest import setup_pg_vessels
-    setup_pg_vessels(monkeypatch, [
-        {"imo": 2000001, "risk_score": 80, "ofac_sanctioned": False, "fetch_ok": True},
-        {"imo": 2000002, "risk_score": 60, "ofac_sanctioned": True, "fetch_ok": True},
-        {"imo": 2000003, "risk_score": 10, "ofac_sanctioned": False, "fetch_ok": True},
-    ])
+
+    setup_pg_vessels(
+        monkeypatch,
+        [
+            {"imo": 2000001, "risk_score": 80, "ofac_sanctioned": False, "fetch_ok": True},
+            {"imo": 2000002, "risk_score": 60, "ofac_sanctioned": True, "fetch_ok": True},
+            {"imo": 2000003, "risk_score": 10, "ofac_sanctioned": False, "fetch_ok": True},
+        ],
+    )
 
     an_file = tmp_path / "analytics.duckdb"
     an_conn = duckdb.connect(str(an_file))
@@ -1414,26 +1457,36 @@ def risk_events_client(tmp_path, monkeypatch):
     # STS: high-risk vessel 9801 with low-risk 9803
     an_conn.execute(
         "INSERT INTO ais_events VALUES ('re_sts001','sts',9801,9803,?,?,25.1,56.1,'hormuz','tanker','VLCC',?)",
-        [now - timedelta(hours=12), now - timedelta(hours=10),
-         '{"duration_hours":2,"co_location_fixes":8}'],
+        [
+            now - timedelta(hours=12),
+            now - timedelta(hours=10),
+            '{"duration_hours":2,"co_location_fixes":8}',
+        ],
     )
     # Reroute for high-risk OFAC vessel 9802
     an_conn.execute(
         "INSERT INTO ais_events VALUES ('re_rr001','reroute',9802,NULL,?,?,1.3,103.7,'singapore_malacca','bulk','Capesize',?)",
-        [now - timedelta(hours=6), now - timedelta(hours=6),
-         '{"old_destination":"CNSHA","new_destination":"IRBIK","fixes_at_old":15}'],
+        [
+            now - timedelta(hours=6),
+            now - timedelta(hours=6),
+            '{"old_destination":"CNSHA","new_destination":"IRBIK","fixes_at_old":15}',
+        ],
     )
     # Reroute for low-risk vessel only (score=10, below min_risk=25)
     an_conn.execute(
         "INSERT INTO ais_events VALUES ('re_rr002','reroute',9803,NULL,?,?,26.1,56.6,'hormuz','tanker','VLCC',?)",
-        [now - timedelta(hours=3), now - timedelta(hours=3),
-         '{"old_destination":"AEFJR","new_destination":"CNSHA","fixes_at_old":5}'],
+        [
+            now - timedelta(hours=3),
+            now - timedelta(hours=3),
+            '{"old_destination":"AEFJR","new_destination":"CNSHA","fixes_at_old":5}',
+        ],
     )
     an_conn.close()
 
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
     monkeypatch.setenv("ANALYTICS_DB", str(an_file))
     from app.main import app
+
     return TestClient(app)
 
 
@@ -1504,6 +1557,7 @@ def test_risk_events_sorted_by_max_risk(risk_events_client):
 # Phase 27: port congestion monitor
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def congestion_client(tmp_path, monkeypatch):
     """Client seeded with anchored_episodes for congestion testing.
@@ -1516,8 +1570,9 @@ def congestion_client(tmp_path, monkeypatch):
       - 1 vessel arrived <2h ago (no historical overlap)
       - No baseline -> congestion_factor = 1.0
     """
-    import duckdb
     from datetime import UTC, datetime, timedelta
+
+    import duckdb
     from fastapi.testclient import TestClient
 
     now = datetime.now(UTC).replace(tzinfo=None)
@@ -1591,7 +1646,7 @@ def congestion_client(tmp_path, monkeypatch):
     for i in range(2):
         an_conn.execute(
             "INSERT INTO anchored_episodes VALUES (?,?,?,?,'tanker','VLCC')",
-            [6100 + i, 'singapore_west', now - timedelta(hours=8 + i * 2), now],
+            [6100 + i, "singapore_west", now - timedelta(hours=8 + i * 2), now],
         )
     # Historical completed episodes at singapore_west (past 7 days) - the baseline.
     for i in range(3):
@@ -1599,7 +1654,7 @@ def congestion_client(tmp_path, monkeypatch):
         end = start + timedelta(hours=24)
         an_conn.execute(
             "INSERT INTO anchored_episodes VALUES (?,?,?,?,'tanker','VLCC')",
-            [7000 + i, 'singapore_west', start, end],
+            [7000 + i, "singapore_west", start, end],
         )
 
     # Currently anchored at hormuz_wait, arrived <2h ago (entirely within the
@@ -1614,6 +1669,7 @@ def congestion_client(tmp_path, monkeypatch):
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
     monkeypatch.setenv("ANALYTICS_DB", str(an_file))
     from app.main import app
+
     return TestClient(app)
 
 
@@ -1669,6 +1725,7 @@ def test_port_congestion_dwell_hours(congestion_client):
 # Chokepoint transit congestion index (AIS dwell time inside the chokepoint region)
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def chokepoint_congestion_client(tmp_path, monkeypatch):
     """Client seeded with transit_events for chokepoint congestion testing.
@@ -1681,8 +1738,9 @@ def chokepoint_congestion_client(tmp_path, monkeypatch):
       - 1 vessel that entered <2h ago (no historical overlap)
       - No baseline -> congestion_factor = 1.0
     """
-    import duckdb
     from datetime import UTC, datetime, timedelta
+
+    import duckdb
     from fastapi.testclient import TestClient
 
     now = datetime.now(UTC).replace(tzinfo=None)
@@ -1745,7 +1803,7 @@ def chokepoint_congestion_client(tmp_path, monkeypatch):
     for i in range(2):
         an_conn.execute(
             "INSERT INTO transit_events VALUES (?,?,?,?,'northbound','tanker','VLCC',true)",
-            [6300 + i, 'suez', now - timedelta(hours=6 + i * 2), now],
+            [6300 + i, "suez", now - timedelta(hours=6 + i * 2), now],
         )
     # Historical completed transits at suez (past days) - the baseline.
     for i in range(3):
@@ -1753,7 +1811,7 @@ def chokepoint_congestion_client(tmp_path, monkeypatch):
         end = start + timedelta(hours=12)
         an_conn.execute(
             "INSERT INTO transit_events VALUES (?,?,?,?,'northbound','tanker','VLCC',true)",
-            [7300 + i, 'suez', start, end],
+            [7300 + i, "suez", start, end],
         )
 
     # Currently mid-transit at panama, entered <2h ago -> no historical baseline.
@@ -1767,6 +1825,7 @@ def chokepoint_congestion_client(tmp_path, monkeypatch):
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
     monkeypatch.setenv("ANALYTICS_DB", str(an_file))
     from app.main import app
+
     return TestClient(app)
 
 
@@ -1832,6 +1891,7 @@ def test_chokepoint_congestion_baseline_higher_than_current(chokepoint_congestio
 # Phase 28: destination flow intelligence
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def flow_client(tmp_path, monkeypatch):
     """Client seeded with laden vessels and destinations.
@@ -1841,8 +1901,9 @@ def flow_client(tmp_path, monkeypatch):
     One ballast VLCC (mmsi 8004) with destination AEFJR.
     vessel_state: 8001, 8002, 8003 = laden; 8004 = ballast.
     """
-    import duckdb
     from datetime import UTC, datetime
+
+    import duckdb
     from fastapi.testclient import TestClient
 
     now = datetime.now(UTC).replace(tzinfo=None)
@@ -1919,17 +1980,21 @@ def flow_client(tmp_path, monkeypatch):
     an_file = tmp_path / "analytics.duckdb"
     an_conn = duckdb.connect(str(an_file))
     an_conn.execute(an_schema)
-    an_conn.executemany("INSERT INTO vessel_state VALUES (?,?,?,?,?)", [
-        (8001, 21.0, 20.0, 'laden', now),
-        (8002, 21.0, 19.5, 'laden', now),
-        (8003, 19.0, 18.0, 'laden', now),
-        (8004, 21.0, 5.0, 'ballast', now),
-    ])
+    an_conn.executemany(
+        "INSERT INTO vessel_state VALUES (?,?,?,?,?)",
+        [
+            (8001, 21.0, 20.0, "laden", now),
+            (8002, 21.0, 19.5, "laden", now),
+            (8003, 19.0, 18.0, "laden", now),
+            (8004, 21.0, 5.0, "ballast", now),
+        ],
+    )
     an_conn.close()
 
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
     monkeypatch.setenv("ANALYTICS_DB", str(an_file))
     from app.main import app
+
     return TestClient(app)
 
 
@@ -1950,8 +2015,8 @@ def test_destination_flows_laden_only(flow_client):
     r = flow_client.get("/api/analytics/destination-flows?laden_only=true")
     d = r.json()
     destinations = {row["destination"] for row in d["rows"]}
-    assert "CNSHA" in destinations   # 2 laden VLCCs (Shanghai LOCODE, uncurated -> raw)
-    assert "Busan" in destinations   # 1 laden Capesize (KRPUS folds to canonical Busan)
+    assert "CNSHA" in destinations  # 2 laden VLCCs (Shanghai LOCODE, uncurated -> raw)
+    assert "Busan" in destinations  # 1 laden Capesize (KRPUS folds to canonical Busan)
     # Ballast vessel destination AEFJR must be excluded
     assert "AEFJR" not in destinations
 
@@ -1959,7 +2024,7 @@ def test_destination_flows_laden_only(flow_client):
 def test_destination_flows_total_laden(flow_client):
     r = flow_client.get("/api/analytics/destination-flows?laden_only=true")
     d = r.json()
-    assert d["total_laden"] == 3   # 3 laden vessels in vessel_state
+    assert d["total_laden"] == 3  # 3 laden vessels in vessel_state
 
 
 def test_destination_flows_includes_all(flow_client):
@@ -1975,7 +2040,7 @@ def test_destination_flows_kind_filter(flow_client):
     r = flow_client.get("/api/analytics/destination-flows?laden_only=true&kind=bulk")
     d = r.json()
     destinations = {row["destination"] for row in d["rows"]}
-    assert "Busan" in destinations      # only the Capesize (KRPUS -> Busan)
+    assert "Busan" in destinations  # only the Capesize (KRPUS -> Busan)
     assert "CNSHA" not in destinations  # VLCCs (tanker) excluded
 
 
@@ -1996,21 +2061,31 @@ def test_destination_flows_sorted_by_count(flow_client):
 # Phase 29: market summary KPI card
 # ---------------------------------------------------------------------------
 
+
 def test_market_summary_structure(flow_client):
     """Reuse flow_client fixture: 3 laden + 1 ballast vessel."""
     r = flow_client.get("/api/analytics/market-summary")
     assert r.status_code == 200
     d = r.json()
-    for key in ("as_of", "total_fleet", "total_laden", "total_ballast",
-                "laden_pct", "transits_24h", "reroutes_24h", "sts_24h",
-                "gaps_24h", "by_segment"):
+    for key in (
+        "as_of",
+        "total_fleet",
+        "total_laden",
+        "total_ballast",
+        "laden_pct",
+        "transits_24h",
+        "reroutes_24h",
+        "sts_24h",
+        "gaps_24h",
+        "by_segment",
+    ):
         assert key in d
 
 
 def test_market_summary_laden_count(flow_client):
     r = flow_client.get("/api/analytics/market-summary")
     d = r.json()
-    assert d["total_laden"] == 3    # 8001, 8002, 8003 seeded as laden
+    assert d["total_laden"] == 3  # 8001, 8002, 8003 seeded as laden
     assert d["total_ballast"] == 1  # 8004 seeded as ballast
     assert d["laden_pct"] == pytest.approx(75.0, abs=1.0)
 
@@ -2018,7 +2093,7 @@ def test_market_summary_laden_count(flow_client):
 def test_market_summary_by_segment(flow_client):
     r = flow_client.get("/api/analytics/market-summary")
     d = r.json()
-    by_seg = {f'{row["kind"]}-{row["segment"]}': row for row in d["by_segment"]}
+    by_seg = {f"{row['kind']}-{row['segment']}": row for row in d["by_segment"]}
     # 2 laden VLCCs + 1 ballast VLCC = 3 total in VLCC tanker segment
     vlcc = by_seg.get("tanker-VLCC")
     assert vlcc is not None
@@ -2055,8 +2130,9 @@ def risk_leaderboard_client(tmp_path, monkeypatch):
       9004  BULK CLEAN  IMO=7004  sts_count=0  reroute_count=0  reg_risk=10  ofac=False
       9005  SMALL VESSEL  (segment=Small)  - must be excluded even if events exist
     """
-    import duckdb
     from datetime import UTC, datetime, timedelta
+
+    import duckdb
     from fastapi.testclient import TestClient
 
     now = datetime.now(UTC).replace(tzinfo=None)
@@ -2105,17 +2181,6 @@ def risk_leaderboard_client(tmp_path, monkeypatch):
         laden VARCHAR, updated_ts TIMESTAMP
     );
     """
-    reg_schema = """
-    CREATE TABLE vessel_registry (
-        imo BIGINT PRIMARY KEY, ship_name VARCHAR, flag VARCHAR, flag_code VARCHAR,
-        call_sign VARCHAR, gross_tonnage INTEGER, dwt INTEGER, ship_type VARCHAR,
-        year_built INTEGER, ship_status VARCHAR, owner VARCHAR, ism_manager VARCHAR,
-        ship_manager VARCHAR, class_society VARCHAR, pi_club VARCHAR,
-        detention_rate_pct DOUBLE, paris_mou VARCHAR, tokyo_mou VARCHAR,
-        uscg_targeting VARCHAR, fetched_ts TIMESTAMP, fetch_ok BOOLEAN,
-        risk_score INTEGER, risk_indicators VARCHAR, ofac_sanctioned BOOLEAN
-    );
-    """
 
     ais_file = tmp_path / "ais.duckdb"
     ais_conn = duckdb.connect(str(ais_file))
@@ -2123,11 +2188,106 @@ def risk_leaderboard_client(tmp_path, monkeypatch):
     ais_conn.executemany(
         "INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         [
-            (9001, "VLCC RISK",    25.0, 56.0, 14.0, 90.0, None, "CNSHA", 80, 330, "tanker", "VLCC",     "hormuz", now, 7001, 20.0, 0, None),
-            (9002, "CAPE REROUTE", 3.5,  5.0,  12.0, 45.0, None, "ARA",   74, 300, "bulk",   "Capesize", "ara",    now, 7002, 18.0, 0, None),
-            (9003, "TANKER OFAC",  1.3, 103.8, 0.5,  180.0, None, "SGSIN", 80, 300, "tanker", "VLCC",     "singapore_malacca", now, 7003, 19.0, 1, None),
-            (9004, "BULK CLEAN",   51.0, 3.0,  10.0, 270.0, None, "NLRTM", 74, 290, "bulk",   "Capesize", "north_sea", now, 7004, 15.0, 0, None),
-            (9005, "SMALL VESSEL", 10.0, 10.0,  5.0,   0.0, None, None,    70, 20,  "tanker", "Small",    "ara",    now, None, None, None, None),
+            (
+                9001,
+                "VLCC RISK",
+                25.0,
+                56.0,
+                14.0,
+                90.0,
+                None,
+                "CNSHA",
+                80,
+                330,
+                "tanker",
+                "VLCC",
+                "hormuz",
+                now,
+                7001,
+                20.0,
+                0,
+                None,
+            ),
+            (
+                9002,
+                "CAPE REROUTE",
+                3.5,
+                5.0,
+                12.0,
+                45.0,
+                None,
+                "ARA",
+                74,
+                300,
+                "bulk",
+                "Capesize",
+                "ara",
+                now,
+                7002,
+                18.0,
+                0,
+                None,
+            ),
+            (
+                9003,
+                "TANKER OFAC",
+                1.3,
+                103.8,
+                0.5,
+                180.0,
+                None,
+                "SGSIN",
+                80,
+                300,
+                "tanker",
+                "VLCC",
+                "singapore_malacca",
+                now,
+                7003,
+                19.0,
+                1,
+                None,
+            ),
+            (
+                9004,
+                "BULK CLEAN",
+                51.0,
+                3.0,
+                10.0,
+                270.0,
+                None,
+                "NLRTM",
+                74,
+                290,
+                "bulk",
+                "Capesize",
+                "north_sea",
+                now,
+                7004,
+                15.0,
+                0,
+                None,
+            ),
+            (
+                9005,
+                "SMALL VESSEL",
+                10.0,
+                10.0,
+                5.0,
+                0.0,
+                None,
+                None,
+                70,
+                20,
+                "tanker",
+                "Small",
+                "ara",
+                now,
+                None,
+                None,
+                None,
+                None,
+            ),
         ],
     )
     ais_conn.close()
@@ -2139,34 +2299,200 @@ def risk_leaderboard_client(tmp_path, monkeypatch):
     an_conn.executemany(
         "INSERT INTO ais_events VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
         [
-            ("sts-1", "sts", 9001, None, recent, None, 25.0, 56.0, "hormuz", "tanker", "VLCC", "{}"),
-            ("sts-2", "sts", 9001, None, recent, None, 25.1, 56.1, "hormuz", "tanker", "VLCC", "{}"),
-            ("sts-3", "sts", 9001, None, recent, None, 25.2, 56.2, "hormuz", "tanker", "VLCC", "{}"),
-            ("sts-4", "sts", 9002, 9003, recent, None, 3.5,  5.0,  "ara",    "bulk",   "Capesize", "{}"),
+            (
+                "sts-1",
+                "sts",
+                9001,
+                None,
+                recent,
+                None,
+                25.0,
+                56.0,
+                "hormuz",
+                "tanker",
+                "VLCC",
+                "{}",
+            ),
+            (
+                "sts-2",
+                "sts",
+                9001,
+                None,
+                recent,
+                None,
+                25.1,
+                56.1,
+                "hormuz",
+                "tanker",
+                "VLCC",
+                "{}",
+            ),
+            (
+                "sts-3",
+                "sts",
+                9001,
+                None,
+                recent,
+                None,
+                25.2,
+                56.2,
+                "hormuz",
+                "tanker",
+                "VLCC",
+                "{}",
+            ),
+            ("sts-4", "sts", 9002, 9003, recent, None, 3.5, 5.0, "ara", "bulk", "Capesize", "{}"),
             # Reroutes for 9001 (2) and 9002 (5)
-            ("rr-1",  "reroute", 9001, None, recent, None, 25.0, 56.0, "hormuz", "tanker", "VLCC", "{}"),
-            ("rr-2",  "reroute", 9001, None, recent, None, 25.0, 56.0, "hormuz", "tanker", "VLCC", "{}"),
-            ("rr-3",  "reroute", 9002, None, recent, None, 3.5,  5.0,  "ara",    "bulk",   "Capesize", "{}"),
-            ("rr-4",  "reroute", 9002, None, recent, None, 3.5,  5.0,  "ara",    "bulk",   "Capesize", "{}"),
-            ("rr-5",  "reroute", 9002, None, recent, None, 3.5,  5.0,  "ara",    "bulk",   "Capesize", "{}"),
-            ("rr-6",  "reroute", 9002, None, recent, None, 3.5,  5.0,  "ara",    "bulk",   "Capesize", "{}"),
-            ("rr-7",  "reroute", 9002, None, recent, None, 3.5,  5.0,  "ara",    "bulk",   "Capesize", "{}"),
+            (
+                "rr-1",
+                "reroute",
+                9001,
+                None,
+                recent,
+                None,
+                25.0,
+                56.0,
+                "hormuz",
+                "tanker",
+                "VLCC",
+                "{}",
+            ),
+            (
+                "rr-2",
+                "reroute",
+                9001,
+                None,
+                recent,
+                None,
+                25.0,
+                56.0,
+                "hormuz",
+                "tanker",
+                "VLCC",
+                "{}",
+            ),
+            (
+                "rr-3",
+                "reroute",
+                9002,
+                None,
+                recent,
+                None,
+                3.5,
+                5.0,
+                "ara",
+                "bulk",
+                "Capesize",
+                "{}",
+            ),
+            (
+                "rr-4",
+                "reroute",
+                9002,
+                None,
+                recent,
+                None,
+                3.5,
+                5.0,
+                "ara",
+                "bulk",
+                "Capesize",
+                "{}",
+            ),
+            (
+                "rr-5",
+                "reroute",
+                9002,
+                None,
+                recent,
+                None,
+                3.5,
+                5.0,
+                "ara",
+                "bulk",
+                "Capesize",
+                "{}",
+            ),
+            (
+                "rr-6",
+                "reroute",
+                9002,
+                None,
+                recent,
+                None,
+                3.5,
+                5.0,
+                "ara",
+                "bulk",
+                "Capesize",
+                "{}",
+            ),
+            (
+                "rr-7",
+                "reroute",
+                9002,
+                None,
+                recent,
+                None,
+                3.5,
+                5.0,
+                "ara",
+                "bulk",
+                "Capesize",
+                "{}",
+            ),
             # Small vessel event - should be excluded from results (segment filter)
-            ("rr-8",  "reroute", 9005, None, recent, None, 10.0, 10.0, "ara",    "tanker", "Small", "{}"),
+            (
+                "rr-8",
+                "reroute",
+                9005,
+                None,
+                recent,
+                None,
+                10.0,
+                10.0,
+                "ara",
+                "tanker",
+                "Small",
+                "{}",
+            ),
         ],
     )
     an_conn.close()
 
     from conftest import setup_pg_vessels
-    setup_pg_vessels(monkeypatch, [
-        {"imo": 7001, "ship_name": "VLCC RISK", "fetch_ok": True, "risk_score": 80, "ofac_sanctioned": False},
-        {"imo": 7003, "ship_name": "TANKER OFAC", "fetch_ok": True, "risk_score": 60, "ofac_sanctioned": True},
-        {"imo": 7004, "ship_name": "BULK CLEAN", "fetch_ok": True, "risk_score": 10, "ofac_sanctioned": False},
-    ])
+
+    setup_pg_vessels(
+        monkeypatch,
+        [
+            {
+                "imo": 7001,
+                "ship_name": "VLCC RISK",
+                "fetch_ok": True,
+                "risk_score": 80,
+                "ofac_sanctioned": False,
+            },
+            {
+                "imo": 7003,
+                "ship_name": "TANKER OFAC",
+                "fetch_ok": True,
+                "risk_score": 60,
+                "ofac_sanctioned": True,
+            },
+            {
+                "imo": 7004,
+                "ship_name": "BULK CLEAN",
+                "fetch_ok": True,
+                "risk_score": 10,
+                "ofac_sanctioned": False,
+            },
+        ],
+    )
 
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
     monkeypatch.setenv("ANALYTICS_DB", str(an_file))
     from app.main import app
+
     return TestClient(app)
 
 
@@ -2178,7 +2504,14 @@ def test_vessel_risk_scores_structure(risk_leaderboard_client):
         assert key in d
     if d["rows"]:
         row = d["rows"][0]
-        for field in ("mmsi", "sto_count", "reroute_count", "behavioral_score", "total_score", "ofac"):
+        for field in (
+            "mmsi",
+            "sto_count",
+            "reroute_count",
+            "behavioral_score",
+            "total_score",
+            "ofac",
+        ):
             assert field in row or field.replace("sto_count", "sts_count") in row
 
 
@@ -2312,6 +2645,7 @@ def test_chokepoint_heatmap_chokepoints_ordered_by_traffic(analytics_client):
     d = r.json()
     # Compute per-chokepoint totals from cells
     from collections import defaultdict
+
     cp_totals: dict[str, int] = defaultdict(int)
     for cell in d["cells"]:
         cp_totals[cell["chokepoint"]] += cell["total"]
@@ -2355,6 +2689,7 @@ def test_chokepoint_heatmap_no_data_returns_empty(tmp_path, monkeypatch):
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
     monkeypatch.setenv("ANALYTICS_DB", str(an_file))
     from app.main import app
+
     r = TestClient(app).get("/api/analytics/chokepoint-heatmap?days=7")
     assert r.status_code == 200
     d = r.json()
@@ -2377,8 +2712,9 @@ def trade_lane_client(tmp_path, monkeypatch):
       9103 CAPE A  region=ara     dest=NLRTM (NW Europe) laden registry_risk=70 ofac=False
       9104 VLCC C  region=hormuz  dest=AEFJR (Middle East) ballast (excluded when laden_only=True)
     """
-    import duckdb
     from datetime import UTC, datetime, timedelta
+
+    import duckdb
     from fastapi.testclient import TestClient
 
     now = datetime.now(UTC).replace(tzinfo=None)
@@ -2445,10 +2781,86 @@ def trade_lane_client(tmp_path, monkeypatch):
     ais_conn.executemany(
         "INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         [
-            (9101, "VLCC A", 25.0, 56.0, 14.0, 90.0, None, "CNSHA", 80, 330, "tanker", "VLCC", "hormuz", now, 8001, 20.0, 0, None),
-            (9102, "VLCC B", 25.5, 56.5, 13.5, 90.0, None, "JPYOK", 80, 330, "tanker", "VLCC", "hormuz", now, 8002, 19.5, 0, None),
-            (9103, "CAPE A", 3.5,  5.0,  12.0, 45.0, None, "NLRTM", 74, 300, "bulk",   "Capesize", "ara", now, 8003, 18.0, 0, None),
-            (9104, "VLCC C", 26.0, 57.0, 15.0, 270.0, None, "AEFJR", 80, 330, "tanker", "VLCC", "hormuz", now, 8004, 5.0, 0, None),
+            (
+                9101,
+                "VLCC A",
+                25.0,
+                56.0,
+                14.0,
+                90.0,
+                None,
+                "CNSHA",
+                80,
+                330,
+                "tanker",
+                "VLCC",
+                "hormuz",
+                now,
+                8001,
+                20.0,
+                0,
+                None,
+            ),
+            (
+                9102,
+                "VLCC B",
+                25.5,
+                56.5,
+                13.5,
+                90.0,
+                None,
+                "JPYOK",
+                80,
+                330,
+                "tanker",
+                "VLCC",
+                "hormuz",
+                now,
+                8002,
+                19.5,
+                0,
+                None,
+            ),
+            (
+                9103,
+                "CAPE A",
+                3.5,
+                5.0,
+                12.0,
+                45.0,
+                None,
+                "NLRTM",
+                74,
+                300,
+                "bulk",
+                "Capesize",
+                "ara",
+                now,
+                8003,
+                18.0,
+                0,
+                None,
+            ),
+            (
+                9104,
+                "VLCC C",
+                26.0,
+                57.0,
+                15.0,
+                270.0,
+                None,
+                "AEFJR",
+                80,
+                330,
+                "tanker",
+                "VLCC",
+                "hormuz",
+                now,
+                8004,
+                5.0,
+                0,
+                None,
+            ),
         ],
     )
     ais_conn.close()
@@ -2457,19 +2869,61 @@ def trade_lane_client(tmp_path, monkeypatch):
     an_conn = duckdb.connect(str(an_file))
     an_conn.execute(an_schema)
     # 9101, 9103 laden; 9104 ballast; 9102 will have STS events making it high-risk
-    an_conn.executemany("INSERT INTO vessel_state VALUES (?,?,?,?,?)", [
-        (9101, 21.0, 20.0, 'laden', now),
-        (9102, 21.0, 19.5, 'laden', now),
-        (9103, 19.0, 18.0, 'laden', now),
-        (9104, 21.0, 5.0,  'ballast', now),
-    ])
+    an_conn.executemany(
+        "INSERT INTO vessel_state VALUES (?,?,?,?,?)",
+        [
+            (9101, 21.0, 20.0, "laden", now),
+            (9102, 21.0, 19.5, "laden", now),
+            (9103, 19.0, 18.0, "laden", now),
+            (9104, 21.0, 5.0, "ballast", now),
+        ],
+    )
     # 3 STS events for 9102 -> behavioral_score = min(3*20, 100) = 60 >= 50 -> high_risk
     an_conn.executemany(
         "INSERT INTO ais_events VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
         [
-            ("sts-tl1", "sts", 9102, None, recent, None, 25.5, 56.5, "hormuz", "tanker", "VLCC", "{}"),
-            ("sts-tl2", "sts", 9102, None, recent, None, 25.6, 56.6, "hormuz", "tanker", "VLCC", "{}"),
-            ("sts-tl3", "sts", 9102, None, recent, None, 25.7, 56.7, "hormuz", "tanker", "VLCC", "{}"),
+            (
+                "sts-tl1",
+                "sts",
+                9102,
+                None,
+                recent,
+                None,
+                25.5,
+                56.5,
+                "hormuz",
+                "tanker",
+                "VLCC",
+                "{}",
+            ),
+            (
+                "sts-tl2",
+                "sts",
+                9102,
+                None,
+                recent,
+                None,
+                25.6,
+                56.6,
+                "hormuz",
+                "tanker",
+                "VLCC",
+                "{}",
+            ),
+            (
+                "sts-tl3",
+                "sts",
+                9102,
+                None,
+                recent,
+                None,
+                25.7,
+                56.7,
+                "hormuz",
+                "tanker",
+                "VLCC",
+                "{}",
+            ),
         ],
     )
     an_conn.close()
@@ -2480,7 +2934,7 @@ def trade_lane_client(tmp_path, monkeypatch):
     reg_conn.executemany(
         "INSERT INTO vessel_registry (imo, ship_name, fetch_ok, risk_score, ofac_sanctioned) VALUES (?,?,?,?,?)",
         [
-            (8003, "CAPE A", True, 70, False),   # registry_risk=70, 9103 has this
+            (8003, "CAPE A", True, 70, False),  # registry_risk=70, 9103 has this
         ],
     )
     reg_conn.close()
@@ -2489,6 +2943,7 @@ def trade_lane_client(tmp_path, monkeypatch):
     monkeypatch.setenv("ANALYTICS_DB", str(an_file))
     monkeypatch.setenv("REGISTRY_DB", str(reg_file))
     from app.main import app
+
     return TestClient(app)
 
 
@@ -2500,7 +2955,13 @@ def test_trade_lane_matrix_structure(trade_lane_client):
         assert key in d
     if d["cells"]:
         cell = d["cells"][0]
-        for field in ("origin_region", "dest_region", "vessel_count", "high_risk_count", "laden_count"):
+        for field in (
+            "origin_region",
+            "dest_region",
+            "vessel_count",
+            "high_risk_count",
+            "laden_count",
+        ):
             assert field in cell
 
 
@@ -2521,7 +2982,14 @@ def test_trade_lane_matrix_high_risk_count(trade_lane_client):
     d = r.json()
     # 9102 has 3 STS events -> behavioral_score=60 >= 50 -> high_risk
     # It's in hormuz -> Far East (JPYOK = JP = Far East)
-    hormuz_fe = next((c for c in d["cells"] if c["origin_region"] == "hormuz" and c["dest_region"] == "Far East"), None)
+    hormuz_fe = next(
+        (
+            c
+            for c in d["cells"]
+            if c["origin_region"] == "hormuz" and c["dest_region"] == "Far East"
+        ),
+        None,
+    )
     assert hormuz_fe is not None
     # 9101 (CNSHA=Far East) + 9102 (JPYOK=Far East) = 2 in this cell
     assert hormuz_fe["vessel_count"] == 2
@@ -2557,9 +3025,19 @@ def test_vessel_behavioral_risk_structure(risk_leaderboard_client):
     r = risk_leaderboard_client.get("/api/vessels/9001/behavioral-risk")
     assert r.status_code == 200
     d = r.json()
-    for key in ("mmsi", "imo", "sts_count", "reroute_count", "days",
-                "behavioral_score", "registry_risk", "ofac", "total_score",
-                "risk_level", "recent_events"):
+    for key in (
+        "mmsi",
+        "imo",
+        "sts_count",
+        "reroute_count",
+        "days",
+        "behavioral_score",
+        "registry_risk",
+        "ofac",
+        "total_score",
+        "risk_level",
+        "recent_events",
+    ):
         assert key in d
 
 
@@ -2634,8 +3112,16 @@ def test_anomaly_watchlist_structure(risk_leaderboard_client):
         assert key in d
     if d["rows"]:
         row = d["rows"][0]
-        for field in ("mmsi", "name", "total_score", "risk_level", "signals",
-                      "sts_count_7d", "reroute_count_7d", "ofac"):
+        for field in (
+            "mmsi",
+            "name",
+            "total_score",
+            "risk_level",
+            "signals",
+            "sts_count_7d",
+            "reroute_count_7d",
+            "ofac",
+        ):
             assert field in row
 
 
@@ -2688,6 +3174,7 @@ def test_anomaly_watchlist_limit_param(risk_leaderboard_client):
 # Phase 35: STS Proximity
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def sts_proximity_client(tmp_path, monkeypatch):
     """Fixture for STS proximity endpoint.
@@ -2700,9 +3187,10 @@ def sts_proximity_client(tmp_path, monkeypatch):
       9205  north_sea   (51.001, 3.001)  sog=0.9  bulk/Capesize  ~131m from 9204
       9206  hormuz      (25.0, 56.1)     sog=0.5  tanker/VLCC   nav_status=1 ANCHORED
     """
+    from datetime import UTC, datetime
+
     import duckdb
     from fastapi.testclient import TestClient
-    from datetime import UTC, datetime
 
     now = datetime.now(UTC).replace(tzinfo=None)
     ais_schema = """
@@ -2732,12 +3220,126 @@ def sts_proximity_client(tmp_path, monkeypatch):
     ais_conn.executemany(
         "INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         [
-            (9201, "VLCC ALPHA",  25.000, 56.000, 0.8, None, None, None, 80, 330, "tanker", "VLCC",     "hormuz",    now, 7201, 20.0, 0,    None),
-            (9202, "VLCC BETA",   25.001, 56.001, 1.2, None, None, None, 80, 330, "tanker", "VLCC",     "hormuz",    now, 7202, 19.5, 0,    None),
-            (9203, "SUEZMAX G",   25.005, 56.005, 2.0, None, None, None, 80, 300, "tanker", "Suezmax",  "hormuz",    now, 7203, 18.0, 0,    None),
-            (9204, "CAPE NORTH",  51.000,  3.000, 1.5, None, None, None, 74, 290, "bulk",   "Capesize", "north_sea", now, 7204, 15.0, 0,    None),
-            (9205, "CAPE SOUTH",  51.001,  3.001, 0.9, None, None, None, 74, 290, "bulk",   "Capesize", "north_sea", now, 7205, 14.5, 0,    None),
-            (9206, "ANCH VLCC",   25.000, 56.100, 0.5, None, None, None, 80, 330, "tanker", "VLCC",     "hormuz",    now, 7206, 20.0, 1,    None),
+            (
+                9201,
+                "VLCC ALPHA",
+                25.000,
+                56.000,
+                0.8,
+                None,
+                None,
+                None,
+                80,
+                330,
+                "tanker",
+                "VLCC",
+                "hormuz",
+                now,
+                7201,
+                20.0,
+                0,
+                None,
+            ),
+            (
+                9202,
+                "VLCC BETA",
+                25.001,
+                56.001,
+                1.2,
+                None,
+                None,
+                None,
+                80,
+                330,
+                "tanker",
+                "VLCC",
+                "hormuz",
+                now,
+                7202,
+                19.5,
+                0,
+                None,
+            ),
+            (
+                9203,
+                "SUEZMAX G",
+                25.005,
+                56.005,
+                2.0,
+                None,
+                None,
+                None,
+                80,
+                300,
+                "tanker",
+                "Suezmax",
+                "hormuz",
+                now,
+                7203,
+                18.0,
+                0,
+                None,
+            ),
+            (
+                9204,
+                "CAPE NORTH",
+                51.000,
+                3.000,
+                1.5,
+                None,
+                None,
+                None,
+                74,
+                290,
+                "bulk",
+                "Capesize",
+                "north_sea",
+                now,
+                7204,
+                15.0,
+                0,
+                None,
+            ),
+            (
+                9205,
+                "CAPE SOUTH",
+                51.001,
+                3.001,
+                0.9,
+                None,
+                None,
+                None,
+                74,
+                290,
+                "bulk",
+                "Capesize",
+                "north_sea",
+                now,
+                7205,
+                14.5,
+                0,
+                None,
+            ),
+            (
+                9206,
+                "ANCH VLCC",
+                25.000,
+                56.100,
+                0.5,
+                None,
+                None,
+                None,
+                80,
+                330,
+                "tanker",
+                "VLCC",
+                "hormuz",
+                now,
+                7206,
+                20.0,
+                1,
+                None,
+            ),
         ],
     )
     ais_conn.close()
@@ -2794,6 +3396,7 @@ def sts_proximity_client(tmp_path, monkeypatch):
     monkeypatch.setenv("REGISTRY_DB", str(reg_file))
 
     from app.main import app as freight_app
+
     return TestClient(freight_app)
 
 
@@ -2851,6 +3454,7 @@ def test_sts_proximity_sog_filter(sts_proximity_client):
 # Phase 36: Region Momentum
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def region_momentum_client(tmp_path, monkeypatch):
     """Fixture for region-momentum endpoint.
@@ -2860,9 +3464,10 @@ def region_momentum_client(tmp_path, monkeypatch):
       suez:        latest=200, prev=250  -> delta=-50
       dover_channel: only in latest=150  -> delta=+150
     """
+    from datetime import UTC, datetime, timedelta
+
     import duckdb
     from fastapi.testclient import TestClient
-    from datetime import UTC, datetime, timedelta
 
     now = datetime.now(UTC).replace(tzinfo=None)
     t_latest = now.replace(minute=0, second=0, microsecond=0)
@@ -2927,17 +3532,17 @@ def region_momentum_client(tmp_path, monkeypatch):
     an_conn.executemany(
         "INSERT INTO fleet_density VALUES (?,?,?,?,?,?,?)",
         [
-            (t_latest, "ara",           "tanker", "VLCC",     300, 150, 50),
-            (t_latest, "suez",          "tanker", "VLCC",     120,  60, 20),
-            (t_latest, "dover_channel", "bulk",   "Capesize",  90,  45, 15),
+            (t_latest, "ara", "tanker", "VLCC", 300, 150, 50),
+            (t_latest, "suez", "tanker", "VLCC", 120, 60, 20),
+            (t_latest, "dover_channel", "bulk", "Capesize", 90, 45, 15),
         ],
     )
     # prev snapshot
     an_conn.executemany(
         "INSERT INTO fleet_density VALUES (?,?,?,?,?,?,?)",
         [
-            (t_prev, "ara",  "tanker", "VLCC", 240, 120, 40),
-            (t_prev, "suez", "tanker", "VLCC",  140,  80, 30),
+            (t_prev, "ara", "tanker", "VLCC", 240, 120, 40),
+            (t_prev, "suez", "tanker", "VLCC", 140, 80, 30),
         ],
     )
     an_conn.close()
@@ -2962,6 +3567,7 @@ def region_momentum_client(tmp_path, monkeypatch):
     monkeypatch.setenv("REGISTRY_DB", str(reg_file))
 
     from app.main import app as freight_app
+
     return TestClient(freight_app)
 
 
@@ -3013,6 +3619,7 @@ def test_region_momentum_laden_ratio(region_momentum_client):
 # Phase 37: Event Rate Timeline
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def event_rate_client(tmp_path, monkeypatch):
     """Fixture for event-rate-timeline endpoint.
@@ -3021,9 +3628,10 @@ def event_rate_client(tmp_path, monkeypatch):
       - 3 reroutes at hour H and 2 reroutes at hour H-1
       - 1 STS at hour H
     """
+    from datetime import UTC, datetime, timedelta
+
     import duckdb
     from fastapi.testclient import TestClient
-    from datetime import UTC, datetime, timedelta
 
     now = datetime.now(UTC).replace(tzinfo=None)
     h0 = now.replace(minute=0, second=0, microsecond=0)
@@ -3090,9 +3698,9 @@ def event_rate_client(tmp_path, monkeypatch):
             ("er-1", "reroute", 9301, None, h0, None, 25.0, 56.0, "hormuz", "tanker", "VLCC", "{}"),
             ("er-2", "reroute", 9302, None, h0, None, 25.0, 56.0, "hormuz", "tanker", "VLCC", "{}"),
             ("er-3", "reroute", 9303, None, h0, None, 25.0, 56.0, "hormuz", "tanker", "VLCC", "{}"),
-            ("er-4", "reroute", 9304, None, h1, None, 3.5,  5.0,  "ara",    "bulk",   "Capesize", "{}"),
-            ("er-5", "reroute", 9305, None, h1, None, 3.5,  5.0,  "ara",    "bulk",   "Capesize", "{}"),
-            ("er-6", "sts",     9301, 9306, h0, None, 25.0, 56.0, "hormuz", "tanker", "VLCC", "{}"),
+            ("er-4", "reroute", 9304, None, h1, None, 3.5, 5.0, "ara", "bulk", "Capesize", "{}"),
+            ("er-5", "reroute", 9305, None, h1, None, 3.5, 5.0, "ara", "bulk", "Capesize", "{}"),
+            ("er-6", "sts", 9301, 9306, h0, None, 25.0, 56.0, "hormuz", "tanker", "VLCC", "{}"),
         ],
     )
     an_conn.close()
@@ -3117,6 +3725,7 @@ def event_rate_client(tmp_path, monkeypatch):
     monkeypatch.setenv("REGISTRY_DB", str(reg_file))
 
     from app.main import app as freight_app
+
     return TestClient(freight_app)
 
 
@@ -3158,6 +3767,7 @@ def test_event_rate_timeline_hours_clamp(event_rate_client):
 # Phase 38: Transit Rate Timeline
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def transit_rate_client(tmp_path, monkeypatch):
     """Fixture for transit-rate-timeline endpoint.
@@ -3166,9 +3776,10 @@ def transit_rate_client(tmp_path, monkeypatch):
       - dover_channel: 3 transits at hour H (2 laden, 1 ballast)
       - suez: 1 transit at hour H, 2 at hour H-1
     """
+    from datetime import UTC, datetime, timedelta
+
     import duckdb
     from fastapi.testclient import TestClient
-    from datetime import UTC, datetime, timedelta
 
     now = datetime.now(UTC).replace(tzinfo=None)
     h0 = now.replace(minute=0, second=0, microsecond=0)
@@ -3231,11 +3842,11 @@ def transit_rate_client(tmp_path, monkeypatch):
         "INSERT INTO transit_events VALUES (?,?,?,?,?,?,?,?)",
         [
             (9401, "dover_channel", h0, None, "northbound", "tanker", "VLCC", True),
-            (9402, "dover_channel", h0, None, "southbound", "bulk",   "Capesize", True),
+            (9402, "dover_channel", h0, None, "southbound", "bulk", "Capesize", True),
             (9403, "dover_channel", h0, None, "northbound", "tanker", "Suezmax", False),
-            (9404, "suez",          h0, None, "northbound", "tanker", "VLCC", True),
-            (9405, "suez",          h1, None, "northbound", "tanker", "VLCC", False),
-            (9406, "suez",          h1, None, "southbound", "bulk",   "Capesize", True),
+            (9404, "suez", h0, None, "northbound", "tanker", "VLCC", True),
+            (9405, "suez", h1, None, "northbound", "tanker", "VLCC", False),
+            (9406, "suez", h1, None, "southbound", "bulk", "Capesize", True),
         ],
     )
     an_conn.close()
@@ -3260,6 +3871,7 @@ def transit_rate_client(tmp_path, monkeypatch):
     monkeypatch.setenv("REGISTRY_DB", str(reg_file))
 
     from app.main import app as freight_app
+
     return TestClient(freight_app)
 
 
@@ -3293,7 +3905,9 @@ def test_transit_rate_suez_prev_hour(transit_rate_client):
 
 
 def test_transit_rate_chokepoint_filter(transit_rate_client):
-    r = transit_rate_client.get("/api/analytics/transit-rate-timeline?hours=72&chokepoints_csv=suez")
+    r = transit_rate_client.get(
+        "/api/analytics/transit-rate-timeline?hours=72&chokepoints_csv=suez"
+    )
     d = r.json()
     assert all(p["chokepoint"] == "suez" for p in d["points"])
     assert "dover_channel" not in d["chokepoints"]
@@ -3310,6 +3924,7 @@ def test_transit_rate_chokepoints_list(transit_rate_client):
 # Phase 39: Anchorage Occupancy Timeline
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def anchorage_occ_client(tmp_path, monkeypatch):
     """Fixture for anchorage-occupancy endpoint.
@@ -3321,9 +3936,10 @@ def anchorage_occ_client(tmp_path, monkeypatch):
     rotterdam:
       Episode 4: h0-2h to h0 (2 hours)
     """
+    from datetime import UTC, datetime, timedelta
+
     import duckdb
     from fastapi.testclient import TestClient
-    from datetime import UTC, datetime, timedelta
 
     now = datetime.now(UTC).replace(tzinfo=None)
     h0 = now.replace(minute=30, second=0, microsecond=0)  # mid-hour, floor will align
@@ -3382,10 +3998,31 @@ def anchorage_occ_client(tmp_path, monkeypatch):
     an_conn.executemany(
         "INSERT INTO anchored_episodes VALUES (?,?,?,?,?,?)",
         [
-            (9501, "singapore_west", h0 - timedelta(hours=3), h0 - timedelta(hours=1), "tanker", "VLCC"),
-            (9502, "singapore_west", h0 - timedelta(hours=1), h0 + timedelta(hours=1), "tanker", "Suezmax"),
-            (9503, "singapore_west", h0 - timedelta(hours=5), h0 - timedelta(hours=4), "bulk",   "Capesize"),
-            (9504, "rotterdam",      h0 - timedelta(hours=2), h0, "tanker", "VLCC"),
+            (
+                9501,
+                "singapore_west",
+                h0 - timedelta(hours=3),
+                h0 - timedelta(hours=1),
+                "tanker",
+                "VLCC",
+            ),
+            (
+                9502,
+                "singapore_west",
+                h0 - timedelta(hours=1),
+                h0 + timedelta(hours=1),
+                "tanker",
+                "Suezmax",
+            ),
+            (
+                9503,
+                "singapore_west",
+                h0 - timedelta(hours=5),
+                h0 - timedelta(hours=4),
+                "bulk",
+                "Capesize",
+            ),
+            (9504, "rotterdam", h0 - timedelta(hours=2), h0, "tanker", "VLCC"),
         ],
     )
     an_conn.close()
@@ -3408,6 +4045,7 @@ def anchorage_occ_client(tmp_path, monkeypatch):
     monkeypatch.setenv("REGISTRY_DB", str(reg_file))
 
     from app.main import app as freight_app
+
     return TestClient(freight_app)
 
 
@@ -3421,7 +4059,9 @@ def test_anchorage_occupancy_structure(anchorage_occ_client):
 
 
 def test_anchorage_occupancy_returns_data(anchorage_occ_client):
-    r = anchorage_occ_client.get("/api/analytics/anchorage-occupancy?hours=72&zones_csv=singapore_west,rotterdam")
+    r = anchorage_occ_client.get(
+        "/api/analytics/anchorage-occupancy?hours=72&zones_csv=singapore_west,rotterdam"
+    )
     d = r.json()
     assert len(d["points"]) > 0
     zones = {p["zone"] for p in d["points"]}
@@ -3436,7 +4076,9 @@ def test_anchorage_occupancy_zone_filter(anchorage_occ_client):
 
 
 def test_anchorage_occupancy_nonzero_counts(anchorage_occ_client):
-    r = anchorage_occ_client.get("/api/analytics/anchorage-occupancy?hours=72&zones_csv=singapore_west")
+    r = anchorage_occ_client.get(
+        "/api/analytics/anchorage-occupancy?hours=72&zones_csv=singapore_west"
+    )
     d = r.json()
     assert all(p["vessel_count"] > 0 for p in d["points"])
 
@@ -3444,6 +4086,7 @@ def test_anchorage_occupancy_nonzero_counts(anchorage_occ_client):
 # ---------------------------------------------------------------------------
 # Phase 40: STS Offenders
 # ---------------------------------------------------------------------------
+
 
 def test_sts_offenders_structure(risk_leaderboard_client):
     """STS offenders uses risk_leaderboard_client which has STS events."""
@@ -3486,15 +4129,17 @@ def test_sts_offenders_sorted_desc(risk_leaderboard_client):
 # Phase 41: Fleet Historical Query (fleet-at-time)
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def fleet_history_client(tmp_path, monkeypatch):
     """Fixture for fleet-at-time endpoint.
 
     ais_snapshots has 3 vessels at a known timestamp.
     """
+    from datetime import UTC, datetime, timedelta
+
     import duckdb
     from fastapi.testclient import TestClient
-    from datetime import UTC, datetime, timedelta
 
     now = datetime.now(UTC).replace(tzinfo=None)
     snap_ts = now - timedelta(hours=23)  # within 30min of 24h ago query
@@ -3526,9 +4171,23 @@ def fleet_history_client(tmp_path, monkeypatch):
     ais_conn.executemany(
         "INSERT INTO ais_snapshots VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
         [
-            (snap_ts, 9601, "tanker", "VLCC",     "hormuz",    25.0, 56.0, 80, 330, 12.0, 0, 18.0, "CNSHA"),
-            (snap_ts, 9602, "bulk",   "Capesize",  "ara",       3.5,  5.0, 74, 300,  8.0, 0,  7.0, "NLRTM"),
-            (snap_ts, 9603, "tanker", "VLCC",     "hormuz",    25.1, 56.1, 80, 330,  0.5, 5,  4.0, None),
+            (
+                snap_ts,
+                9601,
+                "tanker",
+                "VLCC",
+                "hormuz",
+                25.0,
+                56.0,
+                80,
+                330,
+                12.0,
+                0,
+                18.0,
+                "CNSHA",
+            ),
+            (snap_ts, 9602, "bulk", "Capesize", "ara", 3.5, 5.0, 74, 300, 8.0, 0, 7.0, "NLRTM"),
+            (snap_ts, 9603, "tanker", "VLCC", "hormuz", 25.1, 56.1, 80, 330, 0.5, 5, 4.0, None),
         ],
     )
     ais_conn.close()
@@ -3581,6 +4240,7 @@ def fleet_history_client(tmp_path, monkeypatch):
     monkeypatch.setenv("REGISTRY_DB", str(reg_file))
 
     from app.main import app as freight_app
+
     return TestClient(freight_app)
 
 
@@ -3594,7 +4254,8 @@ def test_fleet_history_structure(fleet_history_client):
 
 
 def test_fleet_history_finds_snapshots(fleet_history_client):
-    from datetime import datetime, timedelta, UTC
+    from datetime import UTC, datetime, timedelta
+
     target_ts = (datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=23)).isoformat()
     r = fleet_history_client.get(f"/api/analytics/fleet-at-time?ts={target_ts}")
     d = r.json()
@@ -3602,7 +4263,8 @@ def test_fleet_history_finds_snapshots(fleet_history_client):
 
 
 def test_fleet_history_region_filter(fleet_history_client):
-    from datetime import datetime, timedelta, UTC
+    from datetime import UTC, datetime, timedelta
+
     target_ts = (datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=23)).isoformat()
     r = fleet_history_client.get(f"/api/analytics/fleet-at-time?ts={target_ts}&region=hormuz")
     d = r.json()
@@ -3611,7 +4273,8 @@ def test_fleet_history_region_filter(fleet_history_client):
 
 
 def test_fleet_history_segment_breakdown(fleet_history_client):
-    from datetime import datetime, timedelta, UTC
+    from datetime import UTC, datetime, timedelta
+
     target_ts = (datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=23)).isoformat()
     r = fleet_history_client.get(f"/api/analytics/fleet-at-time?ts={target_ts}")
     d = r.json()
@@ -3624,12 +4287,14 @@ def test_fleet_history_segment_breakdown(fleet_history_client):
 # Phase 42: Destination Change Intelligence
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def dest_changes_client(tmp_path, monkeypatch):
     """Fixture: 3 vessels with destination changes in ais_snapshots."""
+    from datetime import UTC, datetime, timedelta
+
     import duckdb
     from fastapi.testclient import TestClient
-    from datetime import UTC, datetime, timedelta
 
     now = datetime.now(UTC).replace(tzinfo=None)
     t1 = now - timedelta(hours=10)
@@ -3665,17 +4330,86 @@ def dest_changes_client(tmp_path, monkeypatch):
             (t1, 9701, "tanker", "VLCC", "ara", 52.0, 4.0, 80, 330, 12.0, 0, 18.0, "NLROT"),
             (t2, 9701, "tanker", "VLCC", "ara", 52.1, 4.1, 80, 330, 13.0, 0, 17.5, "CNSHA"),
             # Vessel 2: same destination both snapshots (no change)
-            (t1, 9702, "bulk",   "Capesize", "hormuz", 25.0, 56.0, 74, 300, 8.0, 0, 7.0, "JPUKB"),
-            (t2, 9702, "bulk",   "Capesize", "hormuz", 25.1, 56.1, 74, 300, 8.0, 0, 7.0, "JPUKB"),
+            (t1, 9702, "bulk", "Capesize", "hormuz", 25.0, 56.0, 74, 300, 8.0, 0, 7.0, "JPUKB"),
+            (t2, 9702, "bulk", "Capesize", "hormuz", 25.1, 56.1, 74, 300, 8.0, 0, 7.0, "JPUKB"),
             # Vessel 3: changed from GBSOU -> NLROT
-            (t1, 9703, "bulk",   "Handysize", "dover_channel", 50.9, -1.4, 74, 100, 6.0, 0, 4.0, "GBSOU"),
-            (t2, 9703, "bulk",   "Handysize", "dover_channel", 50.8, -1.3, 74, 100, 6.0, 0, 4.0, "NLROT"),
+            (
+                t1,
+                9703,
+                "bulk",
+                "Handysize",
+                "dover_channel",
+                50.9,
+                -1.4,
+                74,
+                100,
+                6.0,
+                0,
+                4.0,
+                "GBSOU",
+            ),
+            (
+                t2,
+                9703,
+                "bulk",
+                "Handysize",
+                "dover_channel",
+                50.8,
+                -1.3,
+                74,
+                100,
+                6.0,
+                0,
+                4.0,
+                "NLROT",
+            ),
         ],
     )
-    conn.executemany("INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [
-        (9701, "VESSEL A", 52.1, 4.1, 13.0, 90.0, 90.0, "CNSHA", 80, 330.0, "tanker", "VLCC", "ara", t2, 9000001, 17.5, 0, None),
-        (9703, "VESSEL C", 50.8, -1.3, 6.0, 180.0, 180.0, "NLROT", 74, 100.0, "bulk", "Handysize", "dover_channel", t2, 9000003, 4.0, 0, None),
-    ])
+    conn.executemany(
+        "INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            (
+                9701,
+                "VESSEL A",
+                52.1,
+                4.1,
+                13.0,
+                90.0,
+                90.0,
+                "CNSHA",
+                80,
+                330.0,
+                "tanker",
+                "VLCC",
+                "ara",
+                t2,
+                9000001,
+                17.5,
+                0,
+                None,
+            ),
+            (
+                9703,
+                "VESSEL C",
+                50.8,
+                -1.3,
+                6.0,
+                180.0,
+                180.0,
+                "NLROT",
+                74,
+                100.0,
+                "bulk",
+                "Handysize",
+                "dover_channel",
+                t2,
+                9000003,
+                4.0,
+                0,
+                None,
+            ),
+        ],
+    )
     conn.close()
 
     an_file = tmp_path / "analytics_dc.duckdb"
@@ -3726,6 +4460,7 @@ def dest_changes_client(tmp_path, monkeypatch):
     monkeypatch.setenv("REGISTRY_DB", str(reg_file))
 
     from app.main import app as freight_app
+
     return TestClient(freight_app)
 
 
@@ -3772,12 +4507,14 @@ def test_dest_changes_kind_filter(dest_changes_client):
 # Phase 43: Owner Intelligence
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def owner_intel_client(tmp_path, monkeypatch):
     """Fixture: vessel_registry with 3 owners; live_positions with kind data."""
+    from datetime import UTC, datetime
+
     import duckdb
     from fastapi.testclient import TestClient
-    from datetime import UTC, datetime
 
     now = datetime.now(UTC).replace(tzinfo=None)
 
@@ -3804,11 +4541,71 @@ def owner_intel_client(tmp_path, monkeypatch):
         owner VARCHAR, manager VARCHAR, class_society VARCHAR, enriched_at TIMESTAMP, equasis_ok BOOLEAN
     );
     """)
-    conn.executemany("INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [
-        (9801, "V1", 25.0, 56.0, 12.0, 90.0, 90.0, "NLROT", 80, 330.0, "tanker", "VLCC", "hormuz", now, 1000001, 18.0, 0, None),
-        (9802, "V2", 25.1, 56.1, 13.0, 91.0, 91.0, "CNSHA", 80, 330.0, "tanker", "VLCC", "hormuz", now, 1000002, 17.0, 0, None),
-        (9803, "V3", 3.5, 5.0, 8.0, 180.0, 180.0, "NLRTM", 74, 300.0, "bulk", "Capesize", "ara", now, 1000003, 7.0, 0, None),
-    ])
+    conn.executemany(
+        "INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            (
+                9801,
+                "V1",
+                25.0,
+                56.0,
+                12.0,
+                90.0,
+                90.0,
+                "NLROT",
+                80,
+                330.0,
+                "tanker",
+                "VLCC",
+                "hormuz",
+                now,
+                1000001,
+                18.0,
+                0,
+                None,
+            ),
+            (
+                9802,
+                "V2",
+                25.1,
+                56.1,
+                13.0,
+                91.0,
+                91.0,
+                "CNSHA",
+                80,
+                330.0,
+                "tanker",
+                "VLCC",
+                "hormuz",
+                now,
+                1000002,
+                17.0,
+                0,
+                None,
+            ),
+            (
+                9803,
+                "V3",
+                3.5,
+                5.0,
+                8.0,
+                180.0,
+                180.0,
+                "NLRTM",
+                74,
+                300.0,
+                "bulk",
+                "Capesize",
+                "ara",
+                now,
+                1000003,
+                7.0,
+                0,
+                None,
+            ),
+        ],
+    )
     conn.close()
 
     an_file = tmp_path / "analytics_oi.duckdb"
@@ -3842,28 +4639,72 @@ def owner_intel_client(tmp_path, monkeypatch):
     an_conn.close()
 
     from conftest import setup_pg_vessels
-    setup_pg_vessels(monkeypatch, [
-        {"imo": 1000001, "ship_name": "V1", "flag": "Russia", "flag_code": "RU",
-         "gross_tonnage": 200000, "dwt": 300000, "ship_type": "Tanker", "year_built": 2005,
-         "ship_status": "In Service", "owner": "SHADOW FLEET LLC", "class_society": "RMRS",
-         "paris_mou": "Black", "tokyo_mou": "Black", "fetch_ok": True,
-         "risk_score": 72, "ofac_sanctioned": True},
-        {"imo": 1000002, "ship_name": "V2", "flag": "Nauru", "flag_code": "NR",
-         "gross_tonnage": 200000, "dwt": 300000, "ship_type": "Tanker", "year_built": 2004,
-         "ship_status": "In Service", "owner": "SHADOW FLEET LLC", "class_society": "RMRS",
-         "paris_mou": "Black", "tokyo_mou": "Black", "fetch_ok": True,
-         "risk_score": 75, "ofac_sanctioned": False},
-        {"imo": 1000003, "ship_name": "V3", "flag": "Marshall Islands", "flag_code": "MH",
-         "gross_tonnage": 150000, "dwt": 200000, "ship_type": "Bulk Carrier", "year_built": 2018,
-         "ship_status": "In Service", "owner": "CLEAN OWNER PTE", "class_society": "ABS (IACS)",
-         "paris_mou": "White", "tokyo_mou": "White", "fetch_ok": True,
-         "risk_score": 10, "ofac_sanctioned": False},
-    ])
+
+    setup_pg_vessels(
+        monkeypatch,
+        [
+            {
+                "imo": 1000001,
+                "ship_name": "V1",
+                "flag": "Russia",
+                "flag_code": "RU",
+                "gross_tonnage": 200000,
+                "dwt": 300000,
+                "ship_type": "Tanker",
+                "year_built": 2005,
+                "ship_status": "In Service",
+                "owner": "SHADOW FLEET LLC",
+                "class_society": "RMRS",
+                "paris_mou": "Black",
+                "tokyo_mou": "Black",
+                "fetch_ok": True,
+                "risk_score": 72,
+                "ofac_sanctioned": True,
+            },
+            {
+                "imo": 1000002,
+                "ship_name": "V2",
+                "flag": "Nauru",
+                "flag_code": "NR",
+                "gross_tonnage": 200000,
+                "dwt": 300000,
+                "ship_type": "Tanker",
+                "year_built": 2004,
+                "ship_status": "In Service",
+                "owner": "SHADOW FLEET LLC",
+                "class_society": "RMRS",
+                "paris_mou": "Black",
+                "tokyo_mou": "Black",
+                "fetch_ok": True,
+                "risk_score": 75,
+                "ofac_sanctioned": False,
+            },
+            {
+                "imo": 1000003,
+                "ship_name": "V3",
+                "flag": "Marshall Islands",
+                "flag_code": "MH",
+                "gross_tonnage": 150000,
+                "dwt": 200000,
+                "ship_type": "Bulk Carrier",
+                "year_built": 2018,
+                "ship_status": "In Service",
+                "owner": "CLEAN OWNER PTE",
+                "class_society": "ABS (IACS)",
+                "paris_mou": "White",
+                "tokyo_mou": "White",
+                "fetch_ok": True,
+                "risk_score": 10,
+                "ofac_sanctioned": False,
+            },
+        ],
+    )
 
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
     monkeypatch.setenv("ANALYTICS_DB", str(an_file))
 
     from app.main import app as freight_app
+
     return TestClient(freight_app)
 
 
@@ -3909,12 +4750,14 @@ def test_owner_intel_min_vessels_filter(owner_intel_client):
 # Phase 44: Chokepoint Throughput Anomaly Detection
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def chokepoint_anomaly_client(tmp_path, monkeypatch):
     """Fixture: transit_events with high activity at suez (recent spike) and normal elsewhere."""
+    from datetime import UTC, datetime, timedelta
+
     import duckdb
     from fastapi.testclient import TestClient
-    from datetime import UTC, datetime, timedelta
 
     now = datetime.now(UTC).replace(tzinfo=None)
 
@@ -3979,25 +4822,49 @@ def chokepoint_anomaly_client(tmp_path, monkeypatch):
         # alternate 1, 2, 3 vessels per hour to produce variance
         count = (h % 3) + 1
         for v in range(count):
-            baseline_entries.append((
-                mmsi_counter, "suez", now - timedelta(hours=h + 0.1 + v * 0.01),
-                now - timedelta(hours=h - 0.1 + 0.5 + v * 0.01), "N", "tanker", "VLCC", True
-            ))
+            baseline_entries.append(
+                (
+                    mmsi_counter,
+                    "suez",
+                    now - timedelta(hours=h + 0.1 + v * 0.01),
+                    now - timedelta(hours=h - 0.1 + 0.5 + v * 0.01),
+                    "N",
+                    "tanker",
+                    "VLCC",
+                    True,
+                )
+            )
             mmsi_counter += 1
     # Recent: suez 20 vessels in last 2h (massive spike vs baseline avg of 2)
     for v in range(20):
-        baseline_entries.append((
-            8000 + v, "suez", now - timedelta(hours=1.0, minutes=v),
-            now - timedelta(hours=0.5, minutes=v), "N", "tanker", "VLCC", True
-        ))
+        baseline_entries.append(
+            (
+                8000 + v,
+                "suez",
+                now - timedelta(hours=1.0, minutes=v),
+                now - timedelta(hours=0.5, minutes=v),
+                "N",
+                "tanker",
+                "VLCC",
+                True,
+            )
+        )
     # Dover: varying 2-4 per hour for baseline, 0 recent (should show as low)
     for h in range(3, 27):
         count = (h % 3) + 2
         for v in range(count):
-            baseline_entries.append((
-                7000 + h * 10 + v, "dover_channel", now - timedelta(hours=h + 0.1 + v * 0.01),
-                now - timedelta(hours=h - 0.1 + 0.5 + v * 0.01), "N", "bulk", "Capesize", False
-            ))
+            baseline_entries.append(
+                (
+                    7000 + h * 10 + v,
+                    "dover_channel",
+                    now - timedelta(hours=h + 0.1 + v * 0.01),
+                    now - timedelta(hours=h - 0.1 + 0.5 + v * 0.01),
+                    "N",
+                    "bulk",
+                    "Capesize",
+                    False,
+                )
+            )
     an_conn.executemany(
         "INSERT INTO transit_events VALUES (?,?,?,?,?,?,?,?)",
         baseline_entries,
@@ -4022,6 +4889,7 @@ def chokepoint_anomaly_client(tmp_path, monkeypatch):
     monkeypatch.setenv("REGISTRY_DB", str(reg_file))
 
     from app.main import app as freight_app
+
     return TestClient(freight_app)
 
 
@@ -4035,7 +4903,9 @@ def test_chokepoint_anomaly_structure(chokepoint_anomaly_client):
 
 
 def test_chokepoint_anomaly_detects_spike(chokepoint_anomaly_client):
-    r = chokepoint_anomaly_client.get("/api/analytics/chokepoint-anomaly?window_hours=2&baseline_hours=24")
+    r = chokepoint_anomaly_client.get(
+        "/api/analytics/chokepoint-anomaly?window_hours=2&baseline_hours=24"
+    )
     d = r.json()
     suez = next(row for row in d["rows"] if row["chokepoint"] == "suez")
     assert suez["recent_count"] == 20
@@ -4045,7 +4915,9 @@ def test_chokepoint_anomaly_detects_spike(chokepoint_anomaly_client):
 
 
 def test_chokepoint_anomaly_detects_low(chokepoint_anomaly_client):
-    r = chokepoint_anomaly_client.get("/api/analytics/chokepoint-anomaly?window_hours=2&baseline_hours=24")
+    r = chokepoint_anomaly_client.get(
+        "/api/analytics/chokepoint-anomaly?window_hours=2&baseline_hours=24"
+    )
     d = r.json()
     dover = next(row for row in d["rows"] if row["chokepoint"] == "dover_channel")
     assert dover["recent_count"] == 0
@@ -4055,7 +4927,9 @@ def test_chokepoint_anomaly_detects_low(chokepoint_anomaly_client):
 
 
 def test_chokepoint_anomaly_sorted_by_magnitude(chokepoint_anomaly_client):
-    r = chokepoint_anomaly_client.get("/api/analytics/chokepoint-anomaly?window_hours=2&baseline_hours=24")
+    r = chokepoint_anomaly_client.get(
+        "/api/analytics/chokepoint-anomaly?window_hours=2&baseline_hours=24"
+    )
     d = r.json()
     rows_with_z = [row for row in d["rows"] if row["z_score"] is not None]
     if len(rows_with_z) >= 2:
@@ -4067,12 +4941,14 @@ def test_chokepoint_anomaly_sorted_by_magnitude(chokepoint_anomaly_client):
 # Phase 45: Cargo State Transition Detection
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def cargo_state_client(tmp_path, monkeypatch):
     """Fixture: tanker anchored at rotterdam; draught drops from 15 to 9 = discharge."""
+    from datetime import UTC, datetime, timedelta
+
     import duckdb
     from fastapi.testclient import TestClient
-    from datetime import UTC, datetime, timedelta
 
     now = datetime.now(UTC).replace(tzinfo=None)
     start_ep = now - timedelta(hours=30)
@@ -4103,14 +4979,64 @@ def cargo_state_client(tmp_path, monkeypatch):
         owner VARCHAR, manager VARCHAR, class_society VARCHAR, enriched_at TIMESTAMP, equasis_ok BOOLEAN
     );
     """)
-    conn.executemany("INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [
-        (9901, "TANKER X", 51.9, 4.1, 0.5, 0.0, 0.0, "NLROT", 80, 330.0, "tanker", "Aframax", "ara", now, 5000001, 9.0, 1, None),
-    ])
+    conn.executemany(
+        "INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            (
+                9901,
+                "TANKER X",
+                51.9,
+                4.1,
+                0.5,
+                0.0,
+                0.0,
+                "NLROT",
+                80,
+                330.0,
+                "tanker",
+                "Aframax",
+                "ara",
+                now,
+                5000001,
+                9.0,
+                1,
+                None,
+            ),
+        ],
+    )
     conn.executemany(
         "INSERT INTO ais_snapshots VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
         [
-            (snap_entry, 9901, "tanker", "Aframax", "ara", 51.9, 4.1, 80, 330.0, 0.5, 1, 15.0, "NLROT"),
-            (snap_exit,  9901, "tanker", "Aframax", "ara", 51.9, 4.1, 80, 330.0, 0.5, 1,  9.0, "NLROT"),
+            (
+                snap_entry,
+                9901,
+                "tanker",
+                "Aframax",
+                "ara",
+                51.9,
+                4.1,
+                80,
+                330.0,
+                0.5,
+                1,
+                15.0,
+                "NLROT",
+            ),
+            (
+                snap_exit,
+                9901,
+                "tanker",
+                "Aframax",
+                "ara",
+                51.9,
+                4.1,
+                80,
+                330.0,
+                0.5,
+                1,
+                9.0,
+                "NLROT",
+            ),
         ],
     )
     conn.close()
@@ -4167,6 +5093,7 @@ def cargo_state_client(tmp_path, monkeypatch):
     monkeypatch.setenv("REGISTRY_DB", str(reg_file))
 
     from app.main import app as freight_app
+
     return TestClient(freight_app)
 
 
@@ -4178,7 +5105,9 @@ def test_cargo_state_structure(cargo_state_client):
 
 
 def test_cargo_state_detects_discharge(cargo_state_client):
-    r = cargo_state_client.get("/api/analytics/cargo-state-changes?days=7&kind=tanker&min_change_m=2.0")
+    r = cargo_state_client.get(
+        "/api/analytics/cargo-state-changes?days=7&kind=tanker&min_change_m=2.0"
+    )
     d = r.json()
     assert d["total_events"] >= 1
     row = d["rows"][0]
@@ -4206,12 +5135,14 @@ def test_cargo_state_min_change_filter(cargo_state_client):
 # Phase 46: Speed Anomaly Detection
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def speed_anomaly_client(tmp_path, monkeypatch):
     """Fixture: fleet of VLCC tankers with one very fast and one very slow outlier."""
+    from datetime import UTC, datetime
+
     import duckdb
     from fastapi.testclient import TestClient
-    from datetime import UTC, datetime, timedelta
 
     now = datetime.now(UTC).replace(tzinfo=None)
 
@@ -4228,17 +5159,68 @@ def speed_anomaly_client(tmp_path, monkeypatch):
     """)
     # 8 VLCCs at typical 14 kn, 1 fast outlier at 22 kn, 1 slow outlier at 5 kn
     normal_vessels = [
-        (100 + i, f"VLCC NORMAL {i}", 10.0 + i, 50.0 + i, 14.0, 90.0, 90.0,
-         "AEJEA", 80, 340.0, "tanker", "VLCC", "arabian_gulf", now,
-         None, 20.0, 0, None)
+        (
+            100 + i,
+            f"VLCC NORMAL {i}",
+            10.0 + i,
+            50.0 + i,
+            14.0,
+            90.0,
+            90.0,
+            "AEJEA",
+            80,
+            340.0,
+            "tanker",
+            "VLCC",
+            "arabian_gulf",
+            now,
+            None,
+            20.0,
+            0,
+            None,
+        )
         for i in range(8)
     ]
-    fast_vessel = (200, "VLCC FAST", 20.0, 55.0, 22.0, 90.0, 90.0,
-                   "USHOU", 80, 340.0, "tanker", "VLCC", "us_gulf", now,
-                   None, 18.0, 0, None)
-    slow_vessel = (201, "VLCC SLOW", 21.0, 56.0, 5.0, 90.0, 90.0,
-                   "CNSHA", 80, 340.0, "tanker", "VLCC", "east_china", now,
-                   None, 22.0, 0, None)
+    fast_vessel = (
+        200,
+        "VLCC FAST",
+        20.0,
+        55.0,
+        22.0,
+        90.0,
+        90.0,
+        "USHOU",
+        80,
+        340.0,
+        "tanker",
+        "VLCC",
+        "us_gulf",
+        now,
+        None,
+        18.0,
+        0,
+        None,
+    )
+    slow_vessel = (
+        201,
+        "VLCC SLOW",
+        21.0,
+        56.0,
+        5.0,
+        90.0,
+        90.0,
+        "CNSHA",
+        80,
+        340.0,
+        "tanker",
+        "VLCC",
+        "east_china",
+        now,
+        None,
+        22.0,
+        0,
+        None,
+    )
     all_vessels = normal_vessels + [fast_vessel, slow_vessel]
     conn.executemany(
         "INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -4258,6 +5240,7 @@ def speed_anomaly_client(tmp_path, monkeypatch):
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
     monkeypatch.setenv("REGISTRY_DB", str(registry_file))
     from app.main import app
+
     return TestClient(app)
 
 
@@ -4301,12 +5284,14 @@ def test_speed_anomaly_sorted_by_z(speed_anomaly_client):
 # Phase 47: Port Arrival Forecast
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def port_arrival_client(tmp_path, monkeypatch):
     """Fixture: tanker heading for Rotterdam (NLRTM) with ETA ~20h."""
+    from datetime import UTC, datetime
+
     import duckdb
     from fastapi.testclient import TestClient
-    from datetime import UTC, datetime
 
     now = datetime.now(UTC).replace(tzinfo=None)
     ais_file = tmp_path / "ais_pa.duckdb"
@@ -4321,34 +5306,121 @@ def port_arrival_client(tmp_path, monkeypatch):
     );
     """)
     # Vessel heading to Rotterdam from ~220 nm away at 12 kn -> ETA ~18h
-    conn.executemany("INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [
-        (5001, "TANKER A", 49.0, 3.5, 12.0, 60.0, 60.0, "NLRTM", 80, 330.0, "tanker", "Aframax", "north_sea", now, None, 20.0, 0, None),
-        (5002, "TANKER B", 50.0, 2.0, 10.0, 60.0, 60.0, "ROTTERDAM", 80, 300.0, "tanker", "Suezmax", "north_sea", now, None, 18.0, 0, None),
-        # This one is > 48h away (very slow and far)
-        (5003, "TANKER C", 20.0, 0.0, 2.0, 30.0, 30.0, "NLRTM", 80, 300.0, "tanker", "VLCC", "west_africa", now, None, 22.0, 0, None),
-        # Not a tanker - should be excluded by kind filter
-        (5004, "BULKER X", 49.5, 3.0, 11.0, 60.0, 60.0, "NLRTM", 70, 200.0, "bulk", "Capesize", "north_sea", now, None, 15.0, 0, None),
-    ])
+    conn.executemany(
+        "INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            (
+                5001,
+                "TANKER A",
+                49.0,
+                3.5,
+                12.0,
+                60.0,
+                60.0,
+                "NLRTM",
+                80,
+                330.0,
+                "tanker",
+                "Aframax",
+                "north_sea",
+                now,
+                None,
+                20.0,
+                0,
+                None,
+            ),
+            (
+                5002,
+                "TANKER B",
+                50.0,
+                2.0,
+                10.0,
+                60.0,
+                60.0,
+                "ROTTERDAM",
+                80,
+                300.0,
+                "tanker",
+                "Suezmax",
+                "north_sea",
+                now,
+                None,
+                18.0,
+                0,
+                None,
+            ),
+            # This one is > 48h away (very slow and far)
+            (
+                5003,
+                "TANKER C",
+                20.0,
+                0.0,
+                2.0,
+                30.0,
+                30.0,
+                "NLRTM",
+                80,
+                300.0,
+                "tanker",
+                "VLCC",
+                "west_africa",
+                now,
+                None,
+                22.0,
+                0,
+                None,
+            ),
+            # Not a tanker - should be excluded by kind filter
+            (
+                5004,
+                "BULKER X",
+                49.5,
+                3.0,
+                11.0,
+                60.0,
+                60.0,
+                "NLRTM",
+                70,
+                200.0,
+                "bulk",
+                "Capesize",
+                "north_sea",
+                now,
+                None,
+                15.0,
+                0,
+                None,
+            ),
+        ],
+    )
     conn.close()
 
     analytics_file = tmp_path / "analytics_pa.duckdb"
     ac = duckdb.connect(str(analytics_file))
-    ac.execute("CREATE TABLE vessel_state (mmsi BIGINT PRIMARY KEY, laden VARCHAR, last_draught DOUBLE, max_draught_seen DOUBLE, updated_ts TIMESTAMP)")
-    ac.executemany("INSERT INTO vessel_state VALUES (?,?,?,?,?)", [
-        (5001, "laden", 20.0, 21.0, now),
-        (5002, "ballast", 12.0, 21.0, now),
-    ])
+    ac.execute(
+        "CREATE TABLE vessel_state (mmsi BIGINT PRIMARY KEY, laden VARCHAR, last_draught DOUBLE, max_draught_seen DOUBLE, updated_ts TIMESTAMP)"
+    )
+    ac.executemany(
+        "INSERT INTO vessel_state VALUES (?,?,?,?,?)",
+        [
+            (5001, "laden", 20.0, 21.0, now),
+            (5002, "ballast", 12.0, 21.0, now),
+        ],
+    )
     ac.close()
 
     registry_file = tmp_path / "registry_pa.duckdb"
     rc = duckdb.connect(str(registry_file))
-    rc.execute("CREATE TABLE vessel_registry (imo BIGINT PRIMARY KEY, risk_score INTEGER, fetch_ok BOOLEAN)")
+    rc.execute(
+        "CREATE TABLE vessel_registry (imo BIGINT PRIMARY KEY, risk_score INTEGER, fetch_ok BOOLEAN)"
+    )
     rc.close()
 
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
     monkeypatch.setenv("ANALYTICS_DB", str(analytics_file))
     monkeypatch.setenv("REGISTRY_DB", str(registry_file))
     from app.main import app
+
     return TestClient(app)
 
 
@@ -4398,9 +5470,10 @@ import pytest
 @pytest.fixture
 def crude_client(tmp_path, monkeypatch):
     """Fixture: 3 laden tankers (VLCC, Aframax, Small) + 1 ballast Suezmax."""
+    from datetime import UTC, datetime
+
     import duckdb
     from fastapi.testclient import TestClient
-    from datetime import UTC, datetime
 
     now = datetime.now(UTC).replace(tzinfo=None)
     ais_file = tmp_path / "ais_cow.duckdb"
@@ -4414,36 +5487,142 @@ def crude_client(tmp_path, monkeypatch):
         imo BIGINT, draught DOUBLE, nav_status INTEGER, eta VARCHAR
     );
     """)
-    conn.executemany("INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [
-        (6001, "VLCC ALPHA", 25.0, 57.0, 13.0, 270.0, 270.0, "NLRTM", 80, 330.0, "tanker", "VLCC", "indian_ocean", now, None, 21.0, 0, None),
-        (6002, "AFRA BETA", 48.0, -5.0, 12.0, 90.0, 90.0, "ESBCN", 80, 250.0, "tanker", "Aframax", "atlantic", now, None, 12.5, 0, None),
-        (6003, "SMALL GAMMA", 35.0, 15.0, 10.0, 180.0, 180.0, "ITGOA", 80, 120.0, "tanker", "Small", "med", now, None, 5.5, 0, None),
-        (6004, "SUEZ DELTA", 20.0, 60.0, 11.0, 0.0, 0.0, "AEFJR", 80, 280.0, "tanker", "Suezmax", "indian_ocean", now, None, 7.0, 0, None),
-        # Bulk carrier - should NOT count
-        (6005, "BULK ETA", 40.0, 20.0, 8.0, 90.0, 90.0, "DEHAM", 70, 200.0, "bulk", "Capesize", "med", now, None, 10.0, 0, None),
-    ])
+    conn.executemany(
+        "INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            (
+                6001,
+                "VLCC ALPHA",
+                25.0,
+                57.0,
+                13.0,
+                270.0,
+                270.0,
+                "NLRTM",
+                80,
+                330.0,
+                "tanker",
+                "VLCC",
+                "indian_ocean",
+                now,
+                None,
+                21.0,
+                0,
+                None,
+            ),
+            (
+                6002,
+                "AFRA BETA",
+                48.0,
+                -5.0,
+                12.0,
+                90.0,
+                90.0,
+                "ESBCN",
+                80,
+                250.0,
+                "tanker",
+                "Aframax",
+                "atlantic",
+                now,
+                None,
+                12.5,
+                0,
+                None,
+            ),
+            (
+                6003,
+                "SMALL GAMMA",
+                35.0,
+                15.0,
+                10.0,
+                180.0,
+                180.0,
+                "ITGOA",
+                80,
+                120.0,
+                "tanker",
+                "Small",
+                "med",
+                now,
+                None,
+                5.5,
+                0,
+                None,
+            ),
+            (
+                6004,
+                "SUEZ DELTA",
+                20.0,
+                60.0,
+                11.0,
+                0.0,
+                0.0,
+                "AEFJR",
+                80,
+                280.0,
+                "tanker",
+                "Suezmax",
+                "indian_ocean",
+                now,
+                None,
+                7.0,
+                0,
+                None,
+            ),
+            # Bulk carrier - should NOT count
+            (
+                6005,
+                "BULK ETA",
+                40.0,
+                20.0,
+                8.0,
+                90.0,
+                90.0,
+                "DEHAM",
+                70,
+                200.0,
+                "bulk",
+                "Capesize",
+                "med",
+                now,
+                None,
+                10.0,
+                0,
+                None,
+            ),
+        ],
+    )
     conn.close()
 
     analytics_file = tmp_path / "analytics_cow.duckdb"
     ac = duckdb.connect(str(analytics_file))
-    ac.execute("CREATE TABLE vessel_state (mmsi BIGINT PRIMARY KEY, laden VARCHAR, last_draught DOUBLE, max_draught_seen DOUBLE, updated_ts TIMESTAMP)")
-    ac.executemany("INSERT INTO vessel_state VALUES (?,?,?,?,?)", [
-        (6001, "laden", 21.0, 22.0, now),   # VLCC laden
-        (6002, "laden", 12.5, 14.0, now),   # Aframax laden
-        (6003, "laden", 5.5, 6.0, now),     # Small laden
-        (6004, "ballast", 7.0, 20.0, now),  # Suezmax ballast
-    ])
+    ac.execute(
+        "CREATE TABLE vessel_state (mmsi BIGINT PRIMARY KEY, laden VARCHAR, last_draught DOUBLE, max_draught_seen DOUBLE, updated_ts TIMESTAMP)"
+    )
+    ac.executemany(
+        "INSERT INTO vessel_state VALUES (?,?,?,?,?)",
+        [
+            (6001, "laden", 21.0, 22.0, now),  # VLCC laden
+            (6002, "laden", 12.5, 14.0, now),  # Aframax laden
+            (6003, "laden", 5.5, 6.0, now),  # Small laden
+            (6004, "ballast", 7.0, 20.0, now),  # Suezmax ballast
+        ],
+    )
     ac.close()
 
     registry_file = tmp_path / "registry_cow.duckdb"
     rc = duckdb.connect(str(registry_file))
-    rc.execute("CREATE TABLE vessel_registry (imo BIGINT PRIMARY KEY, risk_score INTEGER, fetch_ok BOOLEAN)")
+    rc.execute(
+        "CREATE TABLE vessel_registry (imo BIGINT PRIMARY KEY, risk_score INTEGER, fetch_ok BOOLEAN)"
+    )
     rc.close()
 
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
     monkeypatch.setenv("ANALYTICS_DB", str(analytics_file))
     monkeypatch.setenv("REGISTRY_DB", str(registry_file))
     from app.main import app
+
     return TestClient(app)
 
 
@@ -4497,9 +5676,10 @@ def test_crude_on_water_inbound_regions(crude_client):
 @pytest.fixture
 def chokepoint_status_client(tmp_path, monkeypatch):
     """Fixture: vessels spread across suez + dover_channel regions with varying SOG."""
+    from datetime import UTC, datetime
+
     import duckdb
     from fastapi.testclient import TestClient
-    from datetime import UTC, datetime, timedelta
 
     now = datetime.now(UTC).replace(tzinfo=None)
     ais_file = tmp_path / "ais_cps.duckdb"
@@ -4513,48 +5693,192 @@ def chokepoint_status_client(tmp_path, monkeypatch):
         imo BIGINT, draught DOUBLE, nav_status INTEGER, eta VARCHAR
     );
     """)
-    conn.executemany("INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [
-        # suez: 2 transiting (sog>4), 3 waiting (sog<=0.5)
-        (7001, "A", 30.0, 33.0, 12.0, 0.0, 0.0, None, 80, 330.0, "tanker", "VLCC", "suez", now, None, 20.0, 0, None),
-        (7002, "B", 30.1, 33.1, 9.0, 0.0, 0.0, None, 80, 250.0, "tanker", "Suezmax", "suez", now, None, 18.0, 0, None),
-        (7003, "C", 29.8, 32.8, 0.1, 0.0, 0.0, None, 80, 330.0, "tanker", "VLCC", "suez", now, None, 5.0, 0, None),
-        (7004, "D", 29.9, 32.9, 0.0, 0.0, 0.0, None, 80, 250.0, "bulk", "Capesize", "suez", now, None, 15.0, 0, None),
-        (7005, "E", 30.2, 33.2, 0.3, 0.0, 0.0, None, 80, 200.0, "bulk", "Supramax", "suez", now, None, 12.0, 0, None),
-        # dover_channel: 1 transiting, 1 slow (not waiting, not transiting)
-        (7006, "F", 50.5, 1.0, 15.0, 90.0, 90.0, None, 70, 200.0, "bulk", "Capesize", "dover_channel", now, None, 10.0, 0, None),
-        (7007, "G", 50.6, 1.1, 2.0, 90.0, 90.0, None, 70, 180.0, "bulk", "Panamax", "dover_channel", now, None, 8.0, 0, None),
-    ])
+    conn.executemany(
+        "INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            # suez: 2 transiting (sog>4), 3 waiting (sog<=0.5)
+            (
+                7001,
+                "A",
+                30.0,
+                33.0,
+                12.0,
+                0.0,
+                0.0,
+                None,
+                80,
+                330.0,
+                "tanker",
+                "VLCC",
+                "suez",
+                now,
+                None,
+                20.0,
+                0,
+                None,
+            ),
+            (
+                7002,
+                "B",
+                30.1,
+                33.1,
+                9.0,
+                0.0,
+                0.0,
+                None,
+                80,
+                250.0,
+                "tanker",
+                "Suezmax",
+                "suez",
+                now,
+                None,
+                18.0,
+                0,
+                None,
+            ),
+            (
+                7003,
+                "C",
+                29.8,
+                32.8,
+                0.1,
+                0.0,
+                0.0,
+                None,
+                80,
+                330.0,
+                "tanker",
+                "VLCC",
+                "suez",
+                now,
+                None,
+                5.0,
+                0,
+                None,
+            ),
+            (
+                7004,
+                "D",
+                29.9,
+                32.9,
+                0.0,
+                0.0,
+                0.0,
+                None,
+                80,
+                250.0,
+                "bulk",
+                "Capesize",
+                "suez",
+                now,
+                None,
+                15.0,
+                0,
+                None,
+            ),
+            (
+                7005,
+                "E",
+                30.2,
+                33.2,
+                0.3,
+                0.0,
+                0.0,
+                None,
+                80,
+                200.0,
+                "bulk",
+                "Supramax",
+                "suez",
+                now,
+                None,
+                12.0,
+                0,
+                None,
+            ),
+            # dover_channel: 1 transiting, 1 slow (not waiting, not transiting)
+            (
+                7006,
+                "F",
+                50.5,
+                1.0,
+                15.0,
+                90.0,
+                90.0,
+                None,
+                70,
+                200.0,
+                "bulk",
+                "Capesize",
+                "dover_channel",
+                now,
+                None,
+                10.0,
+                0,
+                None,
+            ),
+            (
+                7007,
+                "G",
+                50.6,
+                1.1,
+                2.0,
+                90.0,
+                90.0,
+                None,
+                70,
+                180.0,
+                "bulk",
+                "Panamax",
+                "dover_channel",
+                now,
+                None,
+                8.0,
+                0,
+                None,
+            ),
+        ],
+    )
     conn.close()
 
     analytics_file = tmp_path / "analytics_cps.duckdb"
     ac = duckdb.connect(str(analytics_file))
-    ac.execute("CREATE TABLE vessel_state (mmsi BIGINT PRIMARY KEY, laden VARCHAR, last_draught DOUBLE, max_draught_seen DOUBLE, updated_ts TIMESTAMP)")
+    ac.execute(
+        "CREATE TABLE vessel_state (mmsi BIGINT PRIMARY KEY, laden VARCHAR, last_draught DOUBLE, max_draught_seen DOUBLE, updated_ts TIMESTAMP)"
+    )
     # transit_events for suez: 3 in last 7d (2 northbound, 1 southbound), 1 in last 24h
-    ago2d = (now - __import__('datetime').timedelta(days=2)).isoformat()
-    ago5d = (now - __import__('datetime').timedelta(days=5)).isoformat()
-    ago1h = (now - __import__('datetime').timedelta(hours=1)).isoformat()
-    ago2h = (now - __import__('datetime').timedelta(hours=2)).isoformat()
+    ago2d = (now - __import__("datetime").timedelta(days=2)).isoformat()
+    ago5d = (now - __import__("datetime").timedelta(days=5)).isoformat()
+    ago1h = (now - __import__("datetime").timedelta(hours=1)).isoformat()
+    ago2h = (now - __import__("datetime").timedelta(hours=2)).isoformat()
     ac.execute("""CREATE TABLE transit_events (
         mmsi BIGINT, chokepoint VARCHAR, entered_ts TIMESTAMP, exited_ts TIMESTAMP,
         direction VARCHAR, kind VARCHAR, segment VARCHAR, laden BOOLEAN
     )""")
-    ac.executemany("INSERT INTO transit_events VALUES (?,?,?,?,?,?,?,?)", [
-        (7001, "suez", ago5d, ago5d, "northbound", "tanker", "VLCC", True),
-        (7002, "suez", ago2d, ago2d, "northbound", "tanker", "Suezmax", True),
-        (7003, "suez", ago1h, ago2h, "southbound", "tanker", "VLCC", False),
-        (7006, "dover_channel", ago2d, ago2d, "eastbound", "bulk", "Capesize", None),
-    ])
+    ac.executemany(
+        "INSERT INTO transit_events VALUES (?,?,?,?,?,?,?,?)",
+        [
+            (7001, "suez", ago5d, ago5d, "northbound", "tanker", "VLCC", True),
+            (7002, "suez", ago2d, ago2d, "northbound", "tanker", "Suezmax", True),
+            (7003, "suez", ago1h, ago2h, "southbound", "tanker", "VLCC", False),
+            (7006, "dover_channel", ago2d, ago2d, "eastbound", "bulk", "Capesize", None),
+        ],
+    )
     ac.close()
 
     registry_file = tmp_path / "registry_cps.duckdb"
     rc = duckdb.connect(str(registry_file))
-    rc.execute("CREATE TABLE vessel_registry (imo BIGINT PRIMARY KEY, risk_score INTEGER, fetch_ok BOOLEAN)")
+    rc.execute(
+        "CREATE TABLE vessel_registry (imo BIGINT PRIMARY KEY, risk_score INTEGER, fetch_ok BOOLEAN)"
+    )
     rc.close()
 
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
     monkeypatch.setenv("ANALYTICS_DB", str(analytics_file))
     monkeypatch.setenv("REGISTRY_DB", str(registry_file))
     from app.main import app
+
     return TestClient(app)
 
 
@@ -4573,8 +5897,8 @@ def test_chokepoint_status_suez_counts(chokepoint_status_client):
     suez = next((row for row in d["rows"] if row["chokepoint"] == "suez"), None)
     assert suez is not None
     assert suez["live_total"] == 5
-    assert suez["live_transiting"] == 2   # sog > 4
-    assert suez["live_waiting"] == 3      # sog <= 0.5
+    assert suez["live_transiting"] == 2  # sog > 4
+    assert suez["live_waiting"] == 3  # sog <= 0.5
 
 
 def test_chokepoint_status_transit_counts(chokepoint_status_client):
@@ -4684,13 +6008,15 @@ def test_pipelines_all_mode(client):
 # Phase 55: Owner Fleet Status
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def owner_fleet_client(tmp_path, monkeypatch):
     """Seed: 3 live vessels (2 tankers for SHADOW FLEET LLC, 1 bulk for CLEAN OWNER)
     with laden/ballast state; owner-fleet-status should aggregate correctly."""
+    from datetime import UTC, datetime
+
     import duckdb
     from fastapi.testclient import TestClient
-    from datetime import UTC, datetime
 
     now = datetime.now(UTC).replace(tzinfo=None)
 
@@ -4717,11 +6043,71 @@ def owner_fleet_client(tmp_path, monkeypatch):
         owner VARCHAR, manager VARCHAR, class_society VARCHAR, enriched_at TIMESTAMP, equasis_ok BOOLEAN
     );
     """)
-    conn.executemany("INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [
-        (7001, "T1", 25.0, 56.0, 12.0, 90.0, 90.0, "CNSHA", 80, 330.0, "tanker", "VLCC", "hormuz", now, 2000001, 18.5, 0, None),
-        (7002, "T2", 25.1, 56.1, 13.0, 91.0, 91.0, "NLRTM", 80, 330.0, "tanker", "VLCC", "hormuz", now, 2000002, 8.5, 0, None),
-        (7003, "B1", 3.5, 5.0, 8.0, 180.0, 180.0, "CNQIN", 74, 300.0, "bulk", "Capesize", "ara", now, 2000003, 15.0, 0, None),
-    ])
+    conn.executemany(
+        "INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            (
+                7001,
+                "T1",
+                25.0,
+                56.0,
+                12.0,
+                90.0,
+                90.0,
+                "CNSHA",
+                80,
+                330.0,
+                "tanker",
+                "VLCC",
+                "hormuz",
+                now,
+                2000001,
+                18.5,
+                0,
+                None,
+            ),
+            (
+                7002,
+                "T2",
+                25.1,
+                56.1,
+                13.0,
+                91.0,
+                91.0,
+                "NLRTM",
+                80,
+                330.0,
+                "tanker",
+                "VLCC",
+                "hormuz",
+                now,
+                2000002,
+                8.5,
+                0,
+                None,
+            ),
+            (
+                7003,
+                "B1",
+                3.5,
+                5.0,
+                8.0,
+                180.0,
+                180.0,
+                "CNQIN",
+                74,
+                300.0,
+                "bulk",
+                "Capesize",
+                "ara",
+                now,
+                2000003,
+                15.0,
+                0,
+                None,
+            ),
+        ],
+    )
     conn.close()
 
     an_file = tmp_path / "analytics_ofs.duckdb"
@@ -4753,36 +6139,83 @@ def owner_fleet_client(tmp_path, monkeypatch):
     );
     """)
     # T1 laden, T2 ballast, B1 laden
-    an_conn.executemany("INSERT INTO vessel_state VALUES (?,?,?,?,?)", [
-        (7001, 19.0, 18.5, "laden", now),
-        (7002, 19.0, 8.5, "ballast", now),
-        (7003, 16.0, 15.0, "laden", now),
-    ])
+    an_conn.executemany(
+        "INSERT INTO vessel_state VALUES (?,?,?,?,?)",
+        [
+            (7001, 19.0, 18.5, "laden", now),
+            (7002, 19.0, 8.5, "ballast", now),
+            (7003, 16.0, 15.0, "laden", now),
+        ],
+    )
     an_conn.close()
 
     from conftest import setup_pg_vessels
-    setup_pg_vessels(monkeypatch, [
-        {"imo": 2000001, "ship_name": "T1", "flag": "Russia", "flag_code": "RU",
-         "gross_tonnage": 200000, "dwt": 300000, "ship_type": "Tanker", "year_built": 2005,
-         "ship_status": "In Service", "owner": "SHADOW FLEET LLC", "class_society": "RMRS",
-         "paris_mou": "Black", "tokyo_mou": "Black", "fetch_ok": True,
-         "risk_score": 72, "ofac_sanctioned": True},
-        {"imo": 2000002, "ship_name": "T2", "flag": "Nauru", "flag_code": "NR",
-         "gross_tonnage": 200000, "dwt": 300000, "ship_type": "Tanker", "year_built": 2004,
-         "ship_status": "In Service", "owner": "SHADOW FLEET LLC", "class_society": "RMRS",
-         "paris_mou": "Black", "tokyo_mou": "Black", "fetch_ok": True,
-         "risk_score": 75, "ofac_sanctioned": False},
-        {"imo": 2000003, "ship_name": "B1", "flag": "Marshall Islands", "flag_code": "MH",
-         "gross_tonnage": 150000, "dwt": 200000, "ship_type": "Bulk Carrier", "year_built": 2018,
-         "ship_status": "In Service", "owner": "CLEAN OWNER PTE", "class_society": "ABS (IACS)",
-         "paris_mou": "White", "tokyo_mou": "White", "fetch_ok": True,
-         "risk_score": 10, "ofac_sanctioned": False},
-    ])
+
+    setup_pg_vessels(
+        monkeypatch,
+        [
+            {
+                "imo": 2000001,
+                "ship_name": "T1",
+                "flag": "Russia",
+                "flag_code": "RU",
+                "gross_tonnage": 200000,
+                "dwt": 300000,
+                "ship_type": "Tanker",
+                "year_built": 2005,
+                "ship_status": "In Service",
+                "owner": "SHADOW FLEET LLC",
+                "class_society": "RMRS",
+                "paris_mou": "Black",
+                "tokyo_mou": "Black",
+                "fetch_ok": True,
+                "risk_score": 72,
+                "ofac_sanctioned": True,
+            },
+            {
+                "imo": 2000002,
+                "ship_name": "T2",
+                "flag": "Nauru",
+                "flag_code": "NR",
+                "gross_tonnage": 200000,
+                "dwt": 300000,
+                "ship_type": "Tanker",
+                "year_built": 2004,
+                "ship_status": "In Service",
+                "owner": "SHADOW FLEET LLC",
+                "class_society": "RMRS",
+                "paris_mou": "Black",
+                "tokyo_mou": "Black",
+                "fetch_ok": True,
+                "risk_score": 75,
+                "ofac_sanctioned": False,
+            },
+            {
+                "imo": 2000003,
+                "ship_name": "B1",
+                "flag": "Marshall Islands",
+                "flag_code": "MH",
+                "gross_tonnage": 150000,
+                "dwt": 200000,
+                "ship_type": "Bulk Carrier",
+                "year_built": 2018,
+                "ship_status": "In Service",
+                "owner": "CLEAN OWNER PTE",
+                "class_society": "ABS (IACS)",
+                "paris_mou": "White",
+                "tokyo_mou": "White",
+                "fetch_ok": True,
+                "risk_score": 10,
+                "ofac_sanctioned": False,
+            },
+        ],
+    )
 
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
     monkeypatch.setenv("ANALYTICS_DB", str(an_file))
 
     from app.main import app as freight_app
+
     return TestClient(freight_app)
 
 
@@ -4822,12 +6255,14 @@ def test_owner_fleet_status_kind_filter(owner_fleet_client):
 # Phase 54: European Supply Intelligence
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def eur_inbound_client(tmp_path, monkeypatch):
     """Fixture: tankers heading to Rotterdam (NW Europe) and Trieste (Med)."""
+    from datetime import UTC, datetime, timedelta
+
     import duckdb
     from fastapi.testclient import TestClient
-    from datetime import UTC, datetime, timedelta
 
     now = datetime.now(UTC).replace(tzinfo=None)
     ais_file = tmp_path / "ais_eur.duckdb"
@@ -4844,21 +6279,86 @@ def eur_inbound_client(tmp_path, monkeypatch):
     # Aframax heading Rotterdam from ~200nm, should appear
     # VLCC heading Rotterdam, far out (>48h at 8kn) - excluded by default 48h horizon
     # Suezmax heading Trieste
-    conn.executemany("INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [
-        (7001, "EUR A", 49.5, 3.5, 12.0, 60.0, 60.0, "NLRTM", 80, 330.0, "tanker", "Aframax", "north_sea", now, 9001, 20.0, 0, None),
-        (7002, "EUR B", 30.0, -5.0, 8.0, 45.0, 45.0, "ROTTERDAM", 80, 300.0, "tanker", "VLCC", "west_africa", now, 9002, 15.0, 0, None),
-        (7003, "EUR C", 40.0, 12.0, 11.0, 90.0, 90.0, "ITTRS",  80, 200.0, "tanker", "Suezmax", "med", now, 9003, 22.0, 0, None),
-    ])
+    conn.executemany(
+        "INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            (
+                7001,
+                "EUR A",
+                49.5,
+                3.5,
+                12.0,
+                60.0,
+                60.0,
+                "NLRTM",
+                80,
+                330.0,
+                "tanker",
+                "Aframax",
+                "north_sea",
+                now,
+                9001,
+                20.0,
+                0,
+                None,
+            ),
+            (
+                7002,
+                "EUR B",
+                30.0,
+                -5.0,
+                8.0,
+                45.0,
+                45.0,
+                "ROTTERDAM",
+                80,
+                300.0,
+                "tanker",
+                "VLCC",
+                "west_africa",
+                now,
+                9002,
+                15.0,
+                0,
+                None,
+            ),
+            (
+                7003,
+                "EUR C",
+                40.0,
+                12.0,
+                11.0,
+                90.0,
+                90.0,
+                "ITTRS",
+                80,
+                200.0,
+                "tanker",
+                "Suezmax",
+                "med",
+                now,
+                9003,
+                22.0,
+                0,
+                None,
+            ),
+        ],
+    )
     conn.close()
 
     analytics_file = tmp_path / "analytics_eur.duckdb"
     ac = duckdb.connect(str(analytics_file))
-    ac.execute("CREATE TABLE vessel_state (mmsi BIGINT PRIMARY KEY, laden VARCHAR, last_draught DOUBLE, max_draught_seen DOUBLE, updated_ts TIMESTAMP)")
-    ac.executemany("INSERT INTO vessel_state VALUES (?,?,?,?,?)", [
-        (7001, "laden",   20.0, 22.0, now),
-        (7002, "laden",   15.0, 22.0, now),
-        (7003, "ballast", 10.0, 22.0, now),
-    ])
+    ac.execute(
+        "CREATE TABLE vessel_state (mmsi BIGINT PRIMARY KEY, laden VARCHAR, last_draught DOUBLE, max_draught_seen DOUBLE, updated_ts TIMESTAMP)"
+    )
+    ac.executemany(
+        "INSERT INTO vessel_state VALUES (?,?,?,?,?)",
+        [
+            (7001, "laden", 20.0, 22.0, now),
+            (7002, "laden", 15.0, 22.0, now),
+            (7003, "ballast", 10.0, 22.0, now),
+        ],
+    )
     # Add transit event: vessel 7001 transited Suez northbound laden 10 days ago
     ac.execute("""CREATE TABLE transit_events (
         mmsi BIGINT, chokepoint VARCHAR, entered_ts TIMESTAMP, exited_ts TIMESTAMP,
@@ -4866,20 +6366,35 @@ def eur_inbound_client(tmp_path, monkeypatch):
         PRIMARY KEY (mmsi, chokepoint, entered_ts)
     )""")
     suez_ts = now - timedelta(days=10)
-    ac.executemany("INSERT INTO transit_events VALUES (?,?,?,?,?,?,?,?)", [
-        (7001, "suez", suez_ts, suez_ts + timedelta(hours=12), "northbound", "tanker", "Aframax", True),
-    ])
+    ac.executemany(
+        "INSERT INTO transit_events VALUES (?,?,?,?,?,?,?,?)",
+        [
+            (
+                7001,
+                "suez",
+                suez_ts,
+                suez_ts + timedelta(hours=12),
+                "northbound",
+                "tanker",
+                "Aframax",
+                True,
+            ),
+        ],
+    )
     ac.close()
 
     registry_file = tmp_path / "registry_eur.duckdb"
     rc = duckdb.connect(str(registry_file))
-    rc.execute("CREATE TABLE vessel_registry (imo BIGINT PRIMARY KEY, risk_score INTEGER, fetch_ok BOOLEAN)")
+    rc.execute(
+        "CREATE TABLE vessel_registry (imo BIGINT PRIMARY KEY, risk_score INTEGER, fetch_ok BOOLEAN)"
+    )
     rc.close()
 
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
     monkeypatch.setenv("ANALYTICS_DB", str(analytics_file))
     monkeypatch.setenv("REGISTRY_DB", str(registry_file))
     from app.main import app
+
     return TestClient(app)
 
 
@@ -4887,7 +6402,15 @@ def test_european_inbound_structure(eur_inbound_client):
     r = eur_inbound_client.get("/api/analytics/european-inbound?horizon_h=48")
     assert r.status_code == 200
     d = r.json()
-    for key in ("total_vessels", "total_laden", "total_dwt_laden", "vessels", "by_origin", "by_port", "eta_buckets"):
+    for key in (
+        "total_vessels",
+        "total_laden",
+        "total_dwt_laden",
+        "vessels",
+        "by_origin",
+        "by_port",
+        "eta_buckets",
+    ):
         assert key in d
 
 
@@ -4907,7 +6430,9 @@ def test_european_inbound_origin_inference(eur_inbound_client):
     d = r.json()
     aframax = next((v for v in d["vessels"] if v["mmsi"] == 7001), None)
     assert aframax is not None
-    assert aframax["inferred_origin"] == "Middle East", "Suez NB transit should infer Middle East origin"
+    assert aframax["inferred_origin"] == "Middle East", (
+        "Suez NB transit should infer Middle East origin"
+    )
     assert aframax["inferred_via"] == "Suez NB"
 
 
@@ -4938,17 +6463,18 @@ def test_european_inbound_laden_only_filter(eur_inbound_client):
 # Phase 55: LNG Intelligence tests
 # ===========================================================================
 
+
 @pytest.fixture
 def lng_client(tmp_path, monkeypatch):
     """Seeded TestClient with a known LNG tanker heading to Gate LNG Rotterdam."""
     ais_db = tmp_path / "ais.duckdb"
     ana_db = tmp_path / "analytics.duckdb"
 
+    from datetime import UTC, datetime
+
     import duckdb
-    from datetime import datetime, UTC
 
     now = datetime.now(UTC).replace(tzinfo=None)
-    recently = now.strftime("%Y-%m-%d %H:%M:%S")
 
     # AIS: one LNG tanker heading to Gate Rotterdam (~150nm from Rotterdam at 14kn -> 10.7h)
     ais = duckdb.connect(str(ais_db))
@@ -4962,12 +6488,15 @@ def lng_client(tmp_path, monkeypatch):
         )
     """)
     # LNG tanker QATARI STAR heading to Rotterdam (NLRTM), ~150nm away
-    ais.execute("""
+    ais.execute(
+        """
         INSERT INTO live_positions VALUES
         (9001001, 'QATARI STAR', 50.0, 2.5, 14.0, 45.0, 45.0,
          'NLRTM', 'tanker', 'LNG Tanker', 'english_channel',
          ?, 9451818, 12.0, 0, NULL)
-    """, [now])
+    """,
+        [now],
+    )
     ais.close()
 
     # Analytics: vessel_state + a Suez NB transit 15 days ago
@@ -4982,24 +6511,39 @@ def lng_client(tmp_path, monkeypatch):
             direction TEXT, kind TEXT, segment TEXT, laden BOOLEAN
         )
     """)
-    fifteen_days_ago = (now - __import__('datetime').timedelta(days=15)).strftime("%Y-%m-%d %H:%M:%S")
-    ana.execute("""
+    fifteen_days_ago = (now - __import__("datetime").timedelta(days=15)).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+    ana.execute(
+        """
         INSERT INTO transit_events VALUES
         (9001001, 'suez', ?, ?, 'northbound', 'tanker', 'LNG Tanker', true)
-    """, [fifteen_days_ago, fifteen_days_ago])
+    """,
+        [fifteen_days_ago, fifteen_days_ago],
+    )
     ana.close()
 
     # Registry: QATARI STAR is an LNG tanker (seeded into PostgreSQL temp table)
     from conftest import setup_pg_vessels
-    setup_pg_vessels(monkeypatch, [
-        {"imo": 9451818, "ship_name": "QATARI STAR", "ship_type": "LNG Tanker",
-         "owner": "Qatar Gas Transport"},
-    ])
+
+    setup_pg_vessels(
+        monkeypatch,
+        [
+            {
+                "imo": 9451818,
+                "ship_name": "QATARI STAR",
+                "ship_type": "LNG Tanker",
+                "owner": "Qatar Gas Transport",
+            },
+        ],
+    )
 
     from fastapi.testclient import TestClient
+
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_db))
     monkeypatch.setenv("ANALYTICS_DB", str(ana_db))
     from app.main import app
+
     return TestClient(app)
 
 
@@ -5027,7 +6571,9 @@ def test_lng_inbound_terminal_match(lng_client):
     d = r.json()
     v = next((x for x in d["vessels"] if x["mmsi"] == 9001001), None)
     assert v is not None, "QATARI STAR should appear in vessel list"
-    assert v["terminal"] == "Gate LNG Rotterdam", f"Expected Gate LNG Rotterdam, got {v['terminal']}"
+    assert v["terminal"] == "Gate LNG Rotterdam", (
+        f"Expected Gate LNG Rotterdam, got {v['terminal']}"
+    )
     assert v["terminal_country"] == "Netherlands"
 
 
@@ -5036,7 +6582,9 @@ def test_lng_inbound_origin_inference(lng_client):
     d = r.json()
     v = next((x for x in d["vessels"] if x["mmsi"] == 9001001), None)
     assert v is not None
-    assert v["inferred_origin"] == "Qatar / ME", f"Suez NB laden should infer Qatar/ME, got {v['inferred_origin']}"
+    assert v["inferred_origin"] == "Qatar / ME", (
+        f"Suez NB laden should infer Qatar/ME, got {v['inferred_origin']}"
+    )
     assert v["inferred_via"] == "Suez NB"
 
 
@@ -5052,9 +6600,9 @@ def test_lng_inbound_bcm_estimate(lng_client):
 # ---------------------------------------------------------------------------
 def _flag_client(tmp_path, monkeypatch):
     """TestClient seeded with valid 9-digit MMSIs + a registry for mismatch tests."""
-    import duckdb
     from datetime import UTC, datetime
 
+    import duckdb
     from fastapi.testclient import TestClient
 
     now = datetime.now(UTC).replace(tzinfo=None, microsecond=0)
@@ -5075,17 +6623,89 @@ def _flag_client(tmp_path, monkeypatch):
     """
     rows = [
         # Liberia (FOC), imo 1000001 -> registry says Panama -> mismatch
-        (636000001, "LIBERIA VLCC", 25.0, 56.0, 14.0, 270.0, 271.0, "AEFJR", 80, 330,
-         "tanker", "VLCC", "hormuz", now, 1000001, 20.0, 0, None),
+        (
+            636000001,
+            "LIBERIA VLCC",
+            25.0,
+            56.0,
+            14.0,
+            270.0,
+            271.0,
+            "AEFJR",
+            80,
+            330,
+            "tanker",
+            "VLCC",
+            "hormuz",
+            now,
+            1000001,
+            20.0,
+            0,
+            None,
+        ),
         # Gabon (shadow), imo 1000002 -> not in registry
-        (626000002, "GABON VLCC", 25.1, 56.1, 13.0, 270.0, 271.0, "AEFJR", 80, 320,
-         "tanker", "VLCC", "hormuz", now, 1000002, 19.0, 0, None),
+        (
+            626000002,
+            "GABON VLCC",
+            25.1,
+            56.1,
+            13.0,
+            270.0,
+            271.0,
+            "AEFJR",
+            80,
+            320,
+            "tanker",
+            "VLCC",
+            "hormuz",
+            now,
+            1000002,
+            19.0,
+            0,
+            None,
+        ),
         # UK (neither), imo 1000003 -> registry says GB -> no mismatch
-        (235000003, "UK CAPE", 1.3, 103.7, 12.0, 90.0, 91.0, "SGSIN", 70, 290,
-         "bulk", "Capesize", "singapore_malacca", now, 1000003, 18.0, 0, None),
+        (
+            235000003,
+            "UK CAPE",
+            1.3,
+            103.7,
+            12.0,
+            90.0,
+            91.0,
+            "SGSIN",
+            70,
+            290,
+            "bulk",
+            "Capesize",
+            "singapore_malacca",
+            now,
+            1000003,
+            18.0,
+            0,
+            None,
+        ),
         # Short MMSI -> unresolved flag, imo NULL
-        (1001, "NOFLAG BULK", 1.4, 103.8, 11.0, 90.0, None, "SGSIN", 70, 200,
-         "bulk", "Supramax", "singapore_malacca", now, None, 10.0, 0, None),
+        (
+            1001,
+            "NOFLAG BULK",
+            1.4,
+            103.8,
+            11.0,
+            90.0,
+            None,
+            "SGSIN",
+            70,
+            200,
+            "bulk",
+            "Supramax",
+            "singapore_malacca",
+            now,
+            None,
+            10.0,
+            0,
+            None,
+        ),
     ]
     ais_file = tmp_path / "ais.duckdb"
     conn = duckdb.connect(str(ais_file))
@@ -5096,17 +6716,32 @@ def _flag_client(tmp_path, monkeypatch):
     conn.close()
 
     from conftest import setup_pg_vessels
-    setup_pg_vessels(monkeypatch, [
-        # Registry uses ISO3 codes (as Equasis does); normalization must still
-        # detect LR != PA (mismatch) and GB == GBR (match).
-        {"imo": 1000001, "ship_name": "LIBERIA VLCC", "flag": "Panama", "flag_code": "PAN",
-         "fetch_ok": True},   # MMSI=LR -> mismatch
-        {"imo": 1000003, "ship_name": "UK CAPE", "flag": "United Kingdom", "flag_code": "GBR",
-         "fetch_ok": True},   # MMSI=GB -> match
-    ])
+
+    setup_pg_vessels(
+        monkeypatch,
+        [
+            # Registry uses ISO3 codes (as Equasis does); normalization must still
+            # detect LR != PA (mismatch) and GB == GBR (match).
+            {
+                "imo": 1000001,
+                "ship_name": "LIBERIA VLCC",
+                "flag": "Panama",
+                "flag_code": "PAN",
+                "fetch_ok": True,
+            },  # MMSI=LR -> mismatch
+            {
+                "imo": 1000003,
+                "ship_name": "UK CAPE",
+                "flag": "United Kingdom",
+                "flag_code": "GBR",
+                "fetch_ok": True,
+            },  # MMSI=GB -> match
+        ],
+    )
 
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
     from app.main import app
+
     return TestClient(app)
 
 

@@ -88,10 +88,28 @@ CREATE TABLE IF NOT EXISTS eta_samples (
 # adds the kinematic/context features (`sog_trail6h`, `service_speed`, `draught`,
 # `dest_queue_h`, `approach_bearing`) the physics model and Phase-D ML consume.
 _PERSIST_COLS = [
-    "voyage_id", "mmsi", "target_id", "arrival_ts", "obs_ts", "obs_lat", "obs_lon",
-    "remaining_h", "route_dist_nm", "gc_dist_nm", "route_method", "sog",
-    "sog_trail6h", "service_speed", "draught", "dest_queue_h", "approach_bearing",
-    "segment", "laden", "target_type", "is_canal", "lead_bucket",
+    "voyage_id",
+    "mmsi",
+    "target_id",
+    "arrival_ts",
+    "obs_ts",
+    "obs_lat",
+    "obs_lon",
+    "remaining_h",
+    "route_dist_nm",
+    "gc_dist_nm",
+    "route_method",
+    "sog",
+    "sog_trail6h",
+    "service_speed",
+    "draught",
+    "dest_queue_h",
+    "approach_bearing",
+    "segment",
+    "laden",
+    "target_type",
+    "is_canal",
+    "lead_bucket",
 ]
 
 
@@ -192,12 +210,16 @@ def enrich_routes(conn: duckdb.DuckDBPyConnection, samples: pd.DataFrame) -> pd.
     underway_mask = sogs >= bt._MIN_SOG_KN
     has_target_mask = np.isin(tids, list(targets))
     routable_mask = underway_mask & has_target_mask
-    unique_pairs: dict[tuple[str, str], tuple[float, float, float]] = {}  # -> (cell_lat, cell_lon, gc_cell)
+    unique_pairs: dict[
+        tuple[str, str], tuple[float, float, float]
+    ] = {}  # -> (cell_lat, cell_lon, gc_cell)
     pair_route: dict[tuple[str, str], float] = {}
     pair_method: dict[tuple[str, str], str] = {}
     for fc, tid, clat, clon in zip(
-        from_cells[routable_mask], tids[routable_mask],
-        cell_lats[routable_mask], cell_lons[routable_mask],
+        from_cells[routable_mask],
+        tids[routable_mask],
+        cell_lats[routable_mask],
+        cell_lons[routable_mask],
     ):
         key = (fc, tid)
         if key not in unique_pairs:
@@ -211,7 +233,9 @@ def enrich_routes(conn: duckdb.DuckDBPyConnection, samples: pd.DataFrame) -> pd.
         pair_route[(fc, tid)] = cell_rt
         pair_method[(fc, tid)] = method
     cache.flush()
-    log.info("enrich_routes: %d unique pairs routed (%d cache misses)", len(unique_pairs), cache.misses)
+    log.info(
+        "enrich_routes: %d unique pairs routed (%d cache misses)", len(unique_pairs), cache.misses
+    )
 
     # Step 3: look up per-pair values for every row (one Python list comprehension each).
     cell_route_arr = np.array(
@@ -236,7 +260,7 @@ def enrich_routes(conn: duckdb.DuckDBPyConnection, samples: pd.DataFrame) -> pd.
     # Underway but unknown target (target added after this voyage) -> fall back to gc.
     no_target = underway_mask & ~has_target_mask
     route_arr[no_target] = gc_fix[no_target]
-    for i in np.where(no_target)[0]:
+    for i in np.nonzero(no_target)[0]:
         method_arr[i] = "gc"
 
     out["route_dist_nm"] = route_arr
@@ -362,10 +386,13 @@ def _log_long_haul_improvement(conn: duckdb.DuckDBPyConnection, samples: pd.Data
         route_dist = g["route_dist_nm"].where(np.isfinite(g["route_dist_nm"]), g["gc_dist_nm"])
         route_err = (route_dist / g["sog"]) - g["remaining_h"]
         log.info(
-            "long-haul %s (n=%d): bias naive %+.1fh -> naive+route %+.1fh | "
-            "|err| %.1fh -> %.1fh",
-            lead, len(g), naive_err.median(), route_err.median(),
-            naive_err.abs().median(), route_err.abs().median(),
+            "long-haul %s (n=%d): bias naive %+.1fh -> naive+route %+.1fh | |err| %.1fh -> %.1fh",
+            lead,
+            len(g),
+            naive_err.median(),
+            route_err.median(),
+            naive_err.abs().median(),
+            route_err.abs().median(),
         )
 
 
@@ -434,5 +461,7 @@ _BASELINE_DIR = Path(bt.__file__).resolve().parent / "baselines"
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    argparse.ArgumentParser(description="Build eta_samples + re-score routing baseline").parse_args()
+    argparse.ArgumentParser(
+        description="Build eta_samples + re-score routing baseline"
+    ).parse_args()
     run()
