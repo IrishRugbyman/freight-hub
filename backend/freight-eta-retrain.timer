@@ -1,0 +1,27 @@
+# Weekly trigger for the gated True ETA ML retrain.
+#
+# Weekly, not daily: the gate compares a challenger against physics on a
+# walk-forward hold-out, and a week is roughly the timescale on which the sample
+# table grows enough for that comparison to say anything new. Daily retraining
+# would mostly re-decide the same cells on nearly the same data while costing 90s
+# of six-core CPU and holding the analytics lock.
+#
+# 02:20 Sunday: clear of the hourly incremental pass at 02:00, and ahead of the
+# daily derived stages at 03:20 that rebuild eta_predictions from the artifact.
+#
+# Persistent=true so a retrain missed while the machine was down runs on the next
+# boot rather than being skipped for a week.
+
+[Unit]
+Description=Weekly gated retrain of the freight True ETA ML challenger
+# NO Requires= here. It would make this timer start its service at boot as well
+# as on schedule - see ~/ops/fix-timer-requires.sh and the note in
+# freight-analytics-derived.timer. [Timer] Unit= already defaults to the
+# same-named .service.
+
+[Timer]
+OnCalendar=Sun *-*-* 02:20:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

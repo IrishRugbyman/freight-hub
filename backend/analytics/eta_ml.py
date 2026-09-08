@@ -67,18 +67,36 @@ CATEGORICAL_FEATURES = ["segment", "target_id", "target_type", "is_canal", "lade
 FEATURES = NUMERIC_FEATURES + CATEGORICAL_FEATURES
 LABEL = "remaining_h"
 
-# Quantile heads. LightGBM quantile intervals are under-dispersed out-of-time on
-# this ~3-week history (a P10-P90 head realises only ~0.71 coverage on the
-# walk-forward test), so the interval heads are the wider P05/P95 (nominal 90%),
-# which realise ~0.83 - inside the honest [0.75,0.85] promotion band. `lo`/`hi`
-# are the interval heads; `mid` is the P50 point estimate. Keys double as the
-# saved-artifact filenames.
-QUANTILES = {"lo": 0.05, "mid": 0.50, "hi": 0.95}
+# Quantile heads. `lo`/`hi` are the interval heads; `mid` is the P50 point
+# estimate. Keys double as the saved-artifact filenames.
+#
+# These were P05/P95 (nominal 90%) until 2026-09-08. That was a deliberate
+# small-sample fix: on the original ~3-week history a P10-P90 head was
+# under-dispersed out-of-time and realised only ~0.71 coverage, below the
+# [0.75,0.85] promotion band, while P05/P95 realised ~0.83 and fit inside it.
+#
+# On ~8 weeks (1.05M underway samples, 112k voyages) the under-dispersion is
+# gone and the compensation inverted: measured on the walk-forward test window,
+# raw P05/P95 now realises 0.876 - *above* the band - and, because the CQR
+# offset is clamped non-negative, nothing can narrow it back. Six of the seven
+# cells where ML beat physics on median |err| were being rejected for
+# over-covering, none for under-covering. Raw P10/P90 realises 0.774 on the same
+# window and CQR widens it to ~0.80, so the band now lands inside the gate and
+# those cells promote on their merits.
+#
+# P10/P90 is also the coherent choice independently of the gate: TARGET_COVERAGE
+# is 0.80, physics serves an 80% band, and the API/UI fields are named
+# `eta_p10_h`/`eta_p90_h`. The 90% heads made those names untrue and compared ML
+# against physics at two different band widths.
+QUANTILES = {"lo": 0.10, "mid": 0.50, "hi": 0.90}
 _Q_ORDER = ("lo", "mid", "hi")
 TARGET_COVERAGE = 0.80
 
-# Modest, regularised hyperparameters. History is ~3 weeks: shallow-ish trees,
-# strong leaf minimums and bagging keep the model from memorising voyages.
+# Modest, regularised hyperparameters. Chosen when history was ~3 weeks:
+# shallow-ish trees, strong leaf minimums and bagging keep the model from
+# memorising voyages. History is now ~8 weeks and the capacity ceiling has not
+# been re-measured since - retuning is tracked as a separate change, so that a
+# capacity effect is never confounded with the 2026-09-08 band fix.
 LGB_PARAMS: dict = {
     "learning_rate": 0.05,
     "num_leaves": 63,
@@ -141,9 +159,7 @@ def time_voyage_split(
     if samples.empty:
         empty = samples.iloc[0:0]
         return empty, empty, empty
-    order = (
-        samples.groupby("voyage_id")["arrival_ts"].min().sort_values().index.to_numpy()
-    )
+    order = samples.groupby("voyage_id")["arrival_ts"].min().sort_values().index.to_numpy()
     n = len(order)
     i_train = int(round(n * fracs[0]))
     i_calib = int(round(n * (fracs[0] + fracs[1])))
@@ -174,9 +190,7 @@ def train_quantiles(train: pd.DataFrame, params: dict | None = None) -> dict:
     p = {**LGB_PARAMS, **(params or {})}
     X = _prepare(train)
     y = train[LABEL].to_numpy(dtype=float)
-    dtrain = lgb.Dataset(
-        X, label=y, categorical_feature=CATEGORICAL_FEATURES, free_raw_data=False
-    )
+    dtrain = lgb.Dataset(X, label=y, categorical_feature=CATEGORICAL_FEATURES, free_raw_data=False)
     models: dict = {}
     for name, alpha in QUANTILES.items():
         models[name] = lgb.train(
@@ -217,11 +231,19 @@ def calibrate_cqr(models: dict, calib: pd.DataFrame) -> dict[str, float]:
     serve-time-known), with a global fallback for buckets too thin to calibrate.
 
     Offsets are clamped to be **non-negative: the band is only ever widened,
-    never shrunk.** On ~3 weeks of history the calibration slice systematically
-    *over*-covers relative to the strictly-later test window (a real forward
-    distribution shift), so the raw conformal offset is often negative - trusting
-    it would shrink the served band and make it overconfident out-of-time. Only
-    widening is the robust choice: worst case we keep the raw P05-P95 head width.
+    never shrunk.** The clamp is a guard against a forward distribution shift
+    shrinking the served band and making it overconfident out-of-time; worst case
+    we keep the raw head width.
+
+    The clamp used to *bind*: with the old P05/P95 heads (nominal 90%) the raw
+    offset was negative in every bucket, so the served band stayed at the full
+    90% head width and over-covered. Since the heads became P10/P90 on
+    2026-09-08 it is non-binding - every measured offset is positive (0.05h at
+    0-6h rising to 0.56h at 24-48h), i.e. conformal genuinely widens an
+    under-dispersed 80% band up to its nominal coverage, which is the intended
+    behaviour. A run whose offsets are all exactly 0.0 means the clamp is binding
+    again and the band is wider than TARGET_COVERAGE asks for.
+
     Returned dict is ``{bucket_label: offset, "__global__": offset}``.
     """
     if calib.empty:
@@ -382,7 +404,9 @@ def _score_frame(
     fin = np.isfinite(scored["_lo"]) & np.isfinite(scored["_hi"])
     scored["covered"] = np.where(
         fin,
-        ((scored["remaining_h"] >= scored["_lo"]) & (scored["remaining_h"] <= scored["_hi"])).astype(float),
+        (
+            (scored["remaining_h"] >= scored["_lo"]) & (scored["remaining_h"] <= scored["_hi"])
+        ).astype(float),
         np.nan,
     )
     return scored
@@ -410,7 +434,9 @@ def build_champion_map(ml_scored: pd.DataFrame, phys_scored: pd.DataFrame) -> di
     for ttype in ("chokepoint", "port"):
         for lead in _LEAD_LABELS:
             key = f"{ttype}|{lead}"
-            p = phys_scored[(phys_scored["target_type"] == ttype) & (phys_scored["_pbucket"] == lead)]
+            p = phys_scored[
+                (phys_scored["target_type"] == ttype) & (phys_scored["_pbucket"] == lead)
+            ]
             m = ml_scored[(ml_scored["target_type"] == ttype) & (ml_scored["_pbucket"] == lead)]
             if len(p) < 200 or len(m) < 200:
                 continue  # too thin to judge; leave physics
@@ -516,7 +542,9 @@ def train_and_evaluate(
     ml_low, ml_high = _apply_cqr(q, cqr)
     ml_scored = _score_frame(test, q[:, 1], ml_low, ml_high)
     phys_p50 = vectorized_physics_p50(test)
-    phys_scored = _score_frame(test, phys_p50, np.full(len(test), np.nan), np.full(len(test), np.nan))
+    phys_scored = _score_frame(
+        test, phys_p50, np.full(len(test), np.nan), np.full(len(test), np.nan)
+    )
 
     champ = build_champion_map(ml_scored, phys_scored)
     report["champion_map"] = champ
@@ -563,15 +591,23 @@ def _print_report(report: dict) -> None:
         print(f"ML P10-P90 coverage={report.get('ml_coverage', float('nan')):.3f}")
     ml, ph = report.get("ml_metrics"), report.get("phys_metrics")
     if ml is not None and not ml.empty and ph is not None:
-        m = ml[(ml["lead_basis"] == "actual") & (ml["target_type"] == "all")].set_index("lead_bucket")
-        p = ph[(ph["lead_basis"] == "actual") & (ph["target_type"] == "all")].set_index("lead_bucket")
+        m = ml[(ml["lead_basis"] == "actual") & (ml["target_type"] == "all")].set_index(
+            "lead_bucket"
+        )
+        p = ph[(ph["lead_basis"] == "actual") & (ph["target_type"] == "all")].set_index(
+            "lead_bucket"
+        )
         print("\nby actual lead (target_type=all)   physics -> ML")
         for lead in _LEAD_LABELS:
             if lead in m.index and lead in p.index:
-                print(f"  {lead:8s}  |err| {p.loc[lead,'med_abs_err_h']:6.2f} -> {m.loc[lead,'med_abs_err_h']:6.2f}   "
-                      f"bias {p.loc[lead,'bias_h']:+7.2f} -> {m.loc[lead,'bias_h']:+7.2f}")
+                print(
+                    f"  {lead:8s}  |err| {p.loc[lead, 'med_abs_err_h']:6.2f} -> {m.loc[lead, 'med_abs_err_h']:6.2f}   "
+                    f"bias {p.loc[lead, 'bias_h']:+7.2f} -> {m.loc[lead, 'bias_h']:+7.2f}"
+                )
     champ = report.get("champion_map", {})
-    print(f"\npromoted ML cells ({len(champ)}): " + (", ".join(sorted(champ)) if champ else "(none)"))
+    print(
+        f"\npromoted ML cells ({len(champ)}): " + (", ".join(sorted(champ)) if champ else "(none)")
+    )
 
 
 def run(dry_run: bool = False) -> dict:
@@ -588,6 +624,8 @@ def run(dry_run: bool = False) -> dict:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     ap = argparse.ArgumentParser(description="Train + walk-forward the ETA ML challenger")
-    ap.add_argument("--dry-run", action="store_true", help="evaluate + print, never write artifacts/metrics")
+    ap.add_argument(
+        "--dry-run", action="store_true", help="evaluate + print, never write artifacts/metrics"
+    )
     args = ap.parse_args()
     run(dry_run=args.dry_run)

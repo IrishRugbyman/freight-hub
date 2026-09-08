@@ -12,7 +12,6 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
-
 from analytics import eta_ml
 
 # Feature columns the synthetic frame must carry (mirrors eta_samples).
@@ -37,7 +36,7 @@ def _synth_samples(n_voyages: int = 400, seed: int = 0) -> pd.DataFrame:
         seg = segments[v % len(segments)]
         sog = float(rng.uniform(8, 16))
         laden = bool(v % 2)
-        for k in range(rng.integers(3, 7)):
+        for _k in range(rng.integers(3, 7)):
             dist = float(rng.uniform(20, 900))
             remaining = dist / sog + float(rng.normal(0, 1.5))
             if remaining <= 0:
@@ -91,6 +90,71 @@ def test_quantiles_are_monotone():
     q = eta_ml.predict_quantiles(eta_ml.train_quantiles(train), test)
     assert np.all(q[:, 0] <= q[:, 1] + 1e-9)
     assert np.all(q[:, 1] <= q[:, 2] + 1e-9)
+
+
+def test_interval_heads_span_exactly_the_target_coverage():
+    """The nominal head band must equal TARGET_COVERAGE, not merely contain it.
+
+    Regression guard for the 2026-09-08 fix. The heads were P05/P95 (nominal 90%)
+    while TARGET_COVERAGE was 0.80 - a small-sample compensation for
+    under-dispersion. Once the model stopped being under-dispersed that band
+    over-covered, and because the conformal offset is clamped non-negative
+    nothing could narrow it, so the promotion gate rejected cells for being too
+    *accurate* about their own uncertainty. Widening the heads to buy coverage
+    hides the miscalibration instead of measuring it; conformal is the only part
+    allowed to move the band.
+    """
+    lo, hi = eta_ml.QUANTILES["lo"], eta_ml.QUANTILES["hi"]
+    assert hi - lo == pytest.approx(eta_ml.TARGET_COVERAGE)
+    assert eta_ml.QUANTILES["mid"] == pytest.approx(0.50)
+
+
+def test_promotion_band_admits_a_perfectly_calibrated_model():
+    """A model that hits TARGET_COVERAGE exactly must be promotable.
+
+    If TARGET_COVERAGE fell outside _COVERAGE_BAND, the gate would be
+    unsatisfiable by a correctly calibrated challenger and every promotion would
+    be an artefact of miscalibration. This pins the two constants together.
+    """
+    lo_band, hi_band = eta_ml._COVERAGE_BAND
+    assert lo_band < eta_ml.TARGET_COVERAGE < hi_band
+
+
+def test_champion_map_rejects_a_cell_whose_interval_over_covers():
+    """Over-covering is rejected, not just under-covering.
+
+    Built from two frames that are identical except for the band width, so the
+    only thing that can flip the verdict is coverage. The wide-band variant beats
+    physics on error and covers ~1.0; it must still be refused.
+    """
+    n = 600
+    rng = np.random.default_rng(0)
+    truth = rng.uniform(30.0, 40.0, n)  # physics lands these in the 24-48h cell
+    base = pd.DataFrame(
+        {
+            "target_type": "port",
+            "remaining_h": truth,
+            "route_dist_nm": 300.0,
+            "sog": 10.0,
+        }
+    )
+    # Physics is deliberately poor (|err| 8h); ML is far better on the point
+    # estimate, so `error` is satisfied for both variants and coverage decides.
+    phys = eta_ml._score_frame(base, truth + 8.0, np.full(n, np.nan), np.full(n, np.nan))
+
+    # Residual is 0.2h on 80% of rows and 5h on the rest, so a +/-1h band
+    # realises exactly 0.80 coverage - the target, inside the gate.
+    resid = np.where(np.arange(n) < int(0.8 * n), 0.2, 5.0)
+    ml_pred = truth + resid
+
+    tight = eta_ml._score_frame(base, ml_pred, ml_pred - 1.0, ml_pred + 1.0)
+    wide = eta_ml._score_frame(base, ml_pred, ml_pred - 500.0, ml_pred + 500.0)
+
+    assert tight["covered"].mean() == pytest.approx(0.80)
+    assert wide["covered"].mean() == pytest.approx(1.0)
+
+    assert eta_ml.build_champion_map(tight, phys) == {"port|24-48h": "ml"}
+    assert eta_ml.build_champion_map(wide, phys) == {}
 
 
 def test_cqr_offsets_are_non_negative():

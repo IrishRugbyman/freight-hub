@@ -1,0 +1,62 @@
+# freight-eta-retrain -- WEEKLY gated retrain of the True ETA ML challenger.
+#
+# True ETA Phase G: "the model improves as history grows, automatically, without
+# ever promoting a worse model." `python -m analytics.eta_ml` is already the
+# gated-promotion path - it trains the LightGBM quantile challenger on all
+# accumulated history, runs the leakage-free voyage-grouped walk-forward against
+# physics, and rewrites analytics/models/ + the champion map ONLY for the
+# (target_type, lead-bucket) cells the challenger wins on held-out median |err|
+# with interval coverage inside [0.75, 0.85]. Cells it does not win keep physics.
+# If it wins nothing, nothing is written at all. So this unit is no-promote-safe
+# by construction: it cannot make the served ETA worse.
+#
+# Until 2026-09-08 this ran only by hand, and it showed: the artifact in service
+# had been trained on 2026-07-01 against ~3 weeks of history while the sample
+# table had since grown 2.5x. That staleness is the whole reason for the timer.
+#
+# Ordering. Scheduled 02:20 Sunday: after the hourly incremental pass at 02:00
+# (measured 6m31s) has released the lock, and an hour before the daily derived
+# stages at 03:20 - which are what actually rebuild eta_predictions from the
+# frozen artifact. Retraining first means a newly promoted champion is served
+# the same night rather than waiting a further day.
+#
+# Install:
+#   sudo cp ~/quant/freight/backend/freight-eta-retrain.{service,timer} /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now freight-eta-retrain.timer
+# Check:
+#   systemctl list-timers 'freight-eta-retrain*'
+#   journalctl -u freight-eta-retrain.service -n 50 --no-pager
+#
+# As with the other freight timers: `systemctl stop freight-eta-retrain` would
+# also stop the timer if the timer Requires= the service. It deliberately does
+# not - see the note in freight-analytics-derived.timer.
+
+[Unit]
+Description=Freight True ETA weekly gated ML retrain (LightGBM quantile challenger)
+After=network-online.target
+# A retrain that fails silently leaves a stale champion in service and nothing
+# externally observable changes - exactly the failure mode that hid the
+# server-backup breakage for ten nights. Alert on it.
+OnFailure=alert-email@%N.service
+
+[Service]
+Type=oneshot
+User=lbzgiu
+WorkingDirectory=/home/lbzgiu/quant/freight/backend
+# Same lock as both analytics units: freight_analytics.duckdb is single-writer
+# and this job writes model='ml' scoreboard rows into eta_model_metrics.
+ExecStart=/usr/bin/flock -w 3600 /home/lbzgiu/quant/freight/backend/data/.analytics.lock /home/lbzgiu/quant/freight/backend/.venv/bin/python -m analytics.eta_ml
+StandardOutput=journal
+StandardError=journal
+
+# Measured 2026-09-08 on 1.05M underway samples / 112k voyages: 1.25 GB peak RSS,
+# 1m32s wall (543s CPU across 6 cores). 3 GB leaves room for history growth and
+# for systemd's cgroup accounting running above RSS. Treat a cgroup OOM here as a
+# signal to measure, not to raise the number - the whole job fits in memory only
+# because _load_samples filters to underway, positive-lead rows (1.05M of 3.10M).
+MemoryAccounting=yes
+MemoryMax=3G
+
+[Install]
+WantedBy=multi-user.target
