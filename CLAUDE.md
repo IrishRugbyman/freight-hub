@@ -66,8 +66,8 @@ Each is a standalone Python project with its own venv (symlinked from `~/data/`)
 ## Stack
 
 - **Frontend** (`frontend/`): React 19 + Vite + TypeScript, TanStack Router (file-based
-  `src/routes`) + TanStack Query (60s polling), Tailwind v4, react-leaflet + OSM/Carto
-  dark tiles + leaflet.markercluster. `npm` toolchain (mirrors quant-portfolio).
+  `src/routes`) + TanStack Query (60s polling), Tailwind v4, react-leaflet +
+  leaflet.markercluster, over a MapLibre GL **vector** basemap (`lib/basemap.ts`). `npm` toolchain (mirrors quant-portfolio).
 - **Backend** (`backend/`): FastAPI `freight-api` on `:8003`, a thin read layer over the
   AIS collector's `live_positions` table. pytest suite (mirrors squiidwiki).
 

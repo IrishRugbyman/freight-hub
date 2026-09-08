@@ -1,7 +1,8 @@
 import { useEffect, Suspense, lazy } from 'react'
-import { MapContainer, TileLayer, ZoomControl, useMap } from 'react-leaflet'
+import { MapContainer, ZoomControl, useMap } from 'react-leaflet'
 import type { Vessel, TrackPoint } from '@/lib/api'
 import type { LayerState } from './types'
+import { VectorBasemap } from './VectorBasemap'
 import { VesselLayer } from './VesselLayer'
 import { ChokepointLayer } from './ChokepointLayer'
 import { TrailLayer } from './TrailLayer'
@@ -54,10 +55,7 @@ export function VesselMap({
       preferCanvas
       zoomControl={false}
     >
-      <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-        url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-      />
+      <VectorBasemap />
       <ZoomControl position="bottomright" />
       {layers.deckgl ? (
         <Suspense fallback={null}>

@@ -6,7 +6,8 @@ only what is specific to `frontend/`.
 ## Stack
 
 React 19 + Vite + TypeScript, TanStack Router (file-based) + TanStack Query, Tailwind v4,
-react-leaflet + leaflet.markercluster, deck.gl (via `deck.gl-leaflet`) for the heavy layers,
+react-leaflet + leaflet.markercluster over a MapLibre GL vector basemap, deck.gl (via
+`deck.gl-leaflet`) for the heavy layers,
 recharts for analytics charts, lucide-react for icons. `npm`, not bun or pnpm.
 
 ```bash
@@ -69,6 +70,27 @@ a `.test.ts` beside it (vitest). **Never hardcode a segment color in a component
 not inline in a 700-line card file.
 
 ## Map layers
+
+The basemap is **MapLibre GL vector tiles mounted as a Leaflet layer**
+(`components/tracker/VectorBasemap.tsx` + `lib/basemap.ts`), not a `TileLayer`. Three things
+about it are load-bearing:
+
+- **It is a layer swap, not a migration.** Every vessel/overlay layer below stays on Leaflet.
+  Do not "finish the job" by porting them to MapLibre without a reason.
+- **The palette is applied at runtime and the layer ids are pinned.** Water is near-black
+  (`#191F24`) and land lighter (`#32414E`) - MarineTraffic's scheme, and the inverse of
+  CARTO dark-matter's default, because vessel markers sit on water. Ids are matched exactly,
+  never by substring, so an upstream rename fires the drift warning instead of silently
+  un-painting the map. `basemap.test.ts` covers this.
+- **Raster is gone on purpose.** CARTO began watermarking its keyless raster endpoint in
+  late August 2026 and is retiring raster. The watermark arrived as HTTP 200 with a valid
+  PNG - no 4xx, no console error - so nothing caught it. If the basemap ever looks wrong,
+  suspect a silent upstream change before suspecting this code.
+
+`maplibre-gl` is ~790 kB and gets its own manual chunk (the rule sits *before* the `leaflet`
+rule in `vite.config.ts`, because `@maplibre/maplibre-gl-leaflet` matches both and falling
+into the leaflet chunk would drag the whole engine onto the critical path).
+
 
 `components/tracker/` renders the map. `VesselLayer.tsx` builds markers **imperatively** against
 the Leaflet API (cheap for ~1500 points, and React reconciliation is not); `DeckGLLayer.tsx`,

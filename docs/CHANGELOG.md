@@ -4,6 +4,57 @@
 
 - [2026-Q2](changelog/2026-Q2.md) - 53 entries, 2026-06-10 to 2026-06-30
 
+## 2026-09-08 (later) - the map was defaced the whole time and nothing caught it
+
+Unparking made the tracker reachable again. Opening it in a real browser showed the basemap
+covered in a repeated "API KEY REQUIRED" watermark. **None of the checks that passed earlier
+that evening could have caught it**: CARTO serves the watermark as HTTP 200 with a valid PNG,
+so there is no 4xx, no failed request, and no console error. `curl` said 200, the API said
+`feed=live`, and the map still looked broken to a human.
+
+**Cause.** CARTO began gating its keyless *raster* endpoint in late August 2026 - after the
+2026-08-16 parking, which is why it went unseen. Raster is being retired outright; *vector*
+stays keyless. squiidwiki's maps were unaffected because they already use the vector GL
+style, which is what pointed the way.
+
+**Fix: vector tiles, restyled at runtime.** `lib/basemap.ts` + `components/tracker/VectorBasemap.tsx`
+mount a MapLibre GL vector basemap as a Leaflet layer. Deliberately a layer swap, not a
+migration - VesselLayer, markercluster, deck.gl, chokepoints, pipelines and risk all stay on
+Leaflet untouched.
+
+**The palette is the actual win.** CARTO dark-matter draws water *lighter* than land, which is
+backwards for a vessel tracker: markers sit on water, so they were competing with the brightest
+surface on the map. Repainted to MarineTraffic's scheme - water `#191F24`, land `#32414E` - and
+the segment colours carry properly. This is only possible because vector styles are restylable
+in the browser; raster could never have done it. MarineTraffic itself is Mapbox with a custom
+style, which is why no off-the-shelf basemap matches it.
+
+**Guards added, because the failure mode was silence:**
+- Layer ids are **pinned, never substring-matched**. An upstream rename now fires a drift
+  warning instead of quietly un-painting the map - the same silent shape as the watermark.
+- `assertStyle` rejects a 200 that is not actually a style document, so a CDN error page
+  cannot render as a broken map.
+- OpenFreeMap is wired as an automatic fallback: a provider policy change degrades to a
+  different basemap instead of a blank one.
+- `basemap.test.ts`, 9 vitest cases including the drift path and a luminance assertion that
+  land stays brighter than water.
+
+**Two bugs found by checking rather than assuming:**
+- Attribution rendered **twice**. Both styles declare it in their own TileJSON and maplibre
+  propagates it into Leaflet's control, so the manual line was redundant - and would have
+  credited CARTO while OpenFreeMap was serving the tiles. Removed.
+- `@maplibre/maplibre-gl-leaflet` matches the `leaflet` manualChunks rule, which pulled all
+  790 kB of maplibre-gl into the eagerly-loaded map chunk and defeated the dynamic import.
+  Its own chunk rule now sits before the leaflet one: leaflet chunk 841 kB -> 49 kB.
+
+**A CARTO key was obtained** (free tier, 5M tile req/month) and threaded through in
+`VITE_CARTO_KEY`, though vector does not require it today. Verified harmless first: keyed and
+unkeyed vector tiles both return 200. CARTO confirmed in writing that the key requirement is
+coming to vector with notice - the point is that it will be a non-event here.
+
+Verified live: no watermark, single attribution, 0 console errors, 0 raster tile requests,
+1,036 vessels rendering.
+
 ## 2026-09-08 - unparked: the aisstream.io outage was upstream and transient
 
 Freight had been parked since 2026-08-16 behind a 503 page because the AIS feed went

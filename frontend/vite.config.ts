@@ -52,6 +52,11 @@ export default defineConfig({
           if (id.includes('@tanstack/react-query')) return 'tanstack-query'
           if (id.includes('@luma.gl')) return 'luma'
           if (id.includes('@deck.gl') || id.includes('deck.gl')) return 'deckgl'
+          // Before the leaflet rule: '@maplibre/maplibre-gl-leaflet' matches both,
+          // and letting it fall into 'leaflet' drags all of maplibre-gl (~800 kB)
+          // into the eagerly-loaded map chunk, defeating VectorBasemap's dynamic
+          // import. Its own chunk keeps the basemap engine deferred and cacheable.
+          if (id.includes('maplibre')) return 'maplibre'
           if (id.includes('leaflet')) return 'leaflet'
           if (id.includes('lucide-react')) return 'lucide'
           // recharts + its d3 deps: deferred to analytics/dispersion pages

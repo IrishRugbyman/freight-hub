@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
-import { MapContainer, TileLayer, ZoomControl, useMap } from 'react-leaflet'
+import { MapContainer, ZoomControl, useMap } from 'react-leaflet'
+import { VectorBasemap } from '@/components/tracker/VectorBasemap'
 import L from 'leaflet'
 import { usePipelines, type PipelineSegment } from '@/lib/api'
 import { SkeletonListRows } from '@/components/ui/skeleton'
@@ -455,12 +456,7 @@ export default function PipelinesPage() {
             preferCanvas
             zoomControl={false}
           >
-            <TileLayer
-              attribution='&copy; <a href="https://carto.com">CARTO</a>'
-              url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-              subdomains="abcd"
-              maxZoom={19}
-            />
+            <VectorBasemap />
             <ZoomControl position="bottomright" />
             <PipelineMapLines
               pipelines={mapPipelines}
