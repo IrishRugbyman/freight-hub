@@ -4,6 +4,69 @@
 
 - [2026-Q2](changelog/2026-Q2.md) - 53 entries, 2026-06-10 to 2026-06-30
 
+## 2026-09-08 - unparked: the aisstream.io outage was upstream and transient
+
+Freight had been parked since 2026-08-16 behind a 503 page because the AIS feed went
+silent. Checked whether it was still down. It is not.
+
+**The feed is healthy.** Three tests, escalating from protocol to full pipeline, all with
+the production key:
+
+| test | result |
+|---|---|
+| raw WebSocket, world bounding box | 9,856 messages / 60s |
+| the collector's own 29-region subscription | 4,576 messages / 60s, no drop |
+| `AISCollector` for 3 min against a throwaway DB | snapshots of 264 → 548 → 818 vessels, 6,850 tracked |
+
+The third test ran the real collector class with `db_path` pointed at the scratchpad, so
+the parked production DuckDB was not touched while the question was still open. Vessel
+counts climbing is the exact inverse of the parking signature (`0 vessels held in memory,
+feed appears silent`), and classification came back intact - Capesize, Suezmax, Aframax,
+Supramax, VLCC. **No code change was needed.** The outage was entirely upstream.
+
+**The outage started 2026-08-06, not 2026-08-16.** `/api/meta` reported
+`last_seen: 2026-08-06T02:28:54` on restart. The feed had been dead for ten days before
+the parking, and nothing alerted. The collector is not a batch unit, so it carries no
+`OnFailure=alert-email@%N.service`, and it never exits non-zero when the feed goes quiet -
+it reconnects, logs a warning and backs off to 1024s. UptimeRobot saw the site up the
+whole time because nginx was serving a frontend fine; only the vessel count was zero.
+There is still no alert for this shape of failure.
+
+**What was flipped back on.** `freight-api`, `ais-collector`, `freight-analytics.timer`,
+`freight-analytics-derived.timer`, all `enable --now`. The vhost was reverted to the
+pre-parking config.
+
+**The documented restore step was stale.** The header of `nginx-freight.conf` said
+`git checkout nginx-freight.conf` to get the pre-parking file back, which assumed the
+parking edit was uncommitted. It had since been committed as `0d60dde`, making that
+checkout a no-op that would have silently left the 503 in place. The pre-parking version
+had to be recovered with `git checkout 3386f4b -- nginx-freight.conf`. Note also that
+`/etc/nginx/sites-enabled/freight.conf` is a symlink straight into the repo, so editing
+the working tree edits the live config - there is no separate copy step.
+
+**Memory, the coupled half.** Parking had raised `MemoryHigh` on `user-1000.slice` from
+9G to 10752M because freight's ~1.7 GB left `system.slice`. Measured with freight running
+again: `system.slice` 5.10 GB. By the sizing rule (`total - system.slice - 2G headroom`)
+that gives 16 - 5.10 - 2 = 8.9 GB, so `MemoryHigh=9216M` with `MemoryMax=9728M`, keeping
+the 0.5 GB band that session's note explains is load-bearing.
+
+**`freight-analytics` at 1.5 GB is normal, not the stuck run.** The parking note recorded
+a run "sitting in `activating` holding 1.49 GB" as evidence of a hang. The catch-up run
+triggered by `Persistent=true` hovered at that same 1.49-1.51 GB while progressing through
+stages normally, and finished clean: `Result=success`, exit 0, 7min 44s CPU, **1.7 GB peak**
+against its 3 GB cap (`transits=0 anchored=1065 density=1344 reroutes=0 dark_voyages=25
+spoof=285`). That figure is this job's ordinary working set, not a symptom. Note the live
+`MemoryCurrent` sampling understated it - systemd's recorded peak is the number to trust.
+
+**Known data gap.** No AIS history 2026-08-06 → 2026-09-08. The fleet-dispersion series
+has a ~4.5 week hole and nothing can backfill it, since the source is a live feed with no
+history endpoint.
+
+**Backups need no edit.** `backup.sh` skips `ais_positions.duckdb` while an archive is
+newer than the source, and says in its own comment that it resumes on its own when the
+feed returns. Verified: source is now 2026-09-08 22:43 against a newest archive of
+2026-08-23, so the condition is already false and tonight's run copies it again.
+
 ## 2026-08-09 (session 23) - the hourly analytics job was OOM-killed every run; the same ratchet as session 20, in a different place
 
 `freight-analytics` failed with `oom-kill` on every run of 2026-08-09 (08:33, 09:32,
