@@ -20,7 +20,19 @@ import pytest
 from fastapi.testclient import TestClient
 from tests.conftest import _SCHEMA
 
-_NOW = datetime.now(UTC).replace(tzinfo=None, microsecond=0)
+
+def _now() -> datetime:
+    """Current UTC, read fresh per fixture rather than once at import.
+
+    The endpoint computes `age_minutes` against the wall clock at request time,
+    so a seeded `last_seen` of `_now() - age` only reads back as `age` while
+    little time has passed since it was written. This used to be a module-level
+    constant, which made the drift "however long the suite takes to reach this
+    test": on 2026-09-09 a loaded box pushed the full run to 5m16s and two of
+    these tests failed on their `abs=5` minute tolerance, then passed alone.
+    Reading the clock inside each fixture bounds the drift to one test.
+    """
+    return datetime.now(UTC).replace(tzinfo=None, microsecond=0)
 
 
 def _client_with_feed_age(tmp_path, monkeypatch, age: timedelta | None) -> TestClient:
@@ -45,7 +57,7 @@ def _client_with_feed_age(tmp_path, monkeypatch, age: timedelta | None) -> TestC
                 "tanker",
                 "VLCC",
                 "hormuz",
-                _NOW - age,
+                _now() - age,
                 None,
                 None,
                 None,
@@ -104,7 +116,7 @@ class TestSnapshotFallback:
         conn.execute(
             "INSERT INTO ais_snapshots VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             [
-                _NOW - snapshot_age,
+                _now() - snapshot_age,
                 3001,
                 "tanker",
                 "VLCC",
@@ -160,7 +172,7 @@ class TestSnapshotFallback:
                 "bulk",
                 "Capesize",
                 "singapore_malacca",
-                _NOW,
+                _now(),
                 None,
                 None,
                 None,
@@ -170,7 +182,7 @@ class TestSnapshotFallback:
         conn.execute(
             "INSERT INTO ais_snapshots VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             [
-                _NOW - timedelta(hours=72),
+                _now() - timedelta(hours=72),
                 4001,
                 "bulk",
                 "Capesize",
