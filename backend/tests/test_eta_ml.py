@@ -84,6 +84,53 @@ def test_training_is_deterministic_under_seed():
     np.testing.assert_allclose(p1, p2)
 
 
+def test_early_stop_split_is_time_ordered_and_voyage_disjoint():
+    """The stopping slice must be a forward hold-out, not a shuffle.
+
+    If it shared voyages with the fit set, early stopping would keep improving on
+    leaked rows and stop far too late - the round count would be tuned on data the
+    model had already seen.
+    """
+    s = _synth_samples()
+    fit, val = eta_ml._early_stop_split(s)
+    assert not fit.empty and not val.empty
+    assert set(fit["voyage_id"]) & set(val["voyage_id"]) == set()
+    assert fit["arrival_ts"].max() <= val["arrival_ts"].min()
+    assert len(fit) + len(val) == len(s)
+
+
+def test_train_quantiles_uses_fixed_budget_below_the_row_floor():
+    """Small frames skip early stopping and take the fixed fallback budget.
+
+    Guards two things at once: a cold start still trains, and the unit tests stay
+    fast instead of searching to MAX_BOOST_ROUND on a few thousand synthetic rows.
+    """
+    s = _synth_samples()
+    train, _, _ = eta_ml.time_voyage_split(s)
+    assert len(train) < eta_ml._MIN_ROWS_FOR_EARLY_STOP  # premise of this test
+    models = eta_ml.train_quantiles(train)
+    for booster in models.values():
+        assert booster.num_trees() == eta_ml._FALLBACK_BOOST_ROUND
+
+
+def test_train_quantiles_early_stops_above_the_row_floor(monkeypatch):
+    """Above the floor the round count comes from the data, not from a constant.
+
+    The floor and the cap are lowered so the path is exercised in milliseconds;
+    what is asserted is that the fitted round count is chosen by early stopping
+    (bounded by the cap) rather than being the fixed fallback.
+    """
+    monkeypatch.setattr(eta_ml, "_MIN_ROWS_FOR_EARLY_STOP", 0)
+    monkeypatch.setattr(eta_ml, "MAX_BOOST_ROUND", 40)
+    monkeypatch.setattr(eta_ml, "EARLY_STOPPING_ROUNDS", 5)
+    s = _synth_samples()
+    train, _, _ = eta_ml.time_voyage_split(s)
+    models = eta_ml.train_quantiles(train)
+    for booster in models.values():
+        assert 0 < booster.num_trees() <= 40
+        assert booster.num_trees() != eta_ml._FALLBACK_BOOST_ROUND
+
+
 def test_quantiles_are_monotone():
     s = _synth_samples()
     train, _, test = eta_ml.time_voyage_split(s)

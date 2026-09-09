@@ -109,7 +109,31 @@ LGB_PARAMS: dict = {
     "num_threads": -1,
     "verbosity": -1,
 }
-NUM_BOOST_ROUND = 400
+# Boosting rounds are NOT a tuned constant. They were: `NUM_BOOST_ROUND = 400`,
+# chosen when history was ~3 weeks. Measured on 2026-09-09 against ~8 weeks, the
+# P50 head was still improving at a 4000-round cap, and the fixed 400 cost 6.2%
+# of held-out median |err| (10.640 -> 9.979 on an inner validation slice).
+#
+# The sweep's other result is why capacity is left alone: across 63/127/255/511
+# leaves and min_child_samples 50/100, every early-stopped config landed between
+# 9.928 and 9.995 - a 0.7% spread, i.e. noise - while the shipped config sat 6%
+# behind all of them. The bottleneck was never model capacity, it was the round
+# cap. Raising the constant would just reset the same trap for whoever reads this
+# at 16 weeks of history, so the cap is now large and early stopping picks the
+# round count from the data each retrain.
+MAX_BOOST_ROUND = 8000
+EARLY_STOPPING_ROUNDS = 100
+# Fraction of `train` held out (by voyage arrival time) to early-stop on. It is
+# carved from `train`, never from `calib` or `test`: `calib` must stay clean for
+# the conformal band and `test` for the promotion gate.
+_EARLY_STOP_FRAC = 0.20
+# Below this many rows the stopping slice is too small for the signal to mean
+# anything - early stopping would be fitting noise in the callback rather than in
+# the model - so a small fixed budget is used instead. This is also what keeps the
+# unit tests fast: they train on a few thousand synthetic rows, where searching up
+# to MAX_BOOST_ROUND would cost minutes and prove nothing.
+_MIN_ROWS_FOR_EARLY_STOP = 50_000
+_FALLBACK_BOOST_ROUND = 400
 
 # Promotion band for interval coverage (roadmap): a challenger cell is only
 # promoted if its realised P10-P90 coverage stays honest.
@@ -179,25 +203,117 @@ def time_voyage_split(
 # ---------------------------------------------------------------------------
 
 
-def train_quantiles(train: pd.DataFrame, params: dict | None = None) -> dict:
-    """Train the three quantile boosters. Returns {'p10','p50','p90': Booster}.
+def _early_stop_split(train: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Split `train` into (earlier fit, later stopping slice) by voyage arrival.
 
-    Deterministic under the fixed seed in ``LGB_PARAMS`` (single-threaded RNG per
-    booster; ``num_threads`` affects speed, not the fit, for this objective).
+    Voyage-grouped and time-ordered for the same reason as `time_voyage_split`:
+    a shuffled stopping slice would share voyages with the fit set and stop late
+    on a leaked signal. Returns two empty frames when there is too little data to
+    split (fewer than 2 voyages), so callers can fall back to a fixed budget.
+    """
+    if train.empty:
+        return train, train
+    order = train.groupby("voyage_id")["arrival_ts"].min().sort_values().index.to_numpy()
+    if len(order) < 2:
+        return train.iloc[0:0], train.iloc[0:0]
+    cut = int(round(len(order) * (1.0 - _EARLY_STOP_FRAC)))
+    cut = min(max(cut, 1), len(order) - 1)
+    fit_ids = set(order[:cut].tolist())
+    vid = train["voyage_id"]
+    return train[vid.isin(fit_ids)], train[~vid.isin(fit_ids)]
+
+
+def train_quantiles(train: pd.DataFrame, params: dict | None = None) -> dict:
+    """Train the three quantile boosters. Returns {'lo','mid','hi': Booster}.
+
+    Each head is fitted twice, which is the standard way to spend a round budget
+    without either hard-coding it or throwing away data:
+
+    1. **Find the round count.** Fit on the earlier ``1 - _EARLY_STOP_FRAC`` of
+       ``train`` (split by voyage arrival time, so the stopping signal is a
+       genuine forward hold-out rather than a shuffle) and early-stop on the
+       later slice against the head's own quantile loss.
+    2. **Refit on all of ``train``** for exactly that many rounds.
+
+    The round count is therefore re-derived from the data on every retrain rather
+    than being a constant that silently goes stale as history grows - which is
+    what the old ``NUM_BOOST_ROUND = 400`` did. Using step 1's iteration count
+    unchanged on step 2's slightly larger set errs toward under-fitting, which is
+    the safe direction: the promotion gate can only reject a weaker challenger,
+    never serve one that was not measured.
+
+    The split is carved out of ``train`` alone. ``calib`` stays untouched so the
+    conformal band keeps whatever validity it has, and ``test`` stays untouched so
+    the champion map is decided on a hold-out nothing has been tuned against.
+
+    Deterministic under the fixed seed in ``LGB_PARAMS`` (``num_threads`` affects
+    speed, not the fit, for this objective).
     """
     import lightgbm as lgb
 
     p = {**LGB_PARAMS, **(params or {})}
-    X = _prepare(train)
-    y = train[LABEL].to_numpy(dtype=float)
-    dtrain = lgb.Dataset(X, label=y, categorical_feature=CATEGORICAL_FEATURES, free_raw_data=False)
+    X_all = _prepare(train)
+    y_all = train[LABEL].to_numpy(dtype=float)
+
+    inner_fit, inner_val = _early_stop_split(train)
+    use_es = len(train) >= _MIN_ROWS_FOR_EARLY_STOP and not inner_val.empty and not inner_fit.empty
+    if use_es:
+        Xf, yf = _prepare(inner_fit), inner_fit[LABEL].to_numpy(dtype=float)
+        Xv, yv = _prepare(inner_val), inner_val[LABEL].to_numpy(dtype=float)
+
     models: dict = {}
     for name, alpha in QUANTILES.items():
-        models[name] = lgb.train(
-            {**p, "objective": "quantile", "alpha": alpha},
-            dtrain,
-            num_boost_round=NUM_BOOST_ROUND,
+        head = {**p, "objective": "quantile", "alpha": alpha}
+        if use_es:
+            # feature_pre_filter must be off: a Dataset built under one
+            # min_data_in_leaf cannot be reused under a smaller one, and this
+            # module's params are meant to stay tunable across runs.
+            dfit = lgb.Dataset(
+                Xf,
+                label=yf,
+                categorical_feature=CATEGORICAL_FEATURES,
+                free_raw_data=False,
+                params={"feature_pre_filter": False},
+            )
+            dval = lgb.Dataset(
+                Xv,
+                label=yv,
+                reference=dfit,
+                categorical_feature=CATEGORICAL_FEATURES,
+                free_raw_data=False,
+                # Must match the reference Dataset's params or LightGBM warns
+                # that it is overriding them.
+                params={"feature_pre_filter": False},
+            )
+            probe = lgb.train(
+                head,
+                dfit,
+                num_boost_round=MAX_BOOST_ROUND,
+                valid_sets=[dval],
+                callbacks=[lgb.early_stopping(EARLY_STOPPING_ROUNDS, verbose=False)],
+            )
+            rounds = int(probe.best_iteration) or MAX_BOOST_ROUND
+            if rounds >= MAX_BOOST_ROUND:
+                log.warning(
+                    "eta_ml: %s head hit the %d-round cap without early-stopping; "
+                    "the model is still improving and MAX_BOOST_ROUND is now the binding "
+                    "constraint - re-measure before trusting it as converged",
+                    name,
+                    MAX_BOOST_ROUND,
+                )
+        else:
+            # Too little data to hold out a meaningful stopping slice (unit tests,
+            # a cold start). Fall back to a fixed modest budget.
+            rounds = _FALLBACK_BOOST_ROUND
+        dall = lgb.Dataset(
+            X_all,
+            label=y_all,
+            categorical_feature=CATEGORICAL_FEATURES,
+            free_raw_data=False,
+            params={"feature_pre_filter": False},
         )
+        models[name] = lgb.train(head, dall, num_boost_round=rounds)
+        log.info("eta_ml: %s head trained for %d rounds", name, rounds)
     return models
 
 

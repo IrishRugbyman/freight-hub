@@ -50,11 +50,18 @@ ExecStart=/usr/bin/flock -w 3600 /home/lbzgiu/quant/freight/backend/data/.analyt
 StandardOutput=journal
 StandardError=journal
 
-# Measured 2026-09-08 on 1.05M underway samples / 112k voyages: 1.25 GB peak RSS,
-# 1m32s wall (543s CPU across 6 cores). 3 GB leaves room for history growth and
-# for systemd's cgroup accounting running above RSS. Treat a cgroup OOM here as a
-# signal to measure, not to raise the number - the whole job fits in memory only
-# because _load_samples filters to underway, positive-lead rows (1.05M of 3.10M).
+# Measured 2026-09-09 on 1.05M underway samples / 112k voyages, with early
+# stopping: 1.5 GB peak RSS, 14m55s wall (5710s CPU across ~6.4 cores). It was
+# 1m32s before the round count stopped being a fixed 400 - each head is now fitted
+# twice (a probe that early-stops to find the round count, then a refit on all of
+# train at that count) and the P50 head alone converges around 4500-5300 rounds.
+# That cost is the point: the 400-round cap was leaving 6.2% of median |err| on
+# the table. It still finishes an hour before the 03:20 derived stages.
+#
+# 3 GB leaves room for history growth and for systemd's cgroup accounting running
+# above RSS. Treat a cgroup OOM here as a signal to measure, not to raise the
+# number - the job fits in memory only because _load_samples filters to underway,
+# positive-lead rows (1.05M of 3.10M).
 MemoryAccounting=yes
 MemoryMax=3G
 
