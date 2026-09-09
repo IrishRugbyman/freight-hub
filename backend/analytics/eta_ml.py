@@ -559,11 +559,7 @@ def train_and_evaluate(
     report["ml_metrics"] = ml_metrics
     report["phys_metrics"] = pd.DataFrame(_metric_rows(phys_scored, "physics_v1", run_ts))
 
-    if persist and not ml_metrics.empty:
-        write_metrics(conn, ml_metrics)
-        by_tgt = _metric_rows_by_target(ml_scored, "ml", run_ts)
-        if by_tgt:
-            write_metrics_by_target(conn, by_tgt)
+    report["ml_metrics_by_target"] = _metric_rows_by_target(ml_scored, "ml", run_ts)
 
     # --- production model: refit on train+calib (all but the most recent test
     # window is not the goal here - we want *all* the data the gate was decided
@@ -589,12 +585,31 @@ def train_and_evaluate(
     model = ETAModel(prod_models, prod_cqr, champ)
     report["model"] = model
 
-    if persist and champ:  # only save artifacts if ML actually won somewhere
-        model.save()
-    elif persist:
-        log.info("eta_ml: challenger won no cells; not promoting (physics stays champion)")
+    if persist:
+        persist_run(conn, report)
 
     return report
+
+
+def persist_run(conn: duckdb.DuckDBPyConnection, report: dict) -> None:
+    """Write the scoreboard rows and (if ML won a cell) the model artifacts.
+
+    Split out of ``train_and_evaluate`` so the caller can hold an exclusive
+    connection for only as long as these writes take, instead of for the whole
+    training run - see ``run`` for why that matters.
+    """
+    ml_metrics = report.get("ml_metrics")
+    if ml_metrics is not None and not ml_metrics.empty:
+        write_metrics(conn, ml_metrics)
+        by_tgt = report.get("ml_metrics_by_target")
+        if by_tgt:
+            write_metrics_by_target(conn, by_tgt)
+
+    champ, model = report.get("champion_map"), report.get("model")
+    if champ and model is not None:  # only save artifacts if ML actually won somewhere
+        model.save()
+    else:
+        log.info("eta_ml: challenger won no cells; not promoting (physics stays champion)")
 
 
 def _print_report(report: dict) -> None:
@@ -625,12 +640,36 @@ def _print_report(report: dict) -> None:
 
 
 def run(dry_run: bool = False) -> dict:
-    """Standalone entry: train + walk-forward + (gated) promote against the live DB."""
-    conn = duckdb.connect(str(ANALYTICS_DB))
+    """Standalone entry: train + walk-forward + (gated) promote against the live DB.
+
+    Two phases, deliberately. Training used to run against a read-WRITE connection
+    held for its whole duration, which takes DuckDB's exclusive lock on the live
+    analytics DB for minutes. That is not a loud failure: ``app.db.query`` opens a
+    fresh read-only connection per request and retries a locked file for only
+    ~9s before returning an **empty DataFrame**, so every analytics endpoint would
+    serve HTTP 200 with no rows for the length of a retrain. Measured on
+    2026-09-09: with a training run holding the lock,
+    ``GET /api/analytics/eta-accuracy`` returned ``{"run_ts": null, "rows": []}``
+    and the scoreboard rendered blank - nothing that UptimeRobot or Sentry can see.
+
+    So phase 1 loads and trains through a READ-ONLY connection (DuckDB allows
+    concurrent readers, so the API keeps serving throughout), and phase 2 opens
+    the exclusive connection only for the metric writes, which take well under a
+    second. The model artifacts are plain files and need no DB lock at all.
+    """
+    conn = duckdb.connect(str(ANALYTICS_DB), read_only=True)
     try:
-        report = train_and_evaluate(conn, persist=not dry_run)
+        report = train_and_evaluate(conn, persist=False)
     finally:
         conn.close()
+
+    if not dry_run:
+        wconn = duckdb.connect(str(ANALYTICS_DB))
+        try:
+            persist_run(wconn, report)
+        finally:
+            wconn.close()
+
     _print_report(report)
     return report
 

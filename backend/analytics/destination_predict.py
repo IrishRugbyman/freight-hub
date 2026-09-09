@@ -649,16 +649,29 @@ def train_and_evaluate(conn: duckdb.DuckDBPyConnection, persist: bool = True) ->
     report["model"] = model
 
     if persist:
-        # Pass MODEL_DIR explicitly (a module-global lookup at call time) rather
-        # than relying on `save`'s own bound default, so tests can redirect the
-        # artifact path via `monkeypatch.setattr(dp, "MODEL_DIR", ...)` without
-        # ever writing into the real, gitignored production models/ directory.
-        model.save(MODEL_DIR)
-        _write_metrics(conn, ml_metrics, heur_metrics, promote)
-        if not promote:
-            log.info("destination_predict: challenger did not beat the heuristic; not promoting")
+        persist_run(conn, report)
 
     return report
+
+
+def persist_run(conn: duckdb.DuckDBPyConnection, report: dict) -> None:
+    """Save the artifact and write the scoreboard row.
+
+    Split out of ``train_and_evaluate`` so the caller holds an exclusive
+    connection only for these writes rather than for the whole training run -
+    see ``run`` for why that matters.
+    """
+    model = report.get("model")
+    if model is None:
+        return
+    # Pass MODEL_DIR explicitly (a module-global lookup at call time) rather than
+    # relying on `save`'s own bound default, so tests can redirect the artifact
+    # path via `monkeypatch.setattr(dp, "MODEL_DIR", ...)` without ever writing
+    # into the real, gitignored production models/ directory.
+    model.save(MODEL_DIR)
+    _write_metrics(conn, report["ml_metrics"], report["heuristic_metrics"], report["promoted"])
+    if not report["promoted"]:
+        log.info("destination_predict: challenger did not beat the heuristic; not promoting")
 
 
 def _print_report(report: dict) -> None:
@@ -673,12 +686,29 @@ def _print_report(report: dict) -> None:
 
 
 def run(dry_run: bool = False) -> dict:
-    """Standalone entry: train + walk-forward + (gated) promote against the live DB."""
-    conn = duckdb.connect(str(ANALYTICS_DB))
+    """Standalone entry: train + walk-forward + (gated) promote against the live DB.
+
+    Two phases, for the same reason as ``eta_ml.run`` - see its docstring. Holding
+    a read-WRITE connection for the whole run takes DuckDB's exclusive lock on the
+    live analytics DB for minutes (this job's candidate build alone ran 7+ minutes
+    and 3.7 GB on 2026-09-09), and ``app.db.query`` responds to a locked file by
+    returning an empty DataFrame after ~9s, so analytics endpoints serve HTTP 200
+    with no rows for the duration. Training therefore runs read-only, and the
+    exclusive connection is opened only for the final metric write.
+    """
+    conn = duckdb.connect(str(ANALYTICS_DB), read_only=True)
     try:
-        report = train_and_evaluate(conn, persist=not dry_run)
+        report = train_and_evaluate(conn, persist=False)
     finally:
         conn.close()
+
+    if not dry_run:
+        wconn = duckdb.connect(str(ANALYTICS_DB))
+        try:
+            persist_run(wconn, report)
+        finally:
+            wconn.close()
+
     _print_report(report)
     return report
 

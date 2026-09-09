@@ -15,11 +15,14 @@ DuckDB paths are env-overridable so tests can inject temp files without touching
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from pathlib import Path
 
 import duckdb
+
+log = logging.getLogger(__name__)
 
 _DEFAULT_AIS_DB = "~/quant/shared/market-data/data/ais_positions.duckdb"
 _DEFAULT_ANALYTICS_DB = Path(__file__).resolve().parents[1] / "data" / "freight_analytics.duckdb"
@@ -85,6 +88,23 @@ def query(sql: str, params: list | None = None, retries: int = 30, db: Path | No
             return pd.DataFrame()  # table not created yet
         except duckdb.IOException:
             if attempt == retries - 1:
+                # Giving up on a locked file returns empty, which serves HTTP 200
+                # with no rows - indistinguishable from "there is genuinely no
+                # data". On 2026-09-09 a training job held the write lock for
+                # minutes and /api/analytics/eta-accuracy served an empty
+                # scoreboard the whole time, seen by neither UptimeRobot nor
+                # Sentry. The retry budget stays (the collector's brief per-cycle
+                # lock is normal and must not spam), but exhausting it is now
+                # loud: it means a writer held the file for the full
+                # retries*0.3s, which is a bug in that writer, not normal
+                # contention.
+                log.warning(
+                    "duckdb read gave up after %.1fs waiting on a lock: %s - "
+                    "returning an EMPTY result; a writer is holding %s",
+                    retries * 0.3,
+                    sql.split("\n")[0][:120],
+                    path,
+                )
                 return pd.DataFrame()
             time.sleep(0.3)
     return pd.DataFrame()
