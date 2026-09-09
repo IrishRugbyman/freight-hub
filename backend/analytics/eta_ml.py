@@ -568,7 +568,21 @@ def train_and_evaluate(
     # --- production model: refit on train+calib (all but the most recent test
     # window is not the goal here - we want *all* the data the gate was decided
     # on, so refit on train+calib and recalibrate the band on calib). The
-    # champion map, decided on the honest hold-out, is carried onto it. ---
+    # champion map, decided on the honest hold-out, is carried onto it.
+    #
+    # Note the known impurity: `calib` is inside `prod_train`, so this conformal
+    # calibration is in-sample, and split-conformal's validity guarantee needs a
+    # held-out calibration set. Measured on the 2026-09-08 walk-forward window
+    # rather than argued: the served band realises 0.801 test coverage against
+    # TARGET_COVERAGE 0.80. Carrying the eval model's genuinely held-out offsets
+    # instead gives 0.822, and a voyage-grouped cross-conformal (CV+, K=4, four
+    # extra fits) gives 0.806 - both *further* from target than what ships.
+    #
+    # The reason the impurity does not bite is scale: the offsets are 0.0-0.2h
+    # against a ~51h median band, so the raw quantile heads set the width and
+    # conformal is a rounding correction on top. Revisit only if a run's offsets
+    # become a material fraction of the band - then the in-sample shrinkage would
+    # start to matter and cross-conformal is the fix. ---
     prod_train = pd.concat([train, calib], ignore_index=True) if not calib.empty else train
     prod_models = train_quantiles(prod_train)
     prod_cqr = calibrate_cqr(prod_models, calib if not calib.empty else train)

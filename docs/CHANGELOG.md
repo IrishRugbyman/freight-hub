@@ -4,6 +4,97 @@
 
 - [2026-Q2](changelog/2026-Q2.md) - 53 entries, 2026-06-10 to 2026-06-30
 
+## 2026-09-09 - the ETA gate was punishing the model for getting better
+
+Question that started it: we have more data now, can we do more ML? We do have more
+data - `eta_samples` has grown 2.5x since the ML challenger was last trained, from
+1.23M rows / 51k voyages on 2026-07-01 to 3.10M / 129k. The challenger had never been
+retrained against any of it, because Phase G's retrain timer was the one item of the
+True ETA roadmap never built.
+
+**Retraining on the extra data made things worse.** The gated retrain promoted 1 cell
+where the frozen July artifact had 6. That is the opposite of what more data should do,
+so it was worth understanding before shipping.
+
+**Cause: a small-sample compensation that inverted.** The quantile heads were P05/P95
+(nominal 90%) while `TARGET_COVERAGE` is 0.80. That was deliberate and documented: on
+the original ~3-week history a P10/P90 head was under-dispersed out-of-time and realised
+only ~0.71 coverage - below the [0.75, 0.85] promotion band - while the wider P05/P95
+realised ~0.83 and fit inside it. Widening the heads bought coverage the model had not
+earned.
+
+On ~8 weeks the under-dispersion is gone, and the compensation became an over-correction.
+Raw P05/P95 now realises **0.876** on the walk-forward test window, *above* the band. The
+conformal offset is clamped non-negative (it may only widen, never shrink), so nothing
+could narrow it back - every bucket's offset clamped to exactly 0.0. The per-cell
+diagnostic is unambiguous:
+
+| cell | physics \|err\| | ML \|err\| | ML coverage | verdict |
+|---|--:|--:|--:|---|
+| chokepoint\|0-6h | 1.37 | 3.66 | 0.882 | reject: error |
+| chokepoint\|6-12h | 3.02 | 3.49 | 0.868 | reject: error |
+| chokepoint\|12-24h | 9.26 | **8.31** | 0.852 | reject: coverage |
+| chokepoint\|24-48h | 10.77 | **5.58** | 0.785 | promote |
+| chokepoint\|48h+ | 15.38 | **6.11** | 0.877 | reject: coverage |
+| port\|0-6h | 13.73 | **12.68** | 0.880 | reject: coverage |
+| port\|6-12h | 12.56 | 12.96 | 0.876 | reject: error |
+| port\|12-24h | 14.46 | **13.39** | 0.877 | reject: coverage |
+| port\|24-48h | 16.54 | **12.91** | 0.885 | reject: coverage |
+| port\|48h+ | 15.70 | **9.81** | 0.854 | reject: coverage |
+
+Seven of ten cells had ML beating physics on median |err|. Six were rejected purely on
+coverage, and **every one of them for over-covering - not one for under-covering.** The
+gate was reading a better-calibrated model as a failure.
+
+**Fix.** Heads are now P10/P90. That matches `TARGET_COVERAGE`, matches the 80% band
+physics already serves (so the two models are finally compared at the same band width),
+and matches the `eta_p10_h` / `eta_p90_h` names the API schema and the UI have always
+used - the 90% heads made those field names untrue. Conformal is now the only thing that
+moves the band, and it genuinely widens: offsets run 0.05h at 0-6h to 0.56h at 24-48h
+instead of clamping to zero everywhere.
+
+**Result.** 6 cells promoted, held-out interval coverage 0.876 -> 0.814. The wins are
+exactly where physics is structurally optimistic: chokepoint 48h+ median |err| 15.38h ->
+6.11h, port 48h+ 15.70h -> 9.83h, port 24-48h 16.54h -> 12.91h. The three short-lead
+cells ML loses are now rejected on error, which is the honest reason to reject them.
+Physics keeps the short-lead cells it genuinely owns.
+
+**A stale-artifact bug fell out of it.** `eta_champion_map.json` (1 cell, mtime
+2026-08-16) disagreed with `eta_ml_meta.json` (6 cells, mtime 2026-07-01). Nothing reads
+the standalone file - `ETAModel.load` takes the map out of the meta - so serving was
+unaffected, but the two are written by the same `save()` and had no business differing.
+The retrain rewrote both consistently.
+
+**Phase G closed.** `freight-eta-retrain.{service,timer}` runs the gated retrain weekly
+(Sun 02:20 UTC), under the same analytics `flock`, scheduled ahead of the 03:20 derived
+stages so a newly promoted champion is served the same night. It is no-promote-safe by
+construction: it writes artifacts only for cells the challenger wins, and writes nothing
+at all if it wins none. It carries `OnFailure=alert-email@%N.service` - a retrain that
+fails silently leaves a stale champion in service and changes nothing externally
+observable, which is precisely how the backup breakage hid for ten nights.
+Measured cost: 1m32s wall, 1.25 GB peak RSS, so `MemoryMax=3G`.
+
+**A defect found, measured, and deliberately not fixed.** The production model refits on
+`train+calib` and then calibrates conformal on `calib` - which is inside that fit. That is
+in-sample calibration, and split-conformal's guarantee needs a held-out set, so in
+principle the served band is too narrow. Measured rather than argued: it realises **0.801**
+test coverage against a target of 0.80. Carrying the eval model's genuinely held-out
+offsets gives 0.822; a voyage-grouped cross-conformal (CV+, K=4, four extra fits) gives
+0.806. Both are *further* from target than what ships. The impurity does not bite because
+the offsets are 0.0-0.2h against a ~51h median band - the raw heads set the width and
+conformal is a rounding correction on top. Left as-is with the measurement recorded in the
+code, to revisit only if offsets ever become a material fraction of the band.
+
+**Not addressed, and worth a session each.** (1) The destination-prediction LightGBM
+reranker was last trained 2026-07-04 on 40k labelled transitions and has no retrain timer
+either - same staleness, same fix. (2) `LGB_PARAMS` was tuned when history was 3 weeks
+(shallow trees, `min_child_samples=100`, 400 rounds); the capacity ceiling has not been
+re-measured on 2.5x the data, and that is the most likely remaining source of ML gain.
+Deliberately not changed here so a capacity effect could not be confounded with the band
+fix. (3) The history is 2026-06-09 to 2026-08-05 plus 2026-09-08 onward - the AIS outage
+left a 33-day hole, so it is ~8 weeks of clean data spread over 13 weeks, not 13 weeks of
+data.
+
 ## 2026-09-08 (later) - the map was defaced the whole time and nothing caught it
 
 Unparking made the tracker reachable again. Opening it in a real browser showed the basemap

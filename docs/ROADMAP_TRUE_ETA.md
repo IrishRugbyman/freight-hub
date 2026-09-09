@@ -170,26 +170,31 @@ All new tables in `freight_analytics.duckdb`, written by the analytics batch job
 
 ---
 
-### Phase G - Gated retrain + auto-promote (monitoring half COMPLETE 2026-06-27)
-*Goal: the model improves as history grows, automatically, without ever promoting a worse model.*
-*Depends on: D (ML), which shipped 2026-07-01. The refresh + drift-watch half shipped 2026-06-27.*
+### Phase G - Gated retrain + auto-promote [COMPLETE 2026-09-09]
 
-The nightly-refresh + drift-watch deliverables are done: refresh already runs
-hourly via the existing `freight-analytics.timer` (no separate timer needed), and a
-champion drift watch (`analytics/eta_drift.py`, surfaced on the accuracy scoreboard)
-now flags coverage/median-error regressions every run. See CHANGELOG 2026-06-27.
+---
 
-The Phase-D training entrypoint (`python -m analytics.eta_ml`) already *is* the
-gated-promotion path: it trains the challenger on accumulated history, runs the
-leakage-free walk-forward, and rewrites `models/` + the champion map only for cells
-the challenger wins (median |err| down AND coverage in [0.75,0.85]). The hourly
-build reads the frozen artifact and never retrains. What remains is only to run it
-on a schedule.
+## Open follow-ups
 
-**What's left.**
-- [ ] Add a weekly systemd timer (mirror `freight-analytics.timer`) that runs `python -m analytics.eta_ml` so the champion + champion map re-derive as history grows. It is already no-promote-safe (writes artifacts only for won cells; leaves physics champion otherwise).
+Phases A-G are all delivered; what remains are the three things the 2026-09-09 retrain
+surfaced and deliberately did not touch. See CHANGELOG 2026-09-09 for the measurements.
 
-**Definition of done.** A weekly retrain cycle runs end-to-end unattended and correctly keeps the better model per cell.
+- [ ] **Retune `LGB_PARAMS` on the grown history.** The hyperparameters (shallow trees,
+      `min_child_samples=100`, 400 rounds) were chosen when history was ~3 weeks and have
+      never been re-measured against 2.5x the data. This is the most likely remaining
+      source of ML gain. Kept out of the band fix so a capacity effect could not be
+      confounded with it. Measure held-out median \|err\| per cell, not aggregate.
+- [ ] **Give the destination-prediction reranker the same treatment.** `dest_lgbm.txt` was
+      last trained 2026-07-04 on 40k labelled transitions, has grown since, and has no
+      retrain timer - the identical staleness `freight-eta-retrain.timer` just fixed for
+      the ETA challenger. It already gates on top-1 accuracy vs the heuristic, so a weekly
+      unit is the same shape.
+- [ ] **Decide how the 33-day AIS hole is handled in training.** History is 2026-06-09 to
+      2026-08-05 plus 2026-09-08 onward: ~8 weeks of clean data spread over 13 weeks. The
+      voyage-grouped time split currently steps straight across the gap. Once enough
+      post-outage history accumulates, check whether the pre- and post-outage regimes are
+      exchangeable before pooling them, and whether the walk-forward test window should
+      exclude the sparse Aug 4-5 tail where the feed was already degrading.
 
 ---
 
@@ -203,7 +208,7 @@ on a schedule.
 | D | ML quantile ETA [DONE 2026-07-01] | - | 0 | 1 | - |
 | E | Serving + API | eta_predictions | +1 +3 wired | 1-2 | C |
 | F | Frontend + scoreboard | - | +1 metrics | 1-2 | E |
-| G | Retrain + monitor | eta_model_metrics (live) | 0 | 1 | D,E,F |
+| G | Retrain + monitor [DONE 2026-09-09] | eta_model_metrics (live) | 0 | 1 | D,E,F |
 
 **Critical path to a shippable upgrade is A -> B -> C -> E -> F** (physics, no ML).
 D and G layer learning + automation on top once history justifies them.
