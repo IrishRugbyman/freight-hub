@@ -22,6 +22,13 @@
 Description=Freight hub analytics derived stages (ETA + destination, full history)
 After=network-online.target
 
+# Alert on failure. ~/CLAUDE.md: every batch unit carries this, because a timer-driven
+# job exiting non-zero is seen by neither UptimeRobot nor Sentry - which is how the
+# server-backup breakage hid for ten nights.
+# A failed derived run leaves eta_predictions and destination_predictions frozen
+# at yesterday's build. Nothing 5xxs and no uptime check notices.
+OnFailure=alert-email@%N.service
+
 [Service]
 Type=oneshot
 User=lbzgiu

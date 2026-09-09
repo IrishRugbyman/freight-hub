@@ -189,12 +189,19 @@ surfaced and deliberately did not touch. See CHANGELOG 2026-09-09 for the measur
       retrain timer - the identical staleness `freight-eta-retrain.timer` just fixed for
       the ETA challenger. It already gates on top-1 accuracy vs the heuristic, so a weekly
       unit is the same shape.
-- [ ] **Decide how the 33-day AIS hole is handled in training.** History is 2026-06-09 to
-      2026-08-05 plus 2026-09-08 onward: ~8 weeks of clean data spread over 13 weeks. The
-      voyage-grouped time split currently steps straight across the gap. Once enough
-      post-outage history accumulates, check whether the pre- and post-outage regimes are
-      exchangeable before pooling them, and whether the walk-forward test window should
-      exclude the sparse Aug 4-5 tail where the feed was already degrading.
+- [x] ~~Decide how the 33-day AIS hole is handled in training.~~ **Checked 2026-09-09: no
+      action needed, and the reason is worth keeping.** The sample builder is already
+      self-quarantining. `eta_backtest._MAX_LEAD_H = 72.0` draws samples only from the 72
+      hours before an arrival, so no label can span a 33-day gap - measured, there are
+      exactly **0** rows with a pre-outage `obs_ts` and a post-outage `arrival_ts`, and
+      `remaining_h` maxes at 72.0h across all 3.10M rows. `eta_labels._CALL_GAP_H = 24.0`
+      then starts a *new* arrival after a 24h gap, so a vessel seen before the outage and
+      again after it yields two separate arrivals rather than one fused voyage.
+      The feared Aug 4-5 degradation is also not what it looked like: per-vessel
+      observation density is unchanged through the outage (median inter-observation gap
+      holds at ~62 min every day from Jul 28 to Aug 5, matching
+      `_SAMPLE_CADENCE_H = 1.0`). The feed dying cut the number of vessels still being
+      seen, not the sampling of the ones that were. Nothing to exclude.
 
 ---
 
