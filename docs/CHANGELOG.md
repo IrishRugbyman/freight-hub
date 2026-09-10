@@ -4,6 +4,92 @@
 
 - [2026-Q2](changelog/2026-Q2.md) - 53 entries, 2026-06-10 to 2026-06-30
 
+## 2026-09-10 - both challengers retrained on a schedule, and the retrain stopped blanking the site
+
+Follow-on from the band fix. Three of the four things here were found by measuring
+the cost of the work rather than by looking for bugs.
+
+**The retrain was blanking the live analytics endpoints, and the timer shipped the
+night before would have done it every Sunday.** Both trainers connected to the live
+analytics DuckDB read-WRITE and held that connection for the whole run - 92s for
+`eta_ml`, 24m30s for `destination_predict`. DuckDB's write lock excludes new
+readers, and `app.db.query` opens a fresh read-only connection per request and
+retries a locked file for only ~9s before returning an **empty DataFrame**. So
+every analytics endpoint served HTTP 200 with no rows for the length of a retrain.
+
+Confirmed live, not reasoned about: with the destination job holding the lock,
+`GET /api/analytics/eta-accuracy` returned `{"run_ts": null, "rows": []}` and the
+scoreboard rendered blank; killing the job made the same request return all four
+models instantly. Nothing 5xxed, so neither UptimeRobot nor Sentry could see it.
+
+Both `run()` entrypoints are now two-phase: training loads through a READ-ONLY
+connection (DuckDB allows concurrent readers, so the API keeps serving), and the
+exclusive connection is opened only for the sub-second metric writes. Verified by
+polling the live endpoint every 8s through a full retrain - 24 rows throughout,
+where before it would have been 0. Separately, exhausting the retry budget in
+`app.db.query` now logs a warning instead of silently returning empty: the budget
+is there for the collector's brief per-cycle lock, so using all of it means a
+writer misbehaved.
+
+That change then broke `destination_predict`, which unlike `eta_ml` routes
+distances during its candidate build - `RouteCache.__init__` runs a CREATE, which
+a read-only attach refuses outright. It now detects a read-only connection and
+degrades to memory-only: same in-run memoization, it just cannot persist
+first-time-routed cells. Cheap, because the daily derived build routes the same
+cells through a writable connection anyway.
+
+**The round count was the real tuning story, and it was a negative result.** Swept
+63/127/255/511 leaves against `min_child_samples` 50/100 on an inner validation
+slice carved from `train` (never `test`, which decides the gate). Every
+early-stopped config landed between 9.928 and 9.995 median |err| - a 0.7% spread,
+noise - while the shipped config sat 6% behind all of them at 10.640. Capacity was
+never the bottleneck; `NUM_BOOST_ROUND = 400` was, and it was chosen when history
+was ~3 weeks.
+
+Raising it to a new number would just reset the trap for whoever reads this at 16
+weeks - which is exactly how the P05/P95 band went wrong the day before. So it is
+no longer a constant. Each head is fitted twice: a probe that early-stops on a
+forward slice of `train`, then a refit on all of `train` at the round count the
+probe found. The heads want budgets no single constant could serve - P50 converges
+around 4500-5300 rounds, P90 around 250. Result: **7 promoted cells, up from 6**,
+coverage 0.811. Cost 14m55s and 1.5 GB, up from 1m32s.
+
+**The destination reranker had the identical staleness.** `dest_lgbm.txt` was last
+trained 2026-07-04 on 40k labelled test groups; ground truth had since grown to
+89k and nothing was re-deriving it - the derived build mines its labels and serves
+its predictions, but never retrains it. Retrained 2026-09-10 it still beats the
+heuristic and promotes:
+
+| | 2026-07-04 (40,030 groups) | 2026-09-10 (88,657 groups) |
+|---|--:|--:|
+| heuristic top-1 | 0.633 | 0.647 |
+| **ml top-1** | **0.678** | **0.691** |
+| ml top-3 | 0.955 | 0.959 |
+
+`freight-dest-retrain.{service,timer}` runs it weekly, **Saturday** 02:20 - a
+different night from the ETA retrain's Sunday. Both take the same analytics flock
+so sharing a night would only serialize them, but this job peaks at 4.35 GB
+against the ETA retrain's 1.5 GB, and this box has a documented history of global
+OOMs where the kernel picks the largest process and takes postgres or the AIS
+collector with it. Separate nights keep the peaks from ever coinciding.
+MemoryMax=6G; treat a cgroup OOM there as a signal to chunk
+`build_training_candidates`, which materialises the whole 2.49M-row candidate
+frame, not to raise the number.
+
+**Two flaky tests, and they were genuinely wrong.** `test_feed_status` read `_NOW`
+once at module import while the endpoint computes `age_minutes` against the wall
+clock at request time, with an `abs=5` minute tolerance - so the drift was however
+long the suite took to reach them. A loaded box pushed a run to 5m16s and two
+failed, then passed alone. The clock is now read per fixture. That is the
+project's own "never depend on wall-clock time" standard, broken.
+
+**Also:** all four freight batch units now carry
+`OnFailure=alert-email@%N.service`, which none of them had despite `~/CLAUDE.md`
+saying every batch unit does. Worth knowing:
+`freight-mst.{service,timer}` are SYMLINKS from `/etc/systemd/system` into this
+repo while the others are copies, so editing the repo file changes production
+immediately for mst and does nothing for the rest until copied.
+
 ## 2026-09-09 - the ETA gate was punishing the model for getting better
 
 Question that started it: we have more data now, can we do more ML? We do have more

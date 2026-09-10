@@ -1,0 +1,25 @@
+# Weekly trigger for the gated destination-predictor retrain.
+#
+# 02:20 Saturday. Weekly for the same reason as the ETA retrain: the gate compares
+# a challenger against the champion on a walk-forward hold-out, and a week is
+# roughly the timescale on which the label set grows enough for that comparison to
+# say something new.
+#
+# A different night from freight-eta-retrain (Sunday) deliberately - see the
+# service unit: this job peaks at 4.35 GB and the two should never overlap on a
+# box with a history of global OOMs.
+#
+# Persistent=true so a retrain missed while the machine was down runs on the next
+# boot rather than being skipped for a week.
+
+[Unit]
+Description=Weekly gated retrain of the freight destination-prediction reranker
+# NO Requires= here. It would make this timer start its service at boot as well
+# as on schedule - see ~/ops/fix-timer-requires.sh.
+
+[Timer]
+OnCalendar=Sat *-*-* 02:20:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

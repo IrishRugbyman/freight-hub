@@ -176,36 +176,14 @@ All new tables in `freight_analytics.duckdb`, written by the analytics batch job
 
 ## Open follow-ups
 
-Phases A-G are all delivered; what remains are the three things the 2026-09-09 retrain
-surfaced and deliberately did not touch. See CHANGELOG 2026-09-09 for the measurements.
+None. Phases A-G and every follow-up they raised are delivered as of 2026-09-10.
+What was built, tried and decided is in `docs/CHANGELOG.md` (entries 2026-09-09 and
+2026-09-10); this file keeps only the reference material below - the data model, the
+build order, the API surface, and the things deliberately not built.
 
-- [x] ~~Retune `LGB_PARAMS` on the grown history.~~ **Done 2026-09-09, and the answer was
-      not capacity.** Swept 63/127/255/511 leaves against `min_child_samples` 50/100 on an
-      inner validation slice carved from `train`: every early-stopped config landed between
-      9.928 and 9.995 median \|err\| - a 0.7% spread - while the shipped config sat 6%
-      behind all of them at 10.640. The bottleneck was `NUM_BOOST_ROUND = 400`, not model
-      size. Capacity is therefore unchanged and the round count is no longer a constant:
-      each head early-stops on a forward slice of `train` to find its budget, then refits
-      on all of `train`. The heads want wildly different budgets (P50 ~4500-5300 rounds,
-      P90 ~250), which no single constant could have served. 7 promoted cells, up from 6.
-- [ ] **Give the destination-prediction reranker the same treatment.** `dest_lgbm.txt` was
-      last trained 2026-07-04 on 40k labelled transitions, has grown since, and has no
-      retrain timer - the identical staleness `freight-eta-retrain.timer` just fixed for
-      the ETA challenger. It already gates on top-1 accuracy vs the heuristic, so a weekly
-      unit is the same shape.
-- [x] ~~Decide how the 33-day AIS hole is handled in training.~~ **Checked 2026-09-09: no
-      action needed, and the reason is worth keeping.** The sample builder is already
-      self-quarantining. `eta_backtest._MAX_LEAD_H = 72.0` draws samples only from the 72
-      hours before an arrival, so no label can span a 33-day gap - measured, there are
-      exactly **0** rows with a pre-outage `obs_ts` and a post-outage `arrival_ts`, and
-      `remaining_h` maxes at 72.0h across all 3.10M rows. `eta_labels._CALL_GAP_H = 24.0`
-      then starts a *new* arrival after a 24h gap, so a vessel seen before the outage and
-      again after it yields two separate arrivals rather than one fused voyage.
-      The feared Aug 4-5 degradation is also not what it looked like: per-vessel
-      observation density is unchanged through the outage (median inter-observation gap
-      holds at ~62 min every day from Jul 28 to Aug 5, matching
-      `_SAMPLE_CADENCE_H = 1.0`). The feed dying cut the number of vessels still being
-      seen, not the sampling of the ones that were. Nothing to exclude.
+Both challengers now re-derive themselves on a schedule rather than drifting:
+`freight-eta-retrain.timer` (Sun 02:20) and `freight-dest-retrain.timer` (Sat 02:20).
+Each is gated and no-promote-safe, so neither can make serving worse unattended.
 
 ---
 
