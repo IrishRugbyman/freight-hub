@@ -140,8 +140,13 @@ def _route_once(cell_lat: float, cell_lon: float, target: dict) -> tuple[float, 
             nm = gc  # snapping artifact -> physical floor
         return nm, METHOD_SEAROUTE
     except Exception as exc:  # noqa: BLE001 - any routing failure -> great-circle
-        log.debug("searoute failed for cell (%.3f,%.3f)->%s (%s); using gc",
-                  cell_lat, cell_lon, target["target_id"], exc)
+        log.debug(
+            "searoute failed for cell (%.3f,%.3f)->%s (%s); using gc",
+            cell_lat,
+            cell_lon,
+            target["target_id"],
+            exc,
+        )
         return gc, METHOD_GC
 
 
@@ -157,6 +162,17 @@ class RouteCache:
     routed cells, then `flush()` them back to `eta_route_cache` in one batch. The
     on-disk table persists across analytics runs, so a backfilled cache makes
     every subsequent incremental build route only never-before-seen cells.
+
+    **Read-only connections are supported and degrade to memory-only.** The
+    trainers (`eta_ml`, `destination_predict`) deliberately do their long training
+    phase through a read-only connection so they do not hold DuckDB's exclusive
+    lock on the live analytics DB - see `eta_ml.run` for what that lock does to the
+    API. Given such a connection this class skips the CREATE and the flush, and
+    memoizes in memory only: within the run nothing changes (the same dict serves
+    every repeat lookup), and the only loss is that cells routed for the first time
+    during a training run are not persisted for the next one. That is cheap here,
+    because the daily derived build routes the same cells through a writable
+    connection anyway, so a trainer's miss rate is small.
     """
 
     # Persist accumulated cells once this many new ones pile up, so a long cold
@@ -167,6 +183,7 @@ class RouteCache:
     _FLUSH_EVERY = 2000
 
     def __init__(self, conn: duckdb.DuckDBPyConnection, grid: float = GRID_DEG):
+        """Load the on-disk cache, detecting whether `conn` can be written to."""
         self._conn = conn
         self._grid = grid
         self._cache: dict[tuple[str, str], tuple[float, str]] = {}
@@ -174,10 +191,20 @@ class RouteCache:
         self.hits = 0
         self.misses = 0
         self.written = 0
-        conn.execute(ROUTE_CACHE_SCHEMA)
-        for from_cell, target_id, dist, method in conn.execute(
-            "SELECT from_cell, target_id, route_dist_nm, method FROM eta_route_cache"
-        ).fetchall():
+        self.read_only = False
+        try:
+            conn.execute(ROUTE_CACHE_SCHEMA)
+        except duckdb.InvalidInputException:
+            # Attached read-only: keep serving lookups, just never persist.
+            self.read_only = True
+            log.info("route cache: read-only connection, memoizing in memory only")
+        try:
+            rows = conn.execute(
+                "SELECT from_cell, target_id, route_dist_nm, method FROM eta_route_cache"
+            ).fetchall()
+        except duckdb.CatalogException:
+            rows = []  # table not created yet (read-only against a cold DB)
+        for from_cell, target_id, dist, method in rows:
             self._cache[(from_cell, target_id)] = (float(dist), method)
 
     def distance(self, lat: float, lon: float, target: dict) -> tuple[float, str]:
@@ -191,14 +218,18 @@ class RouteCache:
         clat, clon = snap_cell(lat, lon, self._grid)
         nm, method = _route_once(clat, clon, target)
         self._cache[key] = (nm, method)
-        self._dirty.append((key[0], key[1], nm, method))
-        if len(self._dirty) >= self._FLUSH_EVERY:
-            self.flush()
+        if not self.read_only:
+            self._dirty.append((key[0], key[1], nm, method))
+            if len(self._dirty) >= self._FLUSH_EVERY:
+                self.flush()
         return nm, method
 
     def flush(self) -> int:
-        """Persist newly routed cells to `eta_route_cache`. Returns rows written."""
-        if not self._dirty:
+        """Persist newly routed cells to `eta_route_cache`. Returns rows written.
+
+        A no-op on a read-only connection, where nothing is ever accumulated.
+        """
+        if self.read_only or not self._dirty:
             return 0
         now = datetime.now(UTC).replace(tzinfo=None, microsecond=0)
         self._conn.executemany(
@@ -209,6 +240,11 @@ class RouteCache:
         n = len(self._dirty)
         self.written += n
         self._dirty.clear()
-        log.info("route cache: flushed %d cells (%d total this run; %d hits, %d misses)",
-                 n, self.written, self.hits, self.misses)
+        log.info(
+            "route cache: flushed %d cells (%d total this run; %d hits, %d misses)",
+            n,
+            self.written,
+            self.hits,
+            self.misses,
+        )
         return n

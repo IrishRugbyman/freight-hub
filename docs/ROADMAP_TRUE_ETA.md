@@ -179,11 +179,15 @@ All new tables in `freight_analytics.duckdb`, written by the analytics batch job
 Phases A-G are all delivered; what remains are the three things the 2026-09-09 retrain
 surfaced and deliberately did not touch. See CHANGELOG 2026-09-09 for the measurements.
 
-- [ ] **Retune `LGB_PARAMS` on the grown history.** The hyperparameters (shallow trees,
-      `min_child_samples=100`, 400 rounds) were chosen when history was ~3 weeks and have
-      never been re-measured against 2.5x the data. This is the most likely remaining
-      source of ML gain. Kept out of the band fix so a capacity effect could not be
-      confounded with it. Measure held-out median \|err\| per cell, not aggregate.
+- [x] ~~Retune `LGB_PARAMS` on the grown history.~~ **Done 2026-09-09, and the answer was
+      not capacity.** Swept 63/127/255/511 leaves against `min_child_samples` 50/100 on an
+      inner validation slice carved from `train`: every early-stopped config landed between
+      9.928 and 9.995 median \|err\| - a 0.7% spread - while the shipped config sat 6%
+      behind all of them at 10.640. The bottleneck was `NUM_BOOST_ROUND = 400`, not model
+      size. Capacity is therefore unchanged and the round count is no longer a constant:
+      each head early-stops on a forward slice of `train` to find its budget, then refits
+      on all of `train`. The heads want wildly different budgets (P50 ~4500-5300 rounds,
+      P90 ~250), which no single constant could have served. 7 promoted cells, up from 6.
 - [ ] **Give the destination-prediction reranker the same treatment.** `dest_lgbm.txt` was
       last trained 2026-07-04 on 40k labelled transitions, has grown since, and has no
       retrain timer - the identical staleness `freight-eta-retrain.timer` just fixed for
