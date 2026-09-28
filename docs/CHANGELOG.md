@@ -64,6 +64,16 @@ so this is now a plain import that fails loudly.
   Two latent faults went with it: the 10-minute default SSH `command_timeout` had killed the
   2026-08-16 deploy mid-script (now 30m), and the plain `uv sync` uninstalled pytest and four
   other dev packages on every deploy (now `--extra dev`).
+- **First-load JavaScript cut from ~476 kB to ~173 kB gz** (the tracker page including its
+  basemap: ~700 kB -> 394 kB). Every page was downloading deck.gl (216 kB) and recharts (107 kB).
+  Rolldown's `manualChunks` shim captures a group's dependencies recursively, so the deckgl
+  group swallowed `leaflet` and Vite's `__vitePreload` helper, and the recharts group swallowed
+  `clsx`; the entry needed all three. Replaced with native `codeSplitting.groups` by priority,
+  plus router `autoCodeSplitting` so chart-heavy route files leave the entry. WebGL mode still
+  loads deck.gl on demand with no luma.gl init errors; all 12 pages checked in a browser.
+- **`/api/vessels` returned 500 intermittently from 02:35 UTC.** The ghost-row lookup indexed the
+  PG `vessels` master by MMSI, which is not unique there (66 duplicated MMSIs). Now `DISTINCT ON
+  (mmsi)` preferring a valid IMO, then a verified row, then the newest.
 - **Fleet-trend fixture no longer straddles midnight.** Two density rows seeded at `now - 2h`
   and `now - 1h` fell on different days between 00:00 and 02:00 UTC, failing two tests.
 
