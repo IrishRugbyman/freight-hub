@@ -1,154 +1,38 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef } from 'react'
 
+import type { components } from './api-schema.gen'
+
+/** Response models, generated from the backend's OpenAPI schema (`npm run gen:api`). */
+type Schemas = components['schemas']
+
 // ---- Routes (transport-arb) ----
 
-export interface RouteResult {
-  id: string
-  origin: string
-  destination: string
-  product_class: string
-  vessel_class: string
-  voyage_days: number
-  description: string
-  origin_spot: number
-  origin_price: number
-  dest_spot: number
-  dest_fwd: number
-  fwd_curve_effect: number
-  freight: number
-  freight_base: number
-  freight_bwet_adjusted: boolean
-  port_cost: number
-  finance_cost: number
-  insurance_cost: number
-  total_cost: number
-  gross_margin: number
-  net_margin: number
-  net_margin_baseline: number
-  breakeven_freight: number
-  status: string
-  status_near: string
-}
+export type RouteResult = Schemas['RouteResult']
 
-export interface ArbMatrixCell {
-  origin: string
-  destination: string
-  net_margin: number | null
-  status: string | null
-  voyage_days: number | null
-}
+export type ArbMatrixCell = Schemas['ArbMatrixCell']
 
-export interface BwetInfo {
-  bwet_close: number | null
-  bwet_baseline: number
-  scale_factor: number
-  source: string
-  bwet_date: string | null
-}
+export type BwetInfo = Schemas['BwetInfo']
 
-export interface RoutesResponse {
-  name: string
-  as_of: string
-  spots: Record<string, number>
-  routes: RouteResult[]
-  n_open: number
-  n_closed: number
-  n_near: number
-  hist_series: Record<string, unknown>[]
-  bwet: BwetInfo
-  matrix: ArbMatrixCell[]
-  matrix_origins: string[]
-  matrix_destinations: string[]
-}
+export type RoutesResponse = Schemas['RoutesResponse']
 
 // ---- Dispersion (freight-dispersion) ----
 
-export interface DispersionStats {
-  total_return: number
-  ann_return: number
-  ann_volatility: number
-  sharpe: number
-  max_drawdown: number
-  n_trades: number
-  hit_rate: number
-  n_years: number
-}
+export type DispersionStats = Schemas['DispersionStats']
 
-export interface DispersionPoint {
-  date: string
-  value: number
-}
+export type DispersionPoint = Schemas['DispersionPoint']
 
-export interface DispersionResponse {
-  name: string
-  strategy: string
-  stats: DispersionStats
-  equity: DispersionPoint[]
-  price_5tc: DispersionPoint[]
-  avg_dispersion: DispersionPoint[]
-}
+export type DispersionResponse = Schemas['DispersionResponse']
 
-export interface AisDispersionRow {
-  date: string
-  kind: string
-  segment: string
-  vessel_count: number
-  dispersion_nm: number
-}
+export type AisDispersionRow = Schemas['AisDispersionRow']
 
-export interface Vessel {
-  mmsi: number
-  name: string | null
-  lat: number
-  lon: number
-  sog: number | null
-  cog: number | null
-  heading: number | null
-  destination: string | null
-  origin: string | null
-  kind: string
-  segment: string | null
-  region: string | null
-  updated_ts: string
-  imo: number | null
-  draught: number | null
-  nav_status: number | null
-  eta: string | null
-  flag: string | null
-  flag_code: string | null
-  flag_foc: boolean
-  flag_shadow: boolean
-  stale: boolean
-  age_minutes: number | null
-}
+export type Vessel = Schemas['Vessel']
 
-export interface ChokepointCount {
-  region: string
-  bbox: [[number, number], [number, number]]
-  total: number
-  by_segment: Record<string, number>
-  has_coverage: boolean
-}
+export type ChokepointCount = Schemas['ChokepointCount']
 
-export interface FeedStatus {
-  /** live | stale | down | unknown */
-  state: 'live' | 'stale' | 'down' | 'unknown'
-  /** Newest position in the store, read past every freshness filter. */
-  last_seen: string | null
-  age_minutes: number | null
-  stale_hours: number
-  visible_hours: number
-}
+export type FeedStatus = Schemas['FeedStatus']
 
-export interface Meta {
-  kinds: string[]
-  segments: string[]
-  regions: string[]
-  total_tracked: number
-  last_update: string | null
-  feed?: FeedStatus | null
-}
+export type Meta = Schemas['Meta']
 
 export interface VesselFilters {
   kind?: string
@@ -255,12 +139,7 @@ export function useVesselStream(filters: VesselFilters, enabled: boolean) {
   }, [enabled, filters.kind, filters.segment, filters.region, queryClient])
 }
 
-export interface TrackPoint {
-  ts: string
-  lat: number
-  lon: number
-  sog: number | null
-}
+export type TrackPoint = Schemas['TrackPoint']
 
 export function useVesselTrack(mmsi: number | null, hours: 24 | 168) {
   return useQuery({
@@ -314,64 +193,23 @@ export function useDispersionLive(segment?: string) {
 
 // ---- Analytics (Phase 2) ----
 
-export interface TransitDay {
-  date: string
-  direction: string
-  kind: string
-  count: number
-}
+export type TransitDay = Schemas['TransitDay']
 
-export interface TransitsResponse {
-  chokepoint: string
-  days: number
-  series: TransitDay[]
-}
+export type TransitsResponse = Schemas['TransitsResponse']
 
-export interface CongestionDay {
-  date: string
-  zone: string
-  vessel_count: number
-  median_dwell_hours: number | null
-}
+export type CongestionDay = Schemas['CongestionDay']
 
-export interface CongestionResponse {
-  zone: string
-  days: number
-  series: CongestionDay[]
-}
+export type CongestionResponse = Schemas['CongestionResponse']
 
-export interface DensityDay {
-  date: string
-  kind: string
-  segment: string
-  laden_count: number
-  ballast_count: number
-  unknown_count: number
-}
+export type DensityDay = Schemas['DensityDay']
 
-export interface DensityResponse {
-  region: string
-  days: number
-  series: DensityDay[]
-}
+export type DensityResponse = Schemas['DensityResponse']
 
-export interface LadenSegment {
-  segment: string
-  laden: number
-  ballast: number
-  unknown: number
-}
+export type LadenSegment = Schemas['LadenSegment']
 
-export interface LadenResponse {
-  kind: string
-  segments: LadenSegment[]
-}
+export type LadenResponse = Schemas['LadenResponse']
 
-export interface AnalyticsZone {
-  name: string
-  bbox: [[number, number], [number, number]]
-  type: 'anchorage' | 'chokepoint'
-}
+export type AnalyticsZone = Schemas['AnalyticsZone']
 
 const ANALYTICS_STALE = 10 * 60 * 1000 // 10 min; job runs hourly
 
@@ -420,27 +258,9 @@ export function useAnalyticsZones() {
 
 // ---- Events (Phase 3: AIS gaps, loitering, STS) ----
 
-export interface AisEvent {
-  event_id: string
-  type: 'gap' | 'loiter' | 'sts' | 'reroute' | 'dark_voyage' | 'spoof'
-  mmsi: number
-  mmsi2: number | null
-  start_ts: string
-  end_ts: string
-  lat: number
-  lon: number
-  region: string | null
-  kind: string | null
-  segment: string | null
-  details: Record<string, unknown>
-  vessel_name: string | null
-  vessel2_name: string | null
-}
+export type AisEvent = Schemas['AisEvent']
 
-export interface EventsResponse {
-  events: AisEvent[]
-  total: number
-}
+export type EventsResponse = Schemas['EventsResponse']
 
 const EVENTS_STALE = 2 * 60 * 1000  // 2 min
 
@@ -473,63 +293,15 @@ export interface EquasisData {
 
 // ---- Fleet Explorer (Phase 6) ----
 
-export interface FleetRow {
-  imo: number
-  ship_name?: string
-  flag?: string
-  flag_code?: string
-  ship_type?: string
-  year_built?: number
-  gross_tonnage?: number
-  dwt?: number
-  owner?: string
-  ism_manager?: string
-  class_society?: string
-  pi_club?: string
-  detention_rate_pct?: number
-  paris_mou?: string
-  tokyo_mou?: string
-  ship_status?: string
-  risk_score?: number
-  risk_indicators?: string[]
-  ofac_sanctioned?: boolean
-  // Live fields (null when not currently tracked)
-  mmsi?: number
-  live_name?: string
-  lat?: number
-  lon?: number
-  sog?: number
-  region?: string
-  kind?: string
-  segment?: string
-}
+export type FleetRow = Schemas['FleetRow']
 
-export interface FleetFacetItem { value: string; count: number }
+export type FleetFacetItem = Schemas['FleetFacetItem']
 
-export interface FleetFacets {
-  flags: FleetFacetItem[]
-  class_societies: FleetFacetItem[]
-  pi_clubs: FleetFacetItem[]
-  paris_mou: FleetFacetItem[]
-  tokyo_mou: FleetFacetItem[]
-  owners: FleetFacetItem[]
-}
+export type FleetFacets = Schemas['FleetFacets']
 
-export interface FleetSummary {
-  total: number
-  total_dwt?: number
-  avg_age_years?: number
-  top_flags: FleetFacetItem[]
-  top_owners: FleetFacetItem[]
-}
+export type FleetSummary = Schemas['FleetSummary']
 
-export interface FleetResponse {
-  total: number
-  page: number
-  page_size: number
-  summary: FleetSummary
-  rows: FleetRow[]
-}
+export type FleetResponse = Schemas['FleetResponse']
 
 export interface FleetParams {
   q?: string
@@ -612,53 +384,15 @@ export function useEquasis(imo: number | null | undefined) {
 
 // ---- Vessel voyages + state (new features) ----
 
-export interface VoyageEvent {
-  type: 'port_call' | 'transit' | 'reroute' | 'cargo_load' | 'cargo_discharge' | 'sts'
-  ts: string
-  end_ts: string | null
-  zone: string | null
-  direction: string | null
-  laden: boolean | null
-  dwell_hours: number | null
-  old_destination: string | null
-  new_destination: string | null
-  lat: number | null
-  lon: number | null
-  kind: string | null
-  segment: string | null
-  draught_before: number | null
-  draught_after: number | null
-  change_m: number | null
-  mmsi2: number | null
-  name2: string | null
-}
+export type VoyageEvent = Schemas['VoyageEvent']
 
-export interface VoyagesResponse {
-  mmsi: number
-  events: VoyageEvent[]
-}
+export type VoyagesResponse = Schemas['VoyagesResponse']
 
-export interface VesselStateData {
-  mmsi: number
-  laden: string | null
-  last_draught: number | null
-  max_draught_seen: number | null
-  updated_ts: string | null
-  days_at_anchor: number | null
-}
+export type VesselStateData = Schemas['VesselStateData']
 
-export interface PortDestItem {
-  destination: string
-  count: number
-  tankers: number
-  bulkers: number
-}
+export type PortDestItem = Schemas['PortDestItem']
 
-export interface PortFlowResponse {
-  as_of: string
-  total_with_dest: number
-  ports: PortDestItem[]
-}
+export type PortFlowResponse = Schemas['PortFlowResponse']
 
 export function useVoyages(mmsi: number | null | undefined, days = 14) {
   return useQuery({
@@ -691,26 +425,9 @@ export function usePortFlow(kind?: string, topN?: number) {
   })
 }
 
-export interface ArrivalTarget {
-  target_id: string
-  name: string
-  target_type: 'chokepoint' | 'port'
-  is_canal: boolean
-  arrivals: number
-  vessels: number
-  laden_share: number | null
-  top_segment: string | null
-  last_arrival_ts: string | null
-}
+export type ArrivalTarget = Schemas['ArrivalTarget']
 
-export interface ArrivalsResponse {
-  as_of: string
-  window_days: number
-  target_type: string
-  total_arrivals: number
-  total_vessels: number
-  rows: ArrivalTarget[]
-}
+export type ArrivalsResponse = Schemas['ArrivalsResponse']
 
 export function useArrivals(days = 14, targetType = 'all', topN = 20) {
   const q = new URLSearchParams({ days: String(days), target_type: targetType, top_n: String(topN) })
@@ -722,57 +439,17 @@ export function useArrivals(days = 14, targetType = 'all', topN = 20) {
   })
 }
 
-export interface FlagRiskRow {
-  flag: string
-  flag_code: string | null
-  vessel_count: number
-  avg_risk_score: number
-  max_risk_score: number
-  high_risk_count: number
-  ofac_count: number
-  paris_mou: string | null
-  tokyo_mou: string | null
-}
+export type FlagRiskRow = Schemas['FlagRiskRow']
 
-export interface FlagRiskResponse {
-  as_of: string
-  rows: FlagRiskRow[]
-}
+export type FlagRiskResponse = Schemas['FlagRiskResponse']
 
-export interface FleetFlagRow {
-  flag: string
-  flag_code: string | null
-  vessel_count: number
-  length_sum_m: number
-  is_foc: boolean
-  is_shadow: boolean
-  by_segment: Record<string, number>
-}
+export type FleetFlagRow = Schemas['FleetFlagRow']
 
-export interface FleetFlagsResponse {
-  as_of: string
-  total_with_flag: number
-  total_unresolved: number
-  foc_count: number
-  shadow_count: number
-  rows: FleetFlagRow[]
-}
+export type FleetFlagsResponse = Schemas['FleetFlagsResponse']
 
-export interface FlagMismatchRow {
-  mmsi: number
-  imo: number | null
-  name: string | null
-  segment: string | null
-  mmsi_flag: string
-  mmsi_flag_code: string | null
-  registry_flag: string
-  registry_flag_code: string | null
-}
+export type FlagMismatchRow = Schemas['FlagMismatchRow']
 
-export interface FlagMismatchResponse {
-  as_of: string
-  rows: FlagMismatchRow[]
-}
+export type FlagMismatchResponse = Schemas['FlagMismatchResponse']
 
 export function useFlagRisk(topN = 30) {
   return useQuery({
@@ -801,20 +478,9 @@ export function useFlagMismatches() {
   })
 }
 
-export interface OwnerRiskItem {
-  owner: string
-  vessel_count: number
-  avg_risk_score: number
-  max_risk_score: number
-  high_risk_count: number
-  ofac_count: number
-  flags: string[]
-}
+export type OwnerRiskItem = Schemas['OwnerRiskItem']
 
-export interface OwnerRiskResponse {
-  as_of: string
-  rows: OwnerRiskItem[]
-}
+export type OwnerRiskResponse = Schemas['OwnerRiskResponse']
 
 export function useOwnerRisk(minVessels = 2, topN = 30) {
   const qs = `min_vessels=${minVessels}&top_n=${topN}`
@@ -826,53 +492,17 @@ export function useOwnerRisk(minVessels = 2, topN = 30) {
   })
 }
 
-export interface SpeedSegmentRow {
-  segment: string
-  kind: string
-  underway: number
-  anchored: number
-  moored: number
-  other: number
-  total: number
-  avg_sog_underway: number | null
-  p50_sog: number | null
-  pct_underway: number
-}
+export type SpeedSegmentRow = Schemas['SpeedSegmentRow']
 
-export interface SpeedAnalyticsResponse {
-  as_of: string
-  total_vessels: number
-  rows: SpeedSegmentRow[]
-}
+export type SpeedAnalyticsResponse = Schemas['SpeedAnalyticsResponse']
 
-export interface RegionUtilRow {
-  region: string
-  total: number
-  underway: number
-  anchored: number
-  moored: number
-  pct_underway: number
-  avg_sog: number | null
-}
+export type RegionUtilRow = Schemas['RegionUtilRow']
 
-export interface RegionUtilResponse {
-  as_of: string
-  rows: RegionUtilRow[]
-}
+export type RegionUtilResponse = Schemas['RegionUtilResponse']
 
-export interface SpeedTrendPoint {
-  date: string
-  avg_sog: number | null
-  underway_count: number
-  total_count: number
-}
+export type SpeedTrendPoint = Schemas['SpeedTrendPoint']
 
-export interface SpeedTrendResponse {
-  kind: string
-  segment: string | null
-  days: number
-  series: SpeedTrendPoint[]
-}
+export type SpeedTrendResponse = Schemas['SpeedTrendResponse']
 
 export function useSpeedTrend(kind: string, segment?: string, days = 14) {
   const qs = new URLSearchParams({ kind, days: String(days) })
@@ -903,23 +533,9 @@ export function useRegionUtil() {
   })
 }
 
-export interface HighRiskPosition {
-  mmsi: number
-  imo: number
-  lat: number
-  lon: number
-  name: string | null
-  segment: string | null
-  kind: string | null
-  risk_score: number
-  ofac_sanctioned: boolean
-}
+export type HighRiskPosition = Schemas['HighRiskPosition']
 
-export interface HighRiskPositionsResponse {
-  as_of: string
-  min_risk: number
-  rows: HighRiskPosition[]
-}
+export type HighRiskPositionsResponse = Schemas['HighRiskPositionsResponse']
 
 export function useHighRiskPositions(minRisk = 60, enabled = true) {
   return useQuery({
@@ -954,24 +570,9 @@ export function useRecentEventCount() {
   })
 }
 
-export interface AnchoredVessel {
-  mmsi: number
-  name: string | null
-  zone: string
-  kind: string | null
-  segment: string | null
-  start_ts: string
-  dwell_hours: number
-  laden: string | null
-  risk_score: number | null
-  ofac: boolean
-}
+export type AnchoredVessel = Schemas['AnchoredVessel']
 
-export interface AnchorageDwellResponse {
-  as_of: string
-  zone: string
-  rows: AnchoredVessel[]
-}
+export type AnchorageDwellResponse = Schemas['AnchorageDwellResponse']
 
 export function useAnchorageDwell(zone = 'singapore_west', limit = 50) {
   return useQuery({
@@ -982,29 +583,9 @@ export function useAnchorageDwell(zone = 'singapore_west', limit = 50) {
   })
 }
 
-export interface CargoTransitionEvent {
-  mmsi: number
-  name: string | null
-  kind: string | null
-  segment: string | null
-  region: string | null
-  direction: 'loading' | 'discharging'
-  draught_before: number
-  draught_after: number
-  change_m: number
-  transition_ts: string
-  lat: number | null
-  lon: number | null
-  risk_score: number | null
-  ofac: boolean
-}
+export type CargoTransitionEvent = Schemas['CargoTransitionEvent']
 
-export interface CargoTransitionsResponse {
-  as_of: string
-  days: number
-  min_change: number
-  rows: CargoTransitionEvent[]
-}
+export type CargoTransitionsResponse = Schemas['CargoTransitionsResponse']
 
 export function useCargoTransitions(days = 7, minChange = 2.0, segment = '') {
   return useQuery({
@@ -1018,23 +599,9 @@ export function useCargoTransitions(days = 7, minChange = 2.0, segment = '') {
   })
 }
 
-export interface FleetUtilizationRow {
-  segment: string
-  kind: string
-  total: number
-  underway_count: number
-  idle_count: number
-  unknown_count: number
-  underway_pct: number
-  idle_pct: number
-  avg_sog_underway: number | null
-}
+export type FleetUtilizationRow = Schemas['FleetUtilizationRow']
 
-export interface FleetUtilizationResponse {
-  as_of: string
-  total_fleet: number
-  rows: FleetUtilizationRow[]
-}
+export type FleetUtilizationResponse = Schemas['FleetUtilizationResponse']
 
 export function useFleetUtilization() {
   return useQuery({
@@ -1045,24 +612,9 @@ export function useFleetUtilization() {
   })
 }
 
-export interface SlowSteamerEvent {
-  mmsi: number
-  name: string | null
-  kind: string | null
-  segment: string | null
-  region: string | null
-  sog: number
-  segment_median_sog: number
-  pct_of_median: number
-  risk_score: number | null
-  ofac: boolean
-}
+export type SlowSteamerEvent = Schemas['SlowSteamerEvent']
 
-export interface SlowSteamersResponse {
-  as_of: string
-  total_fleet_underway: number
-  rows: SlowSteamerEvent[]
-}
+export type SlowSteamersResponse = Schemas['SlowSteamersResponse']
 
 export function useSlowSteamers(kind = '') {
   return useQuery({
@@ -1074,19 +626,9 @@ export function useSlowSteamers(kind = '') {
   })
 }
 
-export interface FleetAgeBand {
-  age_band: string
-  vessel_count: number
-  avg_risk_score: number | null
-  high_risk_count: number
-  avg_dwt: number | null
-}
+export type FleetAgeBand = Schemas['FleetAgeBand']
 
-export interface FleetAgeResponse {
-  as_of: string
-  reference_year: number
-  bands: FleetAgeBand[]
-}
+export type FleetAgeResponse = Schemas['FleetAgeResponse']
 
 export function useFleetAge() {
   return useQuery({
@@ -1097,29 +639,9 @@ export function useFleetAge() {
   })
 }
 
-export interface TransitRiskEvent {
-  mmsi: number
-  name: string | null
-  imo: number | null
-  chokepoint: string
-  entered_ts: string
-  exited_ts: string | null
-  direction: string | null
-  kind: string | null
-  segment: string | null
-  laden: boolean | null
-  risk_score: number | null
-  ofac: boolean
-}
+export type TransitRiskEvent = Schemas['TransitRiskEvent']
 
-export interface TransitRiskResponse {
-  as_of: string
-  days: number
-  chokepoint: string
-  total_transits: number
-  enriched: number
-  rows: TransitRiskEvent[]
-}
+export type TransitRiskResponse = Schemas['TransitRiskResponse']
 
 export function useTransitRisk(chokepoint = 'hormuz', days = 30, minRisk = 0) {
   return useQuery({
@@ -1130,32 +652,9 @@ export function useTransitRisk(chokepoint = 'hormuz', days = 30, minRisk = 0) {
   })
 }
 
-export interface StsRiskEvent {
-  event_id: string
-  start_ts: string
-  region: string | null
-  kind: string | null
-  segment: string | null
-  mmsi: number
-  mmsi2: number | null
-  name: string | null
-  name2: string | null
-  duration_hours: number | null
-  co_location_fixes: number | null
-  risk_score: number | null
-  risk_score2: number | null
-  ofac: boolean
-  ofac2: boolean
-  max_risk: number
-}
+export type StsRiskEvent = Schemas['StsRiskEvent']
 
-export interface StsRiskResponse {
-  as_of: string
-  days: number
-  total_events: number
-  enriched_events: number
-  rows: StsRiskEvent[]
-}
+export type StsRiskResponse = Schemas['StsRiskResponse']
 
 export function useStsRisk(days = 30, minRisk = 0) {
   return useQuery({
@@ -1166,27 +665,9 @@ export function useStsRisk(days = 30, minRisk = 0) {
   })
 }
 
-export interface RerouteRiskEvent {
-  event_id: string
-  start_ts: string
-  region: string | null
-  kind: string | null
-  segment: string | null
-  mmsi: number
-  name: string | null
-  old_destination: string | null
-  new_destination: string | null
-  fixes_at_old: number | null
-  risk_score: number | null
-  ofac: boolean
-}
+export type RerouteRiskEvent = Schemas['RerouteRiskEvent']
 
-export interface RerouteRiskResponse {
-  as_of: string
-  days: number
-  total_events: number
-  rows: RerouteRiskEvent[]
-}
+export type RerouteRiskResponse = Schemas['RerouteRiskResponse']
 
 export function useReroutes(days = 7, minRisk = 0, segment?: string) {
   const qs = new URLSearchParams({ days: String(days), min_risk: String(minRisk) })
@@ -1199,17 +680,7 @@ export function useReroutes(days = 7, minRisk = 0, segment?: string) {
   })
 }
 
-export interface FleetKPIs {
-  as_of: string
-  total_registry: number
-  scored: number
-  elevated: number
-  high_risk: number
-  critical: number
-  ofac_count: number
-  avg_risk_score: number | null
-  pct_scored: number
-}
+export type FleetKPIs = Schemas['FleetKPIs']
 
 export function useFleetKPIs() {
   return useQuery({
@@ -1220,37 +691,9 @@ export function useFleetKPIs() {
   })
 }
 
-export interface RiskEventItem {
-  event_id: string
-  event_type: string
-  event_ts: string
-  mmsi: number
-  name: string | null
-  imo: number | null
-  risk_score: number | null
-  ofac: boolean
-  mmsi2: number | null
-  name2: string | null
-  imo2: number | null
-  risk_score2: number | null
-  ofac2: boolean
-  max_risk: number
-  region: string | null
-  kind: string | null
-  segment: string | null
-  lat: number | null
-  lon: number | null
-  old_destination: string | null
-  new_destination: string | null
-}
+export type RiskEventItem = Schemas['RiskEventItem']
 
-export interface RiskEventsResponse {
-  as_of: string
-  min_risk: number
-  days: number
-  total_high_risk_vessels: number
-  rows: RiskEventItem[]
-}
+export type RiskEventsResponse = Schemas['RiskEventsResponse']
 
 export function useRiskEvents(minRisk = 25, days = 2) {
   return useQuery({
@@ -1261,29 +704,9 @@ export function useRiskEvents(minRisk = 25, days = 2) {
   })
 }
 
-export interface MarketSegmentSummary {
-  segment: string
-  kind: string
-  total: number
-  laden: number
-  ballast: number
-  unknown: number
-  laden_pct: number
-  underway_pct: number
-}
+export type MarketSegmentSummary = Schemas['MarketSegmentSummary']
 
-export interface MarketSummaryResponse {
-  as_of: string
-  total_fleet: number
-  total_laden: number
-  total_ballast: number
-  laden_pct: number
-  transits_24h: number
-  reroutes_24h: number
-  sts_24h: number
-  gaps_24h: number
-  by_segment: MarketSegmentSummary[]
-}
+export type MarketSummaryResponse = Schemas['MarketSummaryResponse']
 
 export function useMarketSummary() {
   return useQuery({
@@ -1294,20 +717,9 @@ export function useMarketSummary() {
   })
 }
 
-export interface DestinationFlowRow {
-  origin_region: string
-  destination: string
-  segment: string | null
-  kind: string | null
-  vessel_count: number
-}
+export type DestinationFlowRow = Schemas['DestinationFlowRow']
 
-export interface DestinationFlowsResponse {
-  as_of: string
-  laden_only: boolean
-  total_laden: number
-  rows: DestinationFlowRow[]
-}
+export type DestinationFlowsResponse = Schemas['DestinationFlowsResponse']
 
 export function useDestinationFlows(kind = '', segment = '', region = '', ladenOnly = true) {
   return useQuery({
@@ -1320,22 +732,9 @@ export function useDestinationFlows(kind = '', segment = '', region = '', ladenO
   })
 }
 
-export interface PortCongestionRow {
-  zone: string
-  region: string | null
-  kind: string | null
-  current_vessels: number
-  avg_current_dwell_hours: number | null
-  baseline_avg_vessels: number | null
-  baseline_avg_dwell_hours: number | null
-  congestion_factor: number
-}
+export type PortCongestionRow = Schemas['PortCongestionRow']
 
-export interface PortCongestionResponse {
-  as_of: string
-  days_baseline: number
-  rows: PortCongestionRow[]
-}
+export type PortCongestionResponse = Schemas['PortCongestionResponse']
 
 export function usePortCongestion(kind = '', days = 14) {
   return useQuery({
@@ -1346,21 +745,9 @@ export function usePortCongestion(kind = '', days = 14) {
   })
 }
 
-export interface ChokepointCongestionRow {
-  chokepoint: string
-  kind: string | null
-  current_vessels: number
-  avg_current_dwell_hours: number | null
-  baseline_avg_vessels: number | null
-  baseline_avg_dwell_hours: number | null
-  congestion_factor: number
-}
+export type ChokepointCongestionRow = Schemas['ChokepointCongestionRow']
 
-export interface ChokepointCongestionResponse {
-  as_of: string
-  days_baseline: number
-  rows: ChokepointCongestionRow[]
-}
+export type ChokepointCongestionResponse = Schemas['ChokepointCongestionResponse']
 
 export function useChokepointCongestion(kind = '', days = 14) {
   return useQuery({
@@ -1372,21 +759,9 @@ export function useChokepointCongestion(kind = '', days = 14) {
 }
 
 
-export interface ChokepointHeatmapCell {
-  date: string
-  chokepoint: string
-  total: number
-  tanker: number
-  bulk: number
-}
+export type ChokepointHeatmapCell = Schemas['ChokepointHeatmapCell']
 
-export interface ChokepointHeatmapResponse {
-  as_of: string
-  days: number
-  kind: string
-  chokepoints: string[]
-  cells: ChokepointHeatmapCell[]
-}
+export type ChokepointHeatmapResponse = Schemas['ChokepointHeatmapResponse']
 
 export function useChokepointHeatmap(days = 30, kind = '') {
   return useQuery({
@@ -1400,30 +775,9 @@ export function useChokepointHeatmap(days = 30, kind = '') {
   })
 }
 
-export interface VesselRiskRow {
-  mmsi: number
-  imo: number | null
-  name: string | null
-  kind: string | null
-  segment: string | null
-  region: string | null
-  lat: number | null
-  lon: number | null
-  sts_count: number
-  reroute_count: number
-  registry_risk: number | null
-  ofac: boolean
-  behavioral_score: number
-  total_score: number
-}
+export type VesselRiskRow = Schemas['VesselRiskRow']
 
-export interface VesselRiskResponse {
-  as_of: string
-  days: number
-  top_n: number
-  total_candidates: number
-  rows: VesselRiskRow[]
-}
+export type VesselRiskResponse = Schemas['VesselRiskResponse']
 
 export function useVesselRiskScores(topN = 50, days = 30, segment = '', kind = '', minScore = 5) {
   return useQuery({
@@ -1437,22 +791,9 @@ export function useVesselRiskScores(topN = 50, days = 30, segment = '', kind = '
   })
 }
 
-export interface TradeLaneCell {
-  origin_region: string
-  dest_region: string
-  vessel_count: number
-  high_risk_count: number
-  laden_count: number
-}
+export type TradeLaneCell = Schemas['TradeLaneCell']
 
-export interface TradeLaneMatrixResponse {
-  as_of: string
-  kind: string
-  laden_only: boolean
-  origin_regions: string[]
-  dest_regions: string[]
-  cells: TradeLaneCell[]
-}
+export type TradeLaneMatrixResponse = Schemas['TradeLaneMatrixResponse']
 
 export function useTradeLaneMatrix(kind = '', ladenOnly = true) {
   return useQuery({
@@ -1466,28 +807,7 @@ export function useTradeLaneMatrix(kind = '', ladenOnly = true) {
   })
 }
 
-export interface RecentEvent {
-  type: string
-  ts: string
-  lat: number | null
-  lon: number | null
-  old_destination?: string
-  new_destination?: string
-}
-
-export interface VesselBehavioralRisk {
-  mmsi: number
-  imo: number | null
-  sts_count: number
-  reroute_count: number
-  days: number
-  behavioral_score: number
-  registry_risk: number | null
-  ofac: boolean
-  total_score: number
-  risk_level: 'Low' | 'Elevated' | 'High' | 'Critical'
-  recent_events: RecentEvent[]
-}
+export type VesselBehavioralRisk = Schemas['VesselBehavioralRisk']
 
 export function useVesselBehavioralRisk(mmsi: number | null | undefined, days = 30) {
   return useQuery({
@@ -1499,34 +819,9 @@ export function useVesselBehavioralRisk(mmsi: number | null | undefined, days = 
   })
 }
 
-export interface AnomalyWatchlistItem {
-  mmsi: number
-  imo: number | null
-  name: string | null
-  kind: string | null
-  segment: string | null
-  region: string | null
-  lat: number | null
-  lon: number | null
-  sog: number | null
-  destination: string | null
-  laden: string | null
-  total_score: number
-  behavioral_score: number
-  registry_risk: number | null
-  ofac: boolean
-  risk_level: 'Low' | 'Elevated' | 'High' | 'Critical'
-  sts_count_7d: number
-  reroute_count_7d: number
-  signals: string[]
-}
+export type AnomalyWatchlistItem = Schemas['AnomalyWatchlistItem']
 
-export interface AnomalyWatchlistResponse {
-  as_of: string
-  min_score: number
-  total_flagged: number
-  rows: AnomalyWatchlistItem[]
-}
+export type AnomalyWatchlistResponse = Schemas['AnomalyWatchlistResponse']
 
 export function useAnomalyWatchlist(minScore = 50, limit = 30) {
   return useQuery({
@@ -1540,33 +835,9 @@ export function useAnomalyWatchlist(minScore = 50, limit = 30) {
   })
 }
 
-export interface StsProximityPair {
-  mmsi_a: number
-  name_a: string | null
-  imo_a: number | null
-  kind_a: string | null
-  segment_a: string | null
-  sog_a: number | null
-  mmsi_b: number
-  name_b: string | null
-  imo_b: number | null
-  kind_b: string | null
-  segment_b: string | null
-  sog_b: number | null
-  dist_m: number
-  lat: number
-  lon: number
-  region: string | null
-  risk_region: boolean
-}
+export type StsProximityPair = Schemas['StsProximityPair']
 
-export interface StsProximityResponse {
-  as_of: string
-  max_dist_m: number
-  max_sog: number
-  total_pairs: number
-  pairs: StsProximityPair[]
-}
+export type StsProximityResponse = Schemas['StsProximityResponse']
 
 export function useStsProximity(maxDistM = 2000, maxSog = 3.0) {
   return useQuery({
@@ -1580,22 +851,9 @@ export function useStsProximity(maxDistM = 2000, maxSog = 3.0) {
   })
 }
 
-export interface RegionMomentumRow {
-  region: string
-  current_total: number
-  prev_total: number
-  delta: number
-  laden_count: number
-  ballast_count: number
-  laden_ratio_pct: number
-}
+export type RegionMomentumRow = Schemas['RegionMomentumRow']
 
-export interface RegionMomentumResponse {
-  as_of: string
-  hours_back: number
-  ocean_only: boolean
-  rows: RegionMomentumRow[]
-}
+export type RegionMomentumResponse = Schemas['RegionMomentumResponse']
 
 export function useRegionMomentum(hoursBack = 24, oceanOnly = true) {
   return useQuery({
@@ -1609,18 +867,9 @@ export function useRegionMomentum(hoursBack = 24, oceanOnly = true) {
   })
 }
 
-export interface EventRatePoint {
-  hour: string
-  reroute_count: number
-  sts_count: number
-  total_count: number
-}
+export type EventRatePoint = Schemas['EventRatePoint']
 
-export interface EventRateTimelineResponse {
-  as_of: string
-  hours: number
-  points: EventRatePoint[]
-}
+export type EventRateTimelineResponse = Schemas['EventRateTimelineResponse']
 
 export function useEventRateTimeline(hours = 72) {
   return useQuery({
@@ -1632,19 +881,9 @@ export function useEventRateTimeline(hours = 72) {
   })
 }
 
-export interface TransitRatePoint {
-  hour: string
-  chokepoint: string
-  count: number
-  laden_count: number
-}
+export type TransitRatePoint = Schemas['TransitRatePoint']
 
-export interface TransitRateTimelineResponse {
-  as_of: string
-  hours: number
-  chokepoints: string[]
-  points: TransitRatePoint[]
-}
+export type TransitRateTimelineResponse = Schemas['TransitRateTimelineResponse']
 
 export function useTransitRateTimeline(hours = 72, chopointsCSV = '') {
   return useQuery({
@@ -1658,18 +897,9 @@ export function useTransitRateTimeline(hours = 72, chopointsCSV = '') {
   })
 }
 
-export interface AnchorageOccupancyPoint {
-  hour: string
-  zone: string
-  vessel_count: number
-}
+export type AnchorageOccupancyPoint = Schemas['AnchorageOccupancyPoint']
 
-export interface AnchorageOccupancyResponse {
-  as_of: string
-  hours: number
-  zones: string[]
-  points: AnchorageOccupancyPoint[]
-}
+export type AnchorageOccupancyResponse = Schemas['AnchorageOccupancyResponse']
 
 export function useAnchorageOccupancy(hours = 72, zonesCSV = '') {
   return useQuery({
@@ -1683,29 +913,9 @@ export function useAnchorageOccupancy(hours = 72, zonesCSV = '') {
   })
 }
 
-export interface StsOffenderRow {
-  mmsi: number
-  name: string | null
-  imo: number | null
-  kind: string | null
-  segment: string | null
-  region: string | null
-  lat: number | null
-  lon: number | null
-  sog: number | null
-  sts_events: number
-  as_initiator: number
-  as_counterpart: number
-  registry_risk: number | null
-  ofac: boolean
-}
+export type StsOffenderRow = Schemas['StsOffenderRow']
 
-export interface StsOffendersResponse {
-  as_of: string
-  days: number
-  total_vessels: number
-  rows: StsOffenderRow[]
-}
+export type StsOffendersResponse = Schemas['StsOffendersResponse']
 
 export function useStsOffenders(days = 30, limit = 50) {
   return useQuery({
@@ -1717,23 +927,9 @@ export function useStsOffenders(days = 30, limit = 50) {
   })
 }
 
-export interface FleetHistorySegmentRow {
-  kind: string
-  segment: string
-  count: number
-  laden: number
-  ballast: number
-  underway: number
-  avg_sog: number | null
-}
+export type FleetHistorySegmentRow = Schemas['FleetHistorySegmentRow']
 
-export interface FleetHistoryResponse {
-  queried_ts: string
-  actual_ts: string
-  region: string | null
-  total_vessels: number
-  segments: FleetHistorySegmentRow[]
-}
+export type FleetHistoryResponse = Schemas['FleetHistoryResponse']
 
 export function useFleetAtTime(ts = '', region = '') {
   return useQuery({
@@ -1747,26 +943,9 @@ export function useFleetAtTime(ts = '', region = '') {
   })
 }
 
-export interface DestinationChangeRow {
-  mmsi: number
-  name: string | null
-  kind: string | null
-  segment: string | null
-  region: string | null
-  lat: number | null
-  lon: number | null
-  changed_ts: string
-  from_dest: string
-  to_dest: string
-  hours_ago: number
-}
+export type DestinationChangeRow = Schemas['DestinationChangeRow']
 
-export interface DestinationChangesResponse {
-  as_of: string
-  hours: number
-  total_changes: number
-  rows: DestinationChangeRow[]
-}
+export type DestinationChangesResponse = Schemas['DestinationChangesResponse']
 
 export function useDestinationChanges(hours = 72, kind = '') {
   return useQuery({
@@ -1780,24 +959,9 @@ export function useDestinationChanges(hours = 72, kind = '') {
   })
 }
 
-export interface OwnerIntelRow {
-  owner: string
-  vessel_count: number
-  risk_weighted: number
-  avg_risk: number | null
-  max_risk: number | null
-  high_risk_count: number
-  tanker_count: number
-  bulk_count: number
-  flags: string[]
-  top_segment: string | null
-}
+export type OwnerIntelRow = Schemas['OwnerIntelRow']
 
-export interface OwnerIntelResponse {
-  as_of: string
-  total_owners: number
-  rows: OwnerIntelRow[]
-}
+export type OwnerIntelResponse = Schemas['OwnerIntelResponse']
 
 export function useOwnerIntelligence(minVessels = 2, limit = 50) {
   return useQuery({
@@ -1811,24 +975,9 @@ export function useOwnerIntelligence(minVessels = 2, limit = 50) {
   })
 }
 
-export interface ChokepointAnomalyRow {
-  chokepoint: string
-  recent_count: number
-  baseline_avg: number | null
-  baseline_std: number | null
-  z_score: number | null
-  pct_change: number | null
-  direction: string
-  window_hours: number
-  baseline_hours: number
-}
+export type ChokepointAnomalyRow = Schemas['ChokepointAnomalyRow']
 
-export interface ChokepointAnomalyResponse {
-  as_of: string
-  window_hours: number
-  baseline_hours: number
-  rows: ChokepointAnomalyRow[]
-}
+export type ChokepointAnomalyResponse = Schemas['ChokepointAnomalyResponse']
 
 export function useChokepointAnomaly(windowHours = 6, baselineHours = 48) {
   return useQuery({
@@ -1842,32 +991,9 @@ export function useChokepointAnomaly(windowHours = 6, baselineHours = 48) {
   })
 }
 
-export interface CargoStateChangeRow {
-  mmsi: number
-  name: string | null
-  imo: number | null
-  kind: string | null
-  segment: string | null
-  zone: string
-  region: string | null
-  start_ts: string
-  end_ts: string
-  dwell_hours: number
-  draught_entry: number | null
-  draught_exit: number | null
-  draught_change_m: number | null
-  cargo_state: string
-  lat: number | null
-  lon: number | null
-  registry_risk: number | null
-}
+export type CargoStateChangeRow = Schemas['CargoStateChangeRow']
 
-export interface CargoStateChangesResponse {
-  as_of: string
-  days: number
-  total_events: number
-  rows: CargoStateChangeRow[]
-}
+export type CargoStateChangesResponse = Schemas['CargoStateChangesResponse']
 
 export function useCargoStateChanges(days = 7, kind = 'tanker', minChangeM = 1.5) {
   return useQuery({
@@ -1882,30 +1008,9 @@ export function useCargoStateChanges(days = 7, kind = 'tanker', minChangeM = 1.5
 }
 
 // Phase 46: Speed Anomaly Detection
-export interface SpeedAnomalyRow {
-  mmsi: number
-  imo: number | null
-  name: string | null
-  kind: string | null
-  segment: string | null
-  region: string | null
-  lat: number | null
-  lon: number | null
-  sog: number
-  segment_median_sog: number
-  z_score: number
-  anomaly_type: 'fast' | 'slow'
-  destination: string | null
-  nav_status: number | null
-  registry_risk: number | null
-}
+export type SpeedAnomalyRow = Schemas['SpeedAnomalyRow']
 
-export interface SpeedAnomalyResponse {
-  as_of: string
-  total_vessels_checked: number
-  anomaly_count: number
-  rows: SpeedAnomalyRow[]
-}
+export type SpeedAnomalyResponse = Schemas['SpeedAnomalyResponse']
 
 export function useSpeedAnomalies(kind = 'tanker', minZ = 2.5, limit = 50) {
   return useQuery({
@@ -1920,31 +1025,11 @@ export function useSpeedAnomalies(kind = 'tanker', minZ = 2.5, limit = 50) {
 }
 
 // Phase 47: 48h Port Arrival Forecast
-export interface ArrivalVessel {
-  mmsi: number
-  name: string | null
-  segment: string | null
-  kind: string | null
-  laden: string | null
-  eta_hours: number
-  distance_nm: number
-  sog: number
-  destination_raw: string | null
-  registry_risk: number | null
-}
+export type ArrivalVessel = Schemas['ArrivalVessel']
 
-export interface PortArrivalForecast {
-  port: string
-  arrivals_24h: number
-  arrivals_48h: number
-  vessels: ArrivalVessel[]
-}
+export type PortArrivalForecast = Schemas['PortArrivalForecast']
 
-export interface PortArrivalResponse {
-  as_of: string
-  total_inbound: number
-  ports: PortArrivalForecast[]
-}
+export type PortArrivalResponse = Schemas['PortArrivalResponse']
 
 export function usePortArrivals(kind = 'tanker', horizonH = 48) {
   return useQuery({
@@ -1959,29 +1044,11 @@ export function usePortArrivals(kind = 'tanker', horizonH = 48) {
 }
 
 // Phase 48: Crude Oil on Water
-export interface CrudeSegmentRow {
-  segment: string
-  laden_count: number
-  ballast_count: number
-  unknown_count: number
-  estimated_mb: number
-}
+export type CrudeSegmentRow = Schemas['CrudeSegmentRow']
 
-export interface InboundRegionRow {
-  region: string
-  vessel_count: number
-  estimated_mb: number
-  top_segments: string[]
-}
+export type InboundRegionRow = Schemas['InboundRegionRow']
 
-export interface CrudeOnWaterResponse {
-  as_of: string
-  total_laden_tankers: number
-  total_ballast_tankers: number
-  estimated_mb_on_water: number
-  by_segment: CrudeSegmentRow[]
-  inbound_regions: InboundRegionRow[]
-}
+export type CrudeOnWaterResponse = Schemas['CrudeOnWaterResponse']
 
 export function useCrudeOnWater() {
   return useQuery({
@@ -1993,21 +1060,9 @@ export function useCrudeOnWater() {
 }
 
 // Phase 49: Chokepoint Live Status
-export interface ChokepointStatusRow {
-  chokepoint: string
-  live_total: number
-  live_transiting: number
-  live_waiting: number
-  avg_transit_h_7d: number | null
-  n_transits_24h: number
-  n_transits_7d: number
-  pct_fwd_direction: number | null
-}
+export type ChokepointStatusRow = Schemas['ChokepointStatusRow']
 
-export interface ChokepointStatusResponse {
-  as_of: string
-  rows: ChokepointStatusRow[]
-}
+export type ChokepointStatusResponse = Schemas['ChokepointStatusResponse']
 
 export function useChokepointStatus() {
   return useQuery({
@@ -2020,20 +1075,9 @@ export function useChokepointStatus() {
 
 // ---- Fleet trend (Phase 51) ----
 
-export interface FleetTrendDay {
-  date: string
-  laden: number
-  ballast: number
-  unknown: number
-  total: number
-}
+export type FleetTrendDay = Schemas['FleetTrendDay']
 
-export interface FleetTrendResponse {
-  as_of: string
-  days: number
-  region: string | null
-  series: FleetTrendDay[]
-}
+export type FleetTrendResponse = Schemas['FleetTrendResponse']
 
 export function useFleetTrend(days = 30, region?: string) {
   const qs = new URLSearchParams({ days: String(days) })
@@ -2048,28 +1092,9 @@ export function useFleetTrend(days = 30, region?: string) {
 
 // ---- Shadow fleet monitor (Phase 52) ----
 
-export interface ShadowFleetRow {
-  mmsi: number
-  imo: number | null
-  name: string | null
-  kind: string | null
-  segment: string | null
-  region: string | null
-  sts_count: number
-  gap_count: number
-  spoof_count: number
-  risk_score: number | null
-  ofac: boolean
-  flags: string[]
-  last_event_ts: string | null
-}
+export type ShadowFleetRow = Schemas['ShadowFleetRow']
 
-export interface ShadowFleetResponse {
-  as_of: string
-  days: number
-  total: number
-  rows: ShadowFleetRow[]
-}
+export type ShadowFleetResponse = Schemas['ShadowFleetResponse']
 
 export function useShadowFleet(days = 7, limit = 50) {
   return useQuery({
@@ -2081,41 +1106,9 @@ export function useShadowFleet(days = 7, limit = 50) {
 }
 
 // Phase 54: Pipeline disruption layer
-export interface PipelineSegment {
-  id: string
-  name: string
-  commodity: string
-  physical_state: 'offline' | 'reduced' | 'flowing' | 'unknown'
-  capacity_mbd: number | null
-  capacity_bcm_yr: number | null
-  from_country: string
-  to_country: string
-  start_lat: number | null
-  start_lon: number | null
-  end_lat: number | null
-  end_lon: number | null
-  disruption_description: string | null
-  disruption_event_type: string | null
-  disruption_since: string | null
-  // RexTag enrichment (US pipelines)
-  owner: string | null
-  length_miles: number | null
-  states_served: string | null
-  capacity_bcfd: number | null
-  data_source: 'worldmonitor' | 'rextag'
-  // EIA full route geometry: list of segments, each [[lat, lon], ...]
-  route_coords: number[][][] | null
-}
+export type PipelineSegment = Schemas['PipelineSegment']
 
-export interface PipelinesResponse {
-  as_of: string
-  disrupted_only: boolean
-  total_offline: number
-  total_reduced: number
-  total_offline_mbd: number
-  total_offline_bcm: number
-  pipelines: PipelineSegment[]
-}
+export type PipelinesResponse = Schemas['PipelinesResponse']
 
 export function usePipelines(disruptedOnly = true, enabled = true) {
   return useQuery({
@@ -2131,24 +1124,9 @@ export function usePipelines(disruptedOnly = true, enabled = true) {
 // Phase 55: Owner Fleet Status
 // ---------------------------------------------------------------------------
 
-export interface OwnerFleetStatusRow {
-  owner: string
-  live_count: number
-  laden: number
-  ballast: number
-  unknown: number
-  top_segment: string | null
-  avg_risk: number | null
-  flags: string[]
-  regions: string[]
-}
+export type OwnerFleetStatusRow = Schemas['OwnerFleetStatusRow']
 
-export interface OwnerFleetStatusResponse {
-  as_of: string
-  kind: string | null
-  total_owners: number
-  rows: OwnerFleetStatusRow[]
-}
+export type OwnerFleetStatusResponse = Schemas['OwnerFleetStatusResponse']
 
 export function useOwnerFleetStatus(kind?: string, minVessels = 1, limit = 30) {
   const qs = new URLSearchParams({ min_vessels: String(minVessels), limit: String(limit) })
@@ -2162,44 +1140,9 @@ export function useOwnerFleetStatus(kind?: string, minVessels = 1, limit = 30) {
 }
 
 // Phase 54: European Supply Intelligence
-// True ETA (Phase E/F): optional physics estimate + calibrated band + method.
-export interface TrueEtaFields {
-  eta_true_h: number | null
-  eta_low_h: number | null
-  eta_high_h: number | null
-  eta_naive_h: number | null
-  eta_method: string | null
-}
+export type EuropeanInboundVessel = Schemas['EuropeanInboundVessel']
 
-export interface EuropeanInboundVessel extends TrueEtaFields {
-  mmsi: number
-  name: string | null
-  segment: string | null
-  kind: string | null
-  laden: string | null
-  eta_hours: number
-  distance_nm: number
-  sog: number
-  port: string
-  port_region: string
-  destination_raw: string | null
-  inferred_origin: string | null
-  inferred_via: string | null
-  dwt_estimate: number | null
-  registry_risk: number | null
-}
-
-export interface EuropeanInboundResponse {
-  as_of: string
-  horizon_h: number
-  total_vessels: number
-  total_laden: number
-  total_dwt_laden: number
-  vessels: EuropeanInboundVessel[]
-  by_origin: Record<string, number>
-  by_port: Record<string, number>
-  eta_buckets: Record<string, number>
-}
+export type EuropeanInboundResponse = Schemas['EuropeanInboundResponse']
 
 export function useEuropeanInbound(horizonH = 48, ladenOnly = false) {
   const qs = new URLSearchParams({ horizon_h: String(horizonH), laden_only: String(ladenOnly) })
@@ -2212,50 +1155,11 @@ export function useEuropeanInbound(horizonH = 48, ladenOnly = false) {
 }
 
 // Phase 55: LNG Intelligence
-export interface LngVessel extends TrueEtaFields {
-  mmsi: number
-  imo: number
-  name: string | null
-  sog: number
-  lat: number
-  lon: number
-  region: string | null
-  destination_raw: string | null
-  terminal: string | null
-  terminal_country: string | null
-  eta_hours: number | null
-  distance_nm: number | null
-  laden: string | null
-  inferred_origin: string | null
-  inferred_via: string | null
-  registry_name: string | null
-  owner: string | null
-}
+export type LngVessel = Schemas['LngVessel']
 
-export interface LngLoadingVessel {
-  mmsi: number
-  imo: number
-  name: string | null
-  sog: number
-  lat: number
-  lon: number
-  terminal_name: string
-  status: 'loading' | 'departing'
-  destination_raw: string | null
-  eu_terminal_eta_days: number | null
-}
+export type LngLoadingVessel = Schemas['LngLoadingVessel']
 
-export interface LngInboundResponse {
-  as_of: string
-  total_lng_visible: number
-  inbound_to_europe: number
-  bcm_inbound: number
-  vessels: LngVessel[]
-  by_origin: Record<string, number>
-  by_terminal: Record<string, number>
-  eta_buckets: Record<string, number>
-  us_loading: LngLoadingVessel[]
-}
+export type LngInboundResponse = Schemas['LngInboundResponse']
 
 export function useLngInbound(horizonH = 72) {
   return useQuery({
@@ -2267,66 +1171,18 @@ export function useLngInbound(horizonH = 72) {
 }
 
 // True ETA Phase F: accuracy scoreboard (leakage-free backtest metrics)
-export interface EtaAccuracyRow {
-  model: string
-  lead_bucket: string
-  target_type: string
-  lead_basis: string
-  n: number
-  med_abs_err_h: number | null
-  bias_h: number | null
-  p90_abs_err_h: number | null
-  interval_coverage: number | null
-}
+export type EtaAccuracyRow = Schemas['EtaAccuracyRow']
 
-export interface EtaDriftAlert {
-  run_ts: string
-  model: string
-  kind: string
-  severity: string
-  metric: number
-  reference: number
-  detail: string
-}
+export type EtaDriftAlert = Schemas['EtaDriftAlert']
 
-export interface EtaAccuracyResponse {
-  run_ts: string | null
-  models: string[]
-  lead_order: string[]
-  lead_basis: string
-  rows: EtaAccuracyRow[]
-  drift?: EtaDriftAlert[]
-}
+export type EtaAccuracyResponse = Schemas['EtaAccuracyResponse']
 
 export type EtaLeadBasis = 'actual' | 'predicted'
 
 // True ETA Phase E/F: per-vessel resolvable-target ETAs (vessel-detail popup)
-export interface EtaPrediction {
-  target_id: string
-  target_name: string | null
-  target_type: string | null
-  target_lat: number | null
-  target_lon: number | null
-  eta_p50_h: number | null
-  eta_low_h: number | null
-  eta_high_h: number | null
-  eta_naive_h: number | null
-  method: string | null
-  eta_arrival_ts: string | null
-  route_dist_nm: number | null
-  gc_dist_nm: number | null
-  route_method: string | null
-  sog: number | null
-  segment: string | null
-  laden: boolean | null
-}
+export type EtaPrediction = Schemas['EtaPrediction']
 
-export interface VesselEtaResponse {
-  mmsi: number
-  as_of: string
-  n: number
-  predictions: EtaPrediction[]
-}
+export type VesselEtaResponse = Schemas['EtaResponse']
 
 export function useVesselEta(mmsi: number | null | undefined) {
   return useQuery({
@@ -2339,25 +1195,9 @@ export function useVesselEta(mmsi: number | null | undefined) {
 }
 
 // Destination predictor: ranked candidate ports + probability (vessel-detail popup)
-export interface DestinationCandidate {
-  target_id: string
-  target_name: string | null
-  target_type: string | null
-  target_lat: number | null
-  target_lon: number | null
-  prob: number | null
-  method: string | null
-  reported_match: boolean
-  gc_dist_nm: number | null
-}
+export type DestinationCandidate = Schemas['DestinationCandidate']
 
-export interface VesselDestinationResponse {
-  mmsi: number
-  as_of: string
-  n: number
-  disagrees_with_reported: boolean
-  candidates: DestinationCandidate[]
-}
+export type VesselDestinationResponse = Schemas['DestinationResponse']
 
 export function useVesselDestination(mmsi: number | null | undefined) {
   return useQuery({
@@ -2381,24 +1221,9 @@ export function useEtaAccuracy(targetType = 'all', leadBasis: EtaLeadBasis = 'ac
   })
 }
 
-export interface EtaByTargetRow {
-  target_id: string
-  name: string
-  target_type: string
-  is_canal: boolean
-  n: number
-  med_abs_err_h: number | null
-  bias_h: number | null
-  p90_abs_err_h: number | null
-  mape: number | null
-  interval_coverage: number | null
-  naive_med_abs_err_h: number | null
-}
+export type EtaByTargetRow = Schemas['EtaByTargetRow']
 
-export interface EtaByTargetResponse {
-  run_ts: string | null
-  rows: EtaByTargetRow[]
-}
+export type EtaByTargetResponse = Schemas['EtaByTargetResponse']
 
 export function useEtaByTarget() {
   return useQuery({
@@ -2409,17 +1234,9 @@ export function useEtaByTarget() {
   })
 }
 
-export interface EtaTrendPoint {
-  run_ts: string
-  naive_mae: number | null
-  route_mae: number | null
-  physics_mae: number | null
-  n: number
-}
+export type EtaTrendPoint = Schemas['EtaTrendPoint']
 
-export interface EtaTrendResponse {
-  points: EtaTrendPoint[]
-}
+export type EtaTrendResponse = Schemas['EtaTrendResponse']
 
 export function useEtaTrend() {
   return useQuery({
@@ -2430,30 +1247,9 @@ export function useEtaTrend() {
   })
 }
 
-export interface UpcomingVessel {
-  mmsi: number
-  name: string | null
-  segment: string | null
-  laden: boolean | null
-  target_id: string
-  target_name: string
-  target_type: string
-  remaining_h: number
-  eta_p10_h: number | null
-  eta_p90_h: number | null
-  route_dist_nm: number | null
-  sog: number | null
-  lat: number | null
-  lon: number | null
-}
+export type UpcomingVessel = Schemas['UpcomingVessel']
 
-export interface UpcomingArrivalsResponse {
-  as_of: string
-  horizon_h: number
-  target_id: string | null
-  total: number
-  rows: UpcomingVessel[]
-}
+export type UpcomingArrivalsResponse = Schemas['UpcomingArrivalsResponse']
 
 export function useUpcomingArrivals(horizonH = 96, targetId?: string, targetType = 'all') {
   const params = new URLSearchParams({ horizon_h: String(horizonH), target_type: targetType })
@@ -2468,62 +1264,15 @@ export function useUpcomingArrivals(horizonH = 96, targetId?: string, targetType
 
 // ---- Freight cycle board ----
 
-export interface CycleSignal {
-  id: string
-  subsector: string
-  category: string
-  label: string
-  tier: 'live' | 'registered' | 'missing'
-  unit: string
-  value: number | null
-  value_note: string
-  as_of: string | null
-  state: 'breached' | 'approaching' | 'holding' | 'unknown'
-  threshold_value: number | null
-  threshold_label: string
-  direction: string
-  distance_pct: number | null
-  expected_lag: string
-  falsifier: string
-  source_label: string
-  source_url: string | null
-  stale: boolean
-  review_interval_days: number | null
-  verified: boolean
-  provenance: string
-  caveat: string
-  gap_reason: string
-  spark: number[]
-}
+export type CycleSignal = Schemas['CycleSignal']
 
-export interface CycleSignalsResponse {
-  as_of: string
-  registry_updated: string | null
-  warn_band_pct: number
-  signals: CycleSignal[]
-}
+export type CycleSignalsResponse = Schemas['CycleSignalsResponse']
 
-export interface CycleSubsector {
-  id: string
-  name: string
-  stage: string
-  stage_note: string
-  coverage_note: string
-  headline: CycleSignal | null
-  orderbook: CycleSignal | null
-}
+export type CycleSubsector = Schemas['CycleSubsector']
 
-export interface CycleSubsectorsResponse {
-  as_of: string
-  subsectors: CycleSubsector[]
-}
+export type CycleSubsectorsResponse = Schemas['CycleSubsectorsResponse']
 
-export interface CycleSeriesResponse {
-  series: string
-  label: string
-  source_label: string
-  points: { date: string; value: number }[]
-}
+export type CycleSeriesResponse = Schemas['CycleSeriesResponse']
 
 // Baltic fixings land once a day; nothing here justifies the 60s tracker cadence.
 const CYCLE_REFETCH_MS = 15 * 60_000

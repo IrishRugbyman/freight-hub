@@ -326,9 +326,9 @@ export function FleetAtTimeCard() {
                         <span className="w-28 shrink-0 font-medium">{row.segment}</span>
                         <span className="w-12 shrink-0 tabular-nums text-primary font-semibold">{row.count}</span>
                         <div className="flex min-w-0 gap-2 text-muted-foreground">
-                          <span>L: {row.laden}</span>
-                          <span>B: {row.ballast}</span>
-                          <span>U/W: {row.underway}</span>
+                          <span>L: {row.laden_count}</span>
+                          <span>B: {row.ballast_count}</span>
+                          <span>U/W: {row.underway_count}</span>
                           {row.avg_sog != null && <span>avg {row.avg_sog}kn</span>}
                         </div>
                       </div>

@@ -10,6 +10,7 @@ shadows the real 'vessels' table via temp table precedence in search_path).
 
 from __future__ import annotations
 
+import contextlib
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -31,7 +32,6 @@ def setup_pg_vessels(monkeypatch, rows: list[dict]) -> None:
     lifetime of this connection.  Monkeypatch restores pg_query at end of test.
     """
     import pandas as pd
-    from app import db as _db
 
     conn = psycopg2.connect(_PG_DSN)
     cur = conn.cursor()
@@ -48,7 +48,7 @@ def setup_pg_vessels(monkeypatch, rows: list[dict]) -> None:
 
     conn.commit()
 
-    def _patched(sql: str, params: list | None = None) -> "pd.DataFrame":
+    def _patched(sql: str, params: list | None = None) -> pd.DataFrame:
         try:
             c = conn.cursor()
             c.execute(sql, params or [])
@@ -60,14 +60,13 @@ def setup_pg_vessels(monkeypatch, rows: list[dict]) -> None:
             c.close()
             return pd.DataFrame(data, columns=col_names)
         except Exception:
-            try:
+            with contextlib.suppress(Exception):
                 conn.rollback()
-            except Exception:
-                pass
             return pd.DataFrame()
 
     monkeypatch.setattr("app.db.pg_query", _patched)
     # Connection is closed when garbage-collected at end of test.
+
 
 _SCHEMA = """
 CREATE TABLE live_positions (
@@ -92,16 +91,106 @@ _STALE = _NOW - timedelta(hours=5)
 # mmsi, name, lat, lon, sog, cog, heading, dest, type, len, kind, segment, region, ts,
 #   imo, draught, nav_status, eta
 _SEED = [
-    (1001, "CAPE A", 1.2, 103.6, 12.0, 90.0, 91.0, "CNSHA", 74, 300,
-     "bulk", "Capesize", "singapore_malacca", _NOW, None, None, 0, None),
-    (1002, "CAPE B", 1.3, 103.7, 0.1, None, None, "SGSIN", 74, 290,
-     "bulk", "Capesize", "singapore_malacca", _NOW, None, None, 1, None),
-    (1003, "VLCC A", 26.0, 56.2, 14.0, 270.0, 271.0, "AEFJR", 80, 330,
-     "tanker", "VLCC", "hormuz", _NOW, 9876543, 20.5, 0, "06-20 06:00"),
-    (1004, "COASTER", 51.0, 1.5, 8.0, 45.0, None, None, 70, 100,
-     "bulk", "Small", None, _NOW, None, None, None, None),
-    (1005, "STALE CAPE", 29.0, 33.0, 10.0, 180.0, None, "EGPSD", 74, 280,
-     "bulk", "Capesize", "suez", _STALE, None, None, None, None),
+    (
+        1001,
+        "CAPE A",
+        1.2,
+        103.6,
+        12.0,
+        90.0,
+        91.0,
+        "CNSHA",
+        74,
+        300,
+        "bulk",
+        "Capesize",
+        "singapore_malacca",
+        _NOW,
+        None,
+        None,
+        0,
+        None,
+    ),
+    (
+        1002,
+        "CAPE B",
+        1.3,
+        103.7,
+        0.1,
+        None,
+        None,
+        "SGSIN",
+        74,
+        290,
+        "bulk",
+        "Capesize",
+        "singapore_malacca",
+        _NOW,
+        None,
+        None,
+        1,
+        None,
+    ),
+    (
+        1003,
+        "VLCC A",
+        26.0,
+        56.2,
+        14.0,
+        270.0,
+        271.0,
+        "AEFJR",
+        80,
+        330,
+        "tanker",
+        "VLCC",
+        "hormuz",
+        _NOW,
+        9876543,
+        20.5,
+        0,
+        "06-20 06:00",
+    ),
+    (
+        1004,
+        "COASTER",
+        51.0,
+        1.5,
+        8.0,
+        45.0,
+        None,
+        None,
+        70,
+        100,
+        "bulk",
+        "Small",
+        None,
+        _NOW,
+        None,
+        None,
+        None,
+        None,
+    ),
+    (
+        1005,
+        "STALE CAPE",
+        29.0,
+        33.0,
+        10.0,
+        180.0,
+        None,
+        "EGPSD",
+        74,
+        280,
+        "bulk",
+        "Capesize",
+        "suez",
+        _STALE,
+        None,
+        None,
+        None,
+        None,
+    ),
 ]
 
 
@@ -110,7 +199,9 @@ def client(tmp_path, monkeypatch) -> TestClient:
     db_file = tmp_path / "ais_positions.duckdb"
     conn = duckdb.connect(str(db_file))
     conn.execute(_SCHEMA)
-    conn.executemany("INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", _SEED)
+    conn.executemany(
+        "INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", _SEED
+    )
     conn.close()
 
     monkeypatch.setenv("AIS_POSITIONS_DB", str(db_file))
@@ -130,11 +221,53 @@ def empty_client(tmp_path, monkeypatch) -> TestClient:
 
 _SNAP_SEED = [
     # snapshot_ts, mmsi, kind, segment, region, lat, lon, ship_type, length_m, sog, nav_s, draught, dest
-    (_NOW - timedelta(hours=2), 1003, "tanker", "VLCC", "hormuz", 25.9, 56.1, 80, 330, 14.0, 0, 20.0, "AEFJR"),
-    (_NOW - timedelta(hours=1), 1003, "tanker", "VLCC", "hormuz", 26.0, 56.2, 80, 330, 14.0, 0, 20.0, "AEFJR"),
+    (
+        _NOW - timedelta(hours=2),
+        1003,
+        "tanker",
+        "VLCC",
+        "hormuz",
+        25.9,
+        56.1,
+        80,
+        330,
+        14.0,
+        0,
+        20.0,
+        "AEFJR",
+    ),
+    (
+        _NOW - timedelta(hours=1),
+        1003,
+        "tanker",
+        "VLCC",
+        "hormuz",
+        26.0,
+        56.2,
+        80,
+        330,
+        14.0,
+        0,
+        20.0,
+        "AEFJR",
+    ),
     (_NOW, 1003, "tanker", "VLCC", "hormuz", 26.1, 56.3, 80, 330, 14.0, 0, 20.0, "AEFJR"),
     # old snapshot outside 24h window
-    (_NOW - timedelta(hours=30), 1003, "tanker", "VLCC", "hormuz", 25.5, 55.8, 80, 330, 12.0, 0, 20.0, "AEFJR"),
+    (
+        _NOW - timedelta(hours=30),
+        1003,
+        "tanker",
+        "VLCC",
+        "hormuz",
+        25.5,
+        55.8,
+        80,
+        330,
+        12.0,
+        0,
+        20.0,
+        "AEFJR",
+    ),
 ]
 
 
@@ -143,10 +276,10 @@ def client_with_snaps(tmp_path, monkeypatch) -> TestClient:
     db_file = tmp_path / "ais_positions.duckdb"
     conn = duckdb.connect(str(db_file))
     conn.execute(_SCHEMA)
-    conn.executemany("INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", _SEED)
     conn.executemany(
-        "INSERT INTO ais_snapshots VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", _SNAP_SEED
+        "INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", _SEED
     )
+    conn.executemany("INSERT INTO ais_snapshots VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", _SNAP_SEED)
     conn.close()
 
     monkeypatch.setenv("AIS_POSITIONS_DB", str(db_file))
@@ -263,22 +396,52 @@ CREATE TABLE IF NOT EXISTS eta_arrivals (
 
 _TRANSIT_SEED = [
     # mmsi, chokepoint, entered_ts, exited_ts, direction, kind, segment, laden
-    (1003, "hormuz", _NOW - timedelta(hours=10), _NOW - timedelta(hours=8),
-     "outbound", "tanker", "VLCC", True),
-    (1001, "singapore_malacca", _NOW - timedelta(hours=5), _NOW - timedelta(hours=4),
-     "eastbound", "bulk", "Capesize", False),
+    (
+        1003,
+        "hormuz",
+        _NOW - timedelta(hours=10),
+        _NOW - timedelta(hours=8),
+        "outbound",
+        "tanker",
+        "VLCC",
+        True,
+    ),
+    (
+        1001,
+        "singapore_malacca",
+        _NOW - timedelta(hours=5),
+        _NOW - timedelta(hours=4),
+        "eastbound",
+        "bulk",
+        "Capesize",
+        False,
+    ),
 ]
 
 _ANCHOR_SEED = [
     # mmsi, zone, start_ts, end_ts, kind, segment
-    (1002, "singapore_east", _NOW - timedelta(hours=6), _NOW - timedelta(hours=2),
-     "bulk", "Capesize"),
+    (
+        1002,
+        "singapore_east",
+        _NOW - timedelta(hours=6),
+        _NOW - timedelta(hours=2),
+        "bulk",
+        "Capesize",
+    ),
 ]
 
+# The two density rows must share a calendar day (fleet-trend averages per day), and
+# must stay recent (region-momentum reads a ~25h window). Spaced an hour apart, which
+# spanned midnight whenever the suite ran between 00:00 and 02:00 UTC; the spacing now
+# shrinks near midnight so both always fall on today.
+_DENSITY_STEP = min(
+    timedelta(hours=1),
+    (_NOW - _NOW.replace(hour=0, minute=0, second=0)) / 3,
+)
 _DENSITY_SEED = [
     # ts, region, kind, segment, laden, ballast, unknown
-    (_NOW - timedelta(hours=2), "hormuz", "tanker", "VLCC", 2, 1, 0),
-    (_NOW - timedelta(hours=1), "hormuz", "tanker", "VLCC", 2, 0, 1),
+    (_NOW - 2 * _DENSITY_STEP, "hormuz", "tanker", "VLCC", 2, 1, 0),
+    (_NOW - _DENSITY_STEP, "hormuz", "tanker", "VLCC", 2, 0, 1),
 ]
 
 _VESSEL_STATE_SEED = [
@@ -288,15 +451,48 @@ _VESSEL_STATE_SEED = [
 
 _EVENTS_SEED = [
     # event_id, type, mmsi, mmsi2, start_ts, end_ts, lat, lon, region, kind, segment, details
-    ("gap0000001", "gap", 1001, None,
-     _NOW - timedelta(hours=20), _NOW - timedelta(hours=20),
-     25.2, 56.5, "hormuz", "tanker", "Aframax", '{"silence_hours":20,"last_sog":9.1}'),
-    ("loi0000001", "loiter", 1002, None,
-     _NOW - timedelta(hours=15), _NOW - timedelta(hours=3),
-     1.2, 103.8, "singapore_malacca", "bulk", "Capesize", '{"duration_hours":12,"mean_sog":0.3}'),
-    ("sts0000001", "sts", 1003, 1004,
-     _NOW - timedelta(hours=3), _NOW - timedelta(hours=1),
-     26.1, 56.3, "hormuz", "tanker", "VLCC", '{"duration_hours":2,"co_location_fixes":12}'),
+    (
+        "gap0000001",
+        "gap",
+        1001,
+        None,
+        _NOW - timedelta(hours=20),
+        _NOW - timedelta(hours=20),
+        25.2,
+        56.5,
+        "hormuz",
+        "tanker",
+        "Aframax",
+        '{"silence_hours":20,"last_sog":9.1}',
+    ),
+    (
+        "loi0000001",
+        "loiter",
+        1002,
+        None,
+        _NOW - timedelta(hours=15),
+        _NOW - timedelta(hours=3),
+        1.2,
+        103.8,
+        "singapore_malacca",
+        "bulk",
+        "Capesize",
+        '{"duration_hours":12,"mean_sog":0.3}',
+    ),
+    (
+        "sts0000001",
+        "sts",
+        1003,
+        1004,
+        _NOW - timedelta(hours=3),
+        _NOW - timedelta(hours=1),
+        26.1,
+        56.3,
+        "hormuz",
+        "tanker",
+        "VLCC",
+        '{"duration_hours":2,"co_location_fixes":12}',
+    ),
 ]
 
 
@@ -310,13 +506,36 @@ _ETA_TARGETS_SEED = [
 _ETA_ARRIVALS_SEED = [
     # mmsi, target_id, arrival_ts, min_dist_nm, segment, laden, approach_start_ts
     (1001, "zone:rotterdam", _NOW - timedelta(days=1), 5.2, "VLCC", True, _NOW - timedelta(days=2)),
-    (1002, "zone:rotterdam", _NOW - timedelta(days=3), 4.8, "Suezmax", True, _NOW - timedelta(days=4)),
-    (1003, "zone:rotterdam", _NOW - timedelta(days=5), 6.1, "VLCC", False, _NOW - timedelta(days=6)),
+    (
+        1002,
+        "zone:rotterdam",
+        _NOW - timedelta(days=3),
+        4.8,
+        "Suezmax",
+        True,
+        _NOW - timedelta(days=4),
+    ),
+    (
+        1003,
+        "zone:rotterdam",
+        _NOW - timedelta(days=5),
+        6.1,
+        "VLCC",
+        False,
+        _NOW - timedelta(days=6),
+    ),
     (1001, "cp:suez", _NOW - timedelta(days=2), 12.0, "VLCC", True, _NOW - timedelta(days=3)),
     (1004, "cp:suez", _NOW - timedelta(days=8), 14.0, "Aframax", True, _NOW - timedelta(days=9)),
     # Stale arrival (outside a 7-day window, inside the 14-day default)
-    (1005, "cp:singapore_malacca", _NOW - timedelta(days=10), 9.0, "Capesize", None,
-     _NOW - timedelta(days=11)),
+    (
+        1005,
+        "cp:singapore_malacca",
+        _NOW - timedelta(days=10),
+        9.0,
+        "Capesize",
+        None,
+        _NOW - timedelta(days=11),
+    ),
 ]
 
 
@@ -326,26 +545,22 @@ def analytics_client(tmp_path, monkeypatch) -> TestClient:
     ais_file = tmp_path / "ais_positions.duckdb"
     ais_conn = duckdb.connect(str(ais_file))
     ais_conn.execute(_SCHEMA)
-    ais_conn.executemany("INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", _SEED)
+    ais_conn.executemany(
+        "INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", _SEED
+    )
     ais_conn.executemany("INSERT INTO ais_snapshots VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", _SNAP_SEED)
     ais_conn.close()
 
     an_file = tmp_path / "freight_analytics.duckdb"
     an_conn = duckdb.connect(str(an_file))
     an_conn.execute(_ANALYTICS_SCHEMA)
-    an_conn.executemany(
-        "INSERT INTO transit_events VALUES (?,?,?,?,?,?,?,?)", _TRANSIT_SEED
-    )
+    an_conn.executemany("INSERT INTO transit_events VALUES (?,?,?,?,?,?,?,?)", _TRANSIT_SEED)
     an_conn.executemany("INSERT INTO anchored_episodes VALUES (?,?,?,?,?,?)", _ANCHOR_SEED)
     an_conn.executemany("INSERT INTO fleet_density VALUES (?,?,?,?,?,?,?)", _DENSITY_SEED)
     an_conn.executemany("INSERT INTO vessel_state VALUES (?,?,?,?,?)", _VESSEL_STATE_SEED)
-    an_conn.executemany(
-        "INSERT INTO ais_events VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", _EVENTS_SEED
-    )
+    an_conn.executemany("INSERT INTO ais_events VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", _EVENTS_SEED)
     an_conn.executemany("INSERT INTO eta_targets VALUES (?,?,?,?,?,?,?)", _ETA_TARGETS_SEED)
-    an_conn.executemany(
-        "INSERT INTO eta_arrivals VALUES (?,?,?,?,?,?,?)", _ETA_ARRIVALS_SEED
-    )
+    an_conn.executemany("INSERT INTO eta_arrivals VALUES (?,?,?,?,?,?,?)", _ETA_ARRIVALS_SEED)
     an_conn.close()
 
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))

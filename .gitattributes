@@ -1,0 +1,3 @@
+# Generated from the backend OpenAPI schema (backend/scripts/export_openapi.py, npm run gen:api).
+frontend/openapi.json linguist-generated=true
+frontend/src/lib/api-schema.gen.ts linguist-generated=true

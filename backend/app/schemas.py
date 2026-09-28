@@ -1,11 +1,24 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
+
+
+class ApiModel(BaseModel):
+    """Base for every response model.
+
+    FastAPI serialises every field, defaults included, so in a *response* a field with
+    a default is always present. Marking it required in the serialisation schema makes
+    ``openapi.json``, and the frontend types generated from it, say exactly that:
+    ``eta_method: string | null`` rather than ``eta_method?: string | null``.
+    """
+
+    model_config = ConfigDict(json_schema_serialization_defaults_required=True)
+
 
 # ---- AIS live vessel tracker ----
 
 
-class Vessel(BaseModel):
+class Vessel(ApiModel):
     mmsi: int
     name: str | None = None
     lat: float
@@ -31,22 +44,24 @@ class Vessel(BaseModel):
     age_minutes: int | None = None  # minutes since last AIS fix
 
 
-class TrackPoint(BaseModel):
+class TrackPoint(ApiModel):
     ts: str
     lat: float
     lon: float
     sog: float | None = None
 
 
-class ChokepointCount(BaseModel):
+class ChokepointCount(ApiModel):
     region: str
-    bbox: list[list[float]]  # [[lat_min, lon_min], [lat_max, lon_max]]
+    bbox: tuple[
+        tuple[float, float], tuple[float, float]
+    ]  # ((lat_min, lon_min), (lat_max, lon_max))
     total: int
     by_segment: dict[str, int]
     has_coverage: bool = True  # False = no terrestrial AIS receivers feed this basin
 
 
-class FeedStatus(BaseModel):
+class FeedStatus(ApiModel):
     """Honest state of the upstream AIS feed.
 
     Exists because `last_update` alone cannot distinguish "the feed is fine and
@@ -70,7 +85,7 @@ class FeedStatus(BaseModel):
     visible_hours: float
 
 
-class Meta(BaseModel):
+class Meta(ApiModel):
     kinds: list[str]
     segments: list[str]
     regions: list[str]
@@ -82,7 +97,7 @@ class Meta(BaseModel):
 # ---- Transport-arb routes ----
 
 
-class RouteResult(BaseModel):
+class RouteResult(ApiModel):
     id: str
     origin: str
     destination: str
@@ -110,7 +125,7 @@ class RouteResult(BaseModel):
     status_near: str
 
 
-class BwetInfo(BaseModel):
+class BwetInfo(ApiModel):
     bwet_close: float | None
     bwet_baseline: float
     scale_factor: float
@@ -118,7 +133,7 @@ class BwetInfo(BaseModel):
     bwet_date: str | None
 
 
-class ArbMatrixCell(BaseModel):
+class ArbMatrixCell(ApiModel):
     origin: str
     destination: str
     net_margin: float | None = None
@@ -126,7 +141,7 @@ class ArbMatrixCell(BaseModel):
     voyage_days: int | None = None
 
 
-class RoutesResponse(BaseModel):
+class RoutesResponse(ApiModel):
     name: str
     as_of: str
     spots: dict[str, float]
@@ -144,7 +159,7 @@ class RoutesResponse(BaseModel):
 # ---- Freight-dispersion ----
 
 
-class DispersionStats(BaseModel):
+class DispersionStats(ApiModel):
     total_return: float
     ann_return: float
     ann_volatility: float
@@ -155,12 +170,12 @@ class DispersionStats(BaseModel):
     n_years: float
 
 
-class DispersionPoint(BaseModel):
+class DispersionPoint(ApiModel):
     date: str
     value: float
 
 
-class DispersionResponse(BaseModel):
+class DispersionResponse(ApiModel):
     name: str
     strategy: str
     stats: DispersionStats
@@ -169,7 +184,7 @@ class DispersionResponse(BaseModel):
     avg_dispersion: list[DispersionPoint]
 
 
-class AisDispersionRow(BaseModel):
+class AisDispersionRow(ApiModel):
     date: str
     kind: str
     segment: str
@@ -180,33 +195,33 @@ class AisDispersionRow(BaseModel):
 # ---- Phase 2 analytics ----
 
 
-class TransitDay(BaseModel):
+class TransitDay(ApiModel):
     date: str
     direction: str
     kind: str
     count: int
 
 
-class TransitsResponse(BaseModel):
+class TransitsResponse(ApiModel):
     chokepoint: str
     days: int
     series: list[TransitDay]
 
 
-class CongestionDay(BaseModel):
+class CongestionDay(ApiModel):
     date: str
     zone: str
     vessel_count: int
     median_dwell_hours: float | None = None
 
 
-class CongestionResponse(BaseModel):
+class CongestionResponse(ApiModel):
     zone: str
     days: int
     series: list[CongestionDay]
 
 
-class DensityDay(BaseModel):
+class DensityDay(ApiModel):
     date: str
     kind: str
     segment: str
@@ -215,31 +230,33 @@ class DensityDay(BaseModel):
     unknown_count: int
 
 
-class DensityResponse(BaseModel):
+class DensityResponse(ApiModel):
     region: str
     days: int
     series: list[DensityDay]
 
 
-class LadenSegment(BaseModel):
+class LadenSegment(ApiModel):
     segment: str
     laden: int
     ballast: int
     unknown: int
 
 
-class LadenResponse(BaseModel):
+class LadenResponse(ApiModel):
     kind: str
     segments: list[LadenSegment]
 
 
-class AnalyticsZone(BaseModel):
+class AnalyticsZone(ApiModel):
     name: str
-    bbox: list[list[float]]  # [[lat_min, lon_min], [lat_max, lon_max]]
+    bbox: tuple[
+        tuple[float, float], tuple[float, float]
+    ]  # ((lat_min, lon_min), (lat_max, lon_max))
     type: str  # 'anchorage' or 'chokepoint'
 
 
-class AisEvent(BaseModel):
+class AisEvent(ApiModel):
     event_id: str
     type: str  # 'gap', 'loiter', 'sts'
     mmsi: int
@@ -256,7 +273,7 @@ class AisEvent(BaseModel):
     vessel2_name: str | None = None
 
 
-class EventsResponse(BaseModel):
+class EventsResponse(ApiModel):
     events: list[AisEvent]
     total: int
 
@@ -264,7 +281,7 @@ class EventsResponse(BaseModel):
 # ---- Phase 6: Fleet Explorer ----
 
 
-class VoyageEvent(BaseModel):
+class VoyageEvent(ApiModel):
     type: str  # port_call | transit | reroute | cargo_load | cargo_discharge | sts
     ts: str
     end_ts: str | None = None
@@ -287,12 +304,12 @@ class VoyageEvent(BaseModel):
     name2: str | None = None
 
 
-class VoyagesResponse(BaseModel):
+class VoyagesResponse(ApiModel):
     mmsi: int
     events: list[VoyageEvent]
 
 
-class VesselStateData(BaseModel):
+class VesselStateData(ApiModel):
     mmsi: int
     laden: str | None = None
     last_draught: float | None = None
@@ -301,20 +318,20 @@ class VesselStateData(BaseModel):
     days_at_anchor: float | None = None  # contiguous anchor streak ending now
 
 
-class PortDestItem(BaseModel):
+class PortDestItem(ApiModel):
     destination: str
     count: int
     tankers: int
     bulkers: int
 
 
-class PortFlowResponse(BaseModel):
+class PortFlowResponse(ApiModel):
     as_of: str
     total_with_dest: int
     ports: list[PortDestItem]
 
 
-class FleetRow(BaseModel):
+class FleetRow(ApiModel):
     # Registry fields
     imo: int
     ship_name: str | None = None
@@ -346,7 +363,7 @@ class FleetRow(BaseModel):
     segment: str | None = None
 
 
-class OwnerRiskItem(BaseModel):
+class OwnerRiskItem(ApiModel):
     owner: str
     vessel_count: int
     avg_risk_score: float
@@ -356,26 +373,26 @@ class OwnerRiskItem(BaseModel):
     flags: list[str]
 
 
-class OwnerRiskResponse(BaseModel):
+class OwnerRiskResponse(ApiModel):
     as_of: str
     rows: list[OwnerRiskItem]
 
 
-class SpeedTrendPoint(BaseModel):
+class SpeedTrendPoint(ApiModel):
     date: str  # YYYY-MM-DD
     avg_sog: float | None
     underway_count: int
     total_count: int
 
 
-class SpeedTrendResponse(BaseModel):
+class SpeedTrendResponse(ApiModel):
     kind: str
     segment: str | None
     days: int
     series: list[SpeedTrendPoint]
 
 
-class FlagRiskRow(BaseModel):
+class FlagRiskRow(ApiModel):
     flag: str
     flag_code: str | None
     vessel_count: int
@@ -387,12 +404,12 @@ class FlagRiskRow(BaseModel):
     tokyo_mou: str | None
 
 
-class FlagRiskResponse(BaseModel):
+class FlagRiskResponse(ApiModel):
     as_of: str
     rows: list[FlagRiskRow]
 
 
-class FleetFlagRow(BaseModel):
+class FleetFlagRow(ApiModel):
     flag: str
     flag_code: str | None
     vessel_count: int
@@ -402,7 +419,7 @@ class FleetFlagRow(BaseModel):
     by_segment: dict[str, int]
 
 
-class FleetFlagsResponse(BaseModel):
+class FleetFlagsResponse(ApiModel):
     as_of: str
     total_with_flag: int
     total_unresolved: int  # live vessels whose MMSI did not resolve to a flag
@@ -411,7 +428,7 @@ class FleetFlagsResponse(BaseModel):
     rows: list[FleetFlagRow]  # sorted by vessel_count desc
 
 
-class FlagMismatchRow(BaseModel):
+class FlagMismatchRow(ApiModel):
     mmsi: int
     imo: int | None
     name: str | None
@@ -422,12 +439,12 @@ class FlagMismatchRow(BaseModel):
     registry_flag_code: str | None
 
 
-class FlagMismatchResponse(BaseModel):
+class FlagMismatchResponse(ApiModel):
     as_of: str
     rows: list[FlagMismatchRow]
 
 
-class HighRiskPosition(BaseModel):
+class HighRiskPosition(ApiModel):
     mmsi: int
     imo: int
     lat: float
@@ -439,13 +456,13 @@ class HighRiskPosition(BaseModel):
     ofac_sanctioned: bool
 
 
-class HighRiskPositionsResponse(BaseModel):
+class HighRiskPositionsResponse(ApiModel):
     as_of: str
     min_risk: int
     rows: list[HighRiskPosition]
 
 
-class SpeedSegmentRow(BaseModel):
+class SpeedSegmentRow(ApiModel):
     segment: str
     kind: str
     underway: int  # nav_status 0 (under way using engine)
@@ -458,13 +475,13 @@ class SpeedSegmentRow(BaseModel):
     pct_underway: float  # underway / total
 
 
-class SpeedAnalyticsResponse(BaseModel):
+class SpeedAnalyticsResponse(ApiModel):
     as_of: str
     total_vessels: int
     rows: list[SpeedSegmentRow]
 
 
-class RegionUtilRow(BaseModel):
+class RegionUtilRow(ApiModel):
     region: str
     total: int
     underway: int
@@ -474,17 +491,17 @@ class RegionUtilRow(BaseModel):
     avg_sog: float | None
 
 
-class RegionUtilResponse(BaseModel):
+class RegionUtilResponse(ApiModel):
     as_of: str
     rows: list[RegionUtilRow]
 
 
-class FleetFacetItem(BaseModel):
+class FleetFacetItem(ApiModel):
     value: str
     count: int
 
 
-class FleetFacets(BaseModel):
+class FleetFacets(ApiModel):
     flags: list[FleetFacetItem]
     class_societies: list[FleetFacetItem]
     pi_clubs: list[FleetFacetItem]
@@ -493,7 +510,7 @@ class FleetFacets(BaseModel):
     owners: list[FleetFacetItem]
 
 
-class FleetSummary(BaseModel):
+class FleetSummary(ApiModel):
     total: int
     total_dwt: int | None = None
     avg_age_years: float | None = None
@@ -501,7 +518,7 @@ class FleetSummary(BaseModel):
     top_owners: list[FleetFacetItem]
 
 
-class FleetResponse(BaseModel):
+class FleetResponse(ApiModel):
     total: int
     page: int
     page_size: int
@@ -509,7 +526,7 @@ class FleetResponse(BaseModel):
     rows: list[FleetRow]
 
 
-class AnchoredVessel(BaseModel):
+class AnchoredVessel(ApiModel):
     mmsi: int
     name: str | None
     zone: str
@@ -522,13 +539,13 @@ class AnchoredVessel(BaseModel):
     ofac: bool
 
 
-class AnchorageDwellResponse(BaseModel):
+class AnchorageDwellResponse(ApiModel):
     as_of: str
     zone: str
     rows: list[AnchoredVessel]
 
 
-class CargoTransitionEvent(BaseModel):
+class CargoTransitionEvent(ApiModel):
     mmsi: int
     name: str | None
     kind: str | None
@@ -545,14 +562,14 @@ class CargoTransitionEvent(BaseModel):
     ofac: bool
 
 
-class CargoTransitionsResponse(BaseModel):
+class CargoTransitionsResponse(ApiModel):
     as_of: str
     days: int
     min_change: float
     rows: list[CargoTransitionEvent]
 
 
-class FleetAgeBand(BaseModel):
+class FleetAgeBand(ApiModel):
     age_band: str  # "0-4", "5-9", "10-14", "15-19", "20-24", "25+"
     vessel_count: int
     avg_risk_score: float | None
@@ -560,13 +577,13 @@ class FleetAgeBand(BaseModel):
     avg_dwt: float | None
 
 
-class FleetAgeResponse(BaseModel):
+class FleetAgeResponse(ApiModel):
     as_of: str
     reference_year: int
     bands: list[FleetAgeBand]
 
 
-class SlowSteamerEvent(BaseModel):
+class SlowSteamerEvent(ApiModel):
     mmsi: int
     name: str | None
     kind: str | None
@@ -579,13 +596,13 @@ class SlowSteamerEvent(BaseModel):
     ofac: bool
 
 
-class SlowSteamersResponse(BaseModel):
+class SlowSteamersResponse(ApiModel):
     as_of: str
     total_fleet_underway: int  # live vessels with sog > 0.5 and not anchored/moored
     rows: list[SlowSteamerEvent]
 
 
-class FleetUtilizationRow(BaseModel):
+class FleetUtilizationRow(ApiModel):
     segment: str
     kind: str  # "tanker" | "bulk"
     total: int
@@ -597,13 +614,13 @@ class FleetUtilizationRow(BaseModel):
     avg_sog_underway: float | None
 
 
-class FleetUtilizationResponse(BaseModel):
+class FleetUtilizationResponse(ApiModel):
     as_of: str
     total_fleet: int
     rows: list[FleetUtilizationRow]
 
 
-class TransitRiskEvent(BaseModel):
+class TransitRiskEvent(ApiModel):
     mmsi: int
     name: str | None
     imo: int | None
@@ -618,7 +635,7 @@ class TransitRiskEvent(BaseModel):
     ofac: bool
 
 
-class TransitRiskResponse(BaseModel):
+class TransitRiskResponse(ApiModel):
     as_of: str
     days: int
     chokepoint: str
@@ -627,7 +644,7 @@ class TransitRiskResponse(BaseModel):
     rows: list[TransitRiskEvent]
 
 
-class StsRiskEvent(BaseModel):
+class StsRiskEvent(ApiModel):
     event_id: str
     start_ts: str
     region: str | None
@@ -646,7 +663,7 @@ class StsRiskEvent(BaseModel):
     max_risk: int  # max(risk_score, risk_score2, 0)
 
 
-class StsRiskResponse(BaseModel):
+class StsRiskResponse(ApiModel):
     as_of: str
     days: int
     total_events: int
@@ -654,7 +671,7 @@ class StsRiskResponse(BaseModel):
     rows: list[StsRiskEvent]
 
 
-class RerouteRiskEvent(BaseModel):
+class RerouteRiskEvent(ApiModel):
     event_id: str
     start_ts: str
     region: str | None
@@ -669,14 +686,14 @@ class RerouteRiskEvent(BaseModel):
     ofac: bool
 
 
-class RerouteRiskResponse(BaseModel):
+class RerouteRiskResponse(ApiModel):
     as_of: str
     days: int
     total_events: int
     rows: list[RerouteRiskEvent]
 
 
-class FleetKPIs(BaseModel):
+class FleetKPIs(ApiModel):
     as_of: str
     total_registry: int  # all fetch_ok vessels
     scored: int  # have risk_score
@@ -688,7 +705,7 @@ class FleetKPIs(BaseModel):
     pct_scored: float  # scored / total_registry
 
 
-class RiskEventItem(BaseModel):
+class RiskEventItem(ApiModel):
     event_id: str
     event_type: str  # "sts" | "reroute"
     event_ts: str
@@ -712,7 +729,7 @@ class RiskEventItem(BaseModel):
     new_destination: str | None
 
 
-class RiskEventsResponse(BaseModel):
+class RiskEventsResponse(ApiModel):
     as_of: str
     min_risk: int
     days: int
@@ -720,7 +737,7 @@ class RiskEventsResponse(BaseModel):
     rows: list[RiskEventItem]
 
 
-class MarketSegmentSummary(BaseModel):
+class MarketSegmentSummary(ApiModel):
     segment: str
     kind: str
     total: int
@@ -731,7 +748,7 @@ class MarketSegmentSummary(BaseModel):
     underway_pct: float
 
 
-class MarketSummaryResponse(BaseModel):
+class MarketSummaryResponse(ApiModel):
     as_of: str
     total_fleet: int
     total_laden: int
@@ -744,7 +761,7 @@ class MarketSummaryResponse(BaseModel):
     by_segment: list[MarketSegmentSummary]
 
 
-class DestinationFlowRow(BaseModel):
+class DestinationFlowRow(ApiModel):
     origin_region: str
     destination: str
     segment: str | None
@@ -752,14 +769,14 @@ class DestinationFlowRow(BaseModel):
     vessel_count: int
 
 
-class DestinationFlowsResponse(BaseModel):
+class DestinationFlowsResponse(ApiModel):
     as_of: str
     laden_only: bool
     total_laden: int
     rows: list[DestinationFlowRow]
 
 
-class PortCongestionRow(BaseModel):
+class PortCongestionRow(ApiModel):
     zone: str
     region: str | None
     kind: str | None
@@ -770,13 +787,13 @@ class PortCongestionRow(BaseModel):
     congestion_factor: float  # current_vessels / baseline_avg (or 1.0 if no baseline)
 
 
-class PortCongestionResponse(BaseModel):
+class PortCongestionResponse(ApiModel):
     as_of: str
     days_baseline: int
     rows: list[PortCongestionRow]
 
 
-class ChokepointCongestionRow(BaseModel):
+class ChokepointCongestionRow(ApiModel):
     chokepoint: str
     kind: str | None
     current_vessels: int
@@ -786,7 +803,7 @@ class ChokepointCongestionRow(BaseModel):
     congestion_factor: float  # current_vessels / baseline_avg (or 1.0 if no baseline)
 
 
-class ChokepointCongestionResponse(BaseModel):
+class ChokepointCongestionResponse(ApiModel):
     as_of: str
     days_baseline: int
     rows: list[ChokepointCongestionRow]
@@ -795,7 +812,7 @@ class ChokepointCongestionResponse(BaseModel):
 # ---- Phase 34: Anomaly watchlist ----
 
 
-class AnomalyWatchlistItem(BaseModel):
+class AnomalyWatchlistItem(ApiModel):
     mmsi: int
     imo: int | None
     name: str | None
@@ -817,7 +834,7 @@ class AnomalyWatchlistItem(BaseModel):
     signals: list[str]  # human-readable signal descriptions
 
 
-class AnomalyWatchlistResponse(BaseModel):
+class AnomalyWatchlistResponse(ApiModel):
     as_of: str
     min_score: int
     total_flagged: int
@@ -827,7 +844,7 @@ class AnomalyWatchlistResponse(BaseModel):
 # ---- Phase 33: Per-vessel behavioral risk ----
 
 
-class VesselBehavioralRisk(BaseModel):
+class VesselBehavioralRisk(ApiModel):
     mmsi: int
     imo: int | None
     sts_count: int  # STS events (either party) in last days
@@ -844,7 +861,7 @@ class VesselBehavioralRisk(BaseModel):
 # ---- Phase 32: Trade Lane Risk Matrix ----
 
 
-class TradeLaneCell(BaseModel):
+class TradeLaneCell(ApiModel):
     origin_region: str
     dest_region: str
     vessel_count: int
@@ -852,7 +869,7 @@ class TradeLaneCell(BaseModel):
     laden_count: int
 
 
-class TradeLaneMatrixResponse(BaseModel):
+class TradeLaneMatrixResponse(ApiModel):
     as_of: str
     kind: str
     laden_only: bool
@@ -864,7 +881,7 @@ class TradeLaneMatrixResponse(BaseModel):
 # ---- Phase 31: Chokepoint Traffic Heatmap ----
 
 
-class ChokepointHeatmapCell(BaseModel):
+class ChokepointHeatmapCell(ApiModel):
     date: str  # YYYY-MM-DD
     chokepoint: str
     total: int
@@ -872,7 +889,7 @@ class ChokepointHeatmapCell(BaseModel):
     bulk: int
 
 
-class ChokepointHeatmapResponse(BaseModel):
+class ChokepointHeatmapResponse(ApiModel):
     as_of: str
     days: int
     kind: str  # "" | "tanker" | "bulk"
@@ -883,7 +900,7 @@ class ChokepointHeatmapResponse(BaseModel):
 # ---- Phase 30: Vessel Behavioral Risk Leaderboard ----
 
 
-class VesselRiskRow(BaseModel):
+class VesselRiskRow(ApiModel):
     mmsi: int
     imo: int | None
     name: str | None
@@ -900,7 +917,7 @@ class VesselRiskRow(BaseModel):
     total_score: int  # 0-100 composite (behavioral + registry + ofac bonus)
 
 
-class VesselRiskResponse(BaseModel):
+class VesselRiskResponse(ApiModel):
     as_of: str
     days: int
     top_n: int
@@ -908,7 +925,7 @@ class VesselRiskResponse(BaseModel):
     rows: list[VesselRiskRow]
 
 
-class StsProximityPair(BaseModel):
+class StsProximityPair(ApiModel):
     mmsi_a: int
     name_a: str | None
     imo_a: int | None
@@ -928,7 +945,7 @@ class StsProximityPair(BaseModel):
     risk_region: bool
 
 
-class StsProximityResponse(BaseModel):
+class StsProximityResponse(ApiModel):
     as_of: str
     max_dist_m: float
     max_sog: float
@@ -936,7 +953,7 @@ class StsProximityResponse(BaseModel):
     pairs: list[StsProximityPair]
 
 
-class RegionMomentumRow(BaseModel):
+class RegionMomentumRow(ApiModel):
     region: str
     current_total: int
     prev_total: int
@@ -946,54 +963,54 @@ class RegionMomentumRow(BaseModel):
     laden_ratio_pct: float
 
 
-class RegionMomentumResponse(BaseModel):
+class RegionMomentumResponse(ApiModel):
     as_of: str
     hours_back: int
     ocean_only: bool = True
     rows: list[RegionMomentumRow]
 
 
-class EventRatePoint(BaseModel):
+class EventRatePoint(ApiModel):
     hour: str
     reroute_count: int
     sts_count: int
     total_count: int
 
 
-class EventRateTimelineResponse(BaseModel):
+class EventRateTimelineResponse(ApiModel):
     as_of: str
     hours: int
     points: list[EventRatePoint]
 
 
-class TransitRatePoint(BaseModel):
+class TransitRatePoint(ApiModel):
     hour: str
     chokepoint: str
     count: int
     laden_count: int
 
 
-class TransitRateTimelineResponse(BaseModel):
+class TransitRateTimelineResponse(ApiModel):
     as_of: str
     hours: int
     chokepoints: list[str]
     points: list[TransitRatePoint]
 
 
-class AnchorageOccupancyPoint(BaseModel):
+class AnchorageOccupancyPoint(ApiModel):
     hour: str
     zone: str
     vessel_count: int
 
 
-class AnchorageOccupancyResponse(BaseModel):
+class AnchorageOccupancyResponse(ApiModel):
     as_of: str
     hours: int
     zones: list[str]
     points: list[AnchorageOccupancyPoint]
 
 
-class StsOffenderRow(BaseModel):
+class StsOffenderRow(ApiModel):
     mmsi: int
     name: str | None
     imo: int | None
@@ -1010,14 +1027,14 @@ class StsOffenderRow(BaseModel):
     ofac: bool
 
 
-class StsOffendersResponse(BaseModel):
+class StsOffendersResponse(ApiModel):
     as_of: str
     days: int
     total_vessels: int
     rows: list[StsOffenderRow]
 
 
-class FleetHistorySegmentRow(BaseModel):
+class FleetHistorySegmentRow(ApiModel):
     kind: str
     segment: str
     count: int
@@ -1027,7 +1044,7 @@ class FleetHistorySegmentRow(BaseModel):
     avg_sog: float | None
 
 
-class FleetHistoryResponse(BaseModel):
+class FleetHistoryResponse(ApiModel):
     queried_ts: str
     actual_ts: str
     region: str | None
@@ -1035,7 +1052,7 @@ class FleetHistoryResponse(BaseModel):
     segments: list[FleetHistorySegmentRow]
 
 
-class DestinationChangeRow(BaseModel):
+class DestinationChangeRow(ApiModel):
     mmsi: int
     name: str | None
     kind: str | None
@@ -1049,14 +1066,14 @@ class DestinationChangeRow(BaseModel):
     hours_ago: float
 
 
-class DestinationChangesResponse(BaseModel):
+class DestinationChangesResponse(ApiModel):
     as_of: str
     hours: int
     total_changes: int
     rows: list[DestinationChangeRow]
 
 
-class OwnerIntelRow(BaseModel):
+class OwnerIntelRow(ApiModel):
     owner: str
     vessel_count: int
     risk_weighted: int
@@ -1069,13 +1086,13 @@ class OwnerIntelRow(BaseModel):
     top_segment: str | None
 
 
-class OwnerIntelResponse(BaseModel):
+class OwnerIntelResponse(ApiModel):
     as_of: str
     total_owners: int
     rows: list[OwnerIntelRow]
 
 
-class ChokepointAnomalyRow(BaseModel):
+class ChokepointAnomalyRow(ApiModel):
     chokepoint: str
     recent_count: int
     baseline_avg: float | None
@@ -1087,14 +1104,14 @@ class ChokepointAnomalyRow(BaseModel):
     baseline_hours: int
 
 
-class ChokepointAnomalyResponse(BaseModel):
+class ChokepointAnomalyResponse(ApiModel):
     as_of: str
     window_hours: int
     baseline_hours: int
     rows: list[ChokepointAnomalyRow]
 
 
-class CargoStateChangeRow(BaseModel):
+class CargoStateChangeRow(ApiModel):
     mmsi: int
     name: str | None
     imo: int | None
@@ -1114,14 +1131,14 @@ class CargoStateChangeRow(BaseModel):
     registry_risk: int | None
 
 
-class CargoStateChangesResponse(BaseModel):
+class CargoStateChangesResponse(ApiModel):
     as_of: str
     days: int
     total_events: int
     rows: list[CargoStateChangeRow]
 
 
-class SpeedAnomalyRow(BaseModel):
+class SpeedAnomalyRow(ApiModel):
     mmsi: int
     imo: int | None
     name: str | None
@@ -1139,7 +1156,7 @@ class SpeedAnomalyRow(BaseModel):
     registry_risk: int | None
 
 
-class SpeedAnomalyResponse(BaseModel):
+class SpeedAnomalyResponse(ApiModel):
     as_of: str
     total_vessels_checked: int
     anomaly_count: int
@@ -1147,7 +1164,7 @@ class SpeedAnomalyResponse(BaseModel):
 
 
 # Phase 47: 48h Port Arrival Forecast
-class ArrivalVessel(BaseModel):
+class ArrivalVessel(ApiModel):
     mmsi: int
     name: str | None
     segment: str | None
@@ -1160,21 +1177,21 @@ class ArrivalVessel(BaseModel):
     registry_risk: int | None
 
 
-class PortArrivalForecast(BaseModel):
+class PortArrivalForecast(ApiModel):
     port: str
     arrivals_24h: int
     arrivals_48h: int
     vessels: list[ArrivalVessel]
 
 
-class PortArrivalResponse(BaseModel):
+class PortArrivalResponse(ApiModel):
     as_of: str
     total_inbound: int
     ports: list[PortArrivalForecast]
 
 
 # Phase 48: Crude Oil on Water
-class CrudeSegmentRow(BaseModel):
+class CrudeSegmentRow(ApiModel):
     segment: str
     laden_count: int
     ballast_count: int
@@ -1182,14 +1199,14 @@ class CrudeSegmentRow(BaseModel):
     estimated_mb: float  # million barrels, laden vessels only
 
 
-class InboundRegionRow(BaseModel):
+class InboundRegionRow(ApiModel):
     region: str
     vessel_count: int
     estimated_mb: float
     top_segments: list[str]
 
 
-class CrudeOnWaterResponse(BaseModel):
+class CrudeOnWaterResponse(ApiModel):
     as_of: str
     total_laden_tankers: int
     total_ballast_tankers: int
@@ -1199,7 +1216,7 @@ class CrudeOnWaterResponse(BaseModel):
 
 
 # Phase 49: Chokepoint Live Status
-class ChokepointStatusRow(BaseModel):
+class ChokepointStatusRow(ApiModel):
     chokepoint: str
     live_total: int
     live_transiting: int  # SOG > 4 kn
@@ -1210,13 +1227,13 @@ class ChokepointStatusRow(BaseModel):
     pct_fwd_direction: float | None  # northbound or eastbound %
 
 
-class ChokepointStatusResponse(BaseModel):
+class ChokepointStatusResponse(ApiModel):
     as_of: str
     rows: list[ChokepointStatusRow]
 
 
 # Phase 51: Fleet trend time-series
-class FleetTrendDay(BaseModel):
+class FleetTrendDay(ApiModel):
     date: str  # YYYY-MM-DD
     laden: int
     ballast: int
@@ -1224,7 +1241,7 @@ class FleetTrendDay(BaseModel):
     total: int
 
 
-class FleetTrendResponse(BaseModel):
+class FleetTrendResponse(ApiModel):
     as_of: str
     days: int
     region: str | None
@@ -1232,7 +1249,7 @@ class FleetTrendResponse(BaseModel):
 
 
 # Phase 52: Shadow fleet monitor
-class ShadowFleetRow(BaseModel):
+class ShadowFleetRow(ApiModel):
     mmsi: int
     imo: int | None
     name: str | None
@@ -1248,7 +1265,7 @@ class ShadowFleetRow(BaseModel):
     last_event_ts: str | None
 
 
-class ShadowFleetResponse(BaseModel):
+class ShadowFleetResponse(ApiModel):
     as_of: str
     days: int
     total: int
@@ -1256,7 +1273,7 @@ class ShadowFleetResponse(BaseModel):
 
 
 # Phase 54: Pipeline disruption map layer
-class PipelineSegment(BaseModel):
+class PipelineSegment(ApiModel):
     id: str
     name: str
     commodity: str
@@ -1283,7 +1300,7 @@ class PipelineSegment(BaseModel):
     route_coords: list[list[list[float]]] | None = None
 
 
-class PipelinesResponse(BaseModel):
+class PipelinesResponse(ApiModel):
     as_of: str
     disrupted_only: bool
     total_offline: int
@@ -1293,7 +1310,7 @@ class PipelinesResponse(BaseModel):
     pipelines: list[PipelineSegment]
 
 
-class OwnerFleetStatusRow(BaseModel):
+class OwnerFleetStatusRow(ApiModel):
     owner: str
     live_count: int  # vessels currently in live feed (joined via IMO)
     laden: int
@@ -1305,7 +1322,7 @@ class OwnerFleetStatusRow(BaseModel):
     regions: list[str]
 
 
-class OwnerFleetStatusResponse(BaseModel):
+class OwnerFleetStatusResponse(ApiModel):
     as_of: str
     kind: str | None
     total_owners: int
@@ -1313,7 +1330,7 @@ class OwnerFleetStatusResponse(BaseModel):
 
 
 # Phase 54: European Supply Intelligence
-class EuropeanInboundVessel(BaseModel):
+class EuropeanInboundVessel(ApiModel):
     mmsi: int
     name: str | None
     segment: str | None
@@ -1337,7 +1354,7 @@ class EuropeanInboundVessel(BaseModel):
     eta_method: str | None = None  # 'ml' | 'physics' | 'naive'
 
 
-class EuropeanInboundResponse(BaseModel):
+class EuropeanInboundResponse(ApiModel):
     as_of: str
     horizon_h: int
     total_vessels: int
@@ -1350,7 +1367,7 @@ class EuropeanInboundResponse(BaseModel):
 
 
 # Phase 55: LNG Intelligence
-class LngVessel(BaseModel):
+class LngVessel(ApiModel):
     mmsi: int
     imo: int
     name: str | None
@@ -1377,7 +1394,7 @@ class LngVessel(BaseModel):
     eta_method: str | None = None
 
 
-class LngLoadingVessel(BaseModel):
+class LngLoadingVessel(ApiModel):
     mmsi: int
     imo: int
     name: str | None
@@ -1390,7 +1407,7 @@ class LngLoadingVessel(BaseModel):
     eu_terminal_eta_days: float | None  # ETA to nearest EU terminal after loading (~14-18d)
 
 
-class LngInboundResponse(BaseModel):
+class LngInboundResponse(ApiModel):
     as_of: str
     total_lng_visible: int  # all LNG tankers in live AIS
     inbound_to_europe: int  # vessels with EU terminal ETA inside horizon
@@ -1403,7 +1420,7 @@ class LngInboundResponse(BaseModel):
 
 
 # True ETA Phase E: serving the physics ETA + calibrated interval
-class EtaPrediction(BaseModel):
+class EtaPrediction(ApiModel):
     """A true-ETA estimate to one resolved target (chokepoint or port)."""
 
     target_id: str
@@ -1425,14 +1442,14 @@ class EtaPrediction(BaseModel):
     laden: bool | None
 
 
-class EtaResponse(BaseModel):
+class EtaResponse(ApiModel):
     mmsi: int
     as_of: str
     n: int  # number of resolvable targets scored
     predictions: list[EtaPrediction]
 
 
-class EtaAccuracyRow(BaseModel):
+class EtaAccuracyRow(ApiModel):
     """One backtest metric cell: a model's error in a lead bucket / target type."""
 
     model: str  # 'naive' | 'naive+route' | 'physics_v1'
@@ -1446,7 +1463,7 @@ class EtaAccuracyRow(BaseModel):
     interval_coverage: float | None
 
 
-class EtaDriftAlert(BaseModel):
+class EtaDriftAlert(ApiModel):
     """A persisted champion-accuracy degradation flag (True ETA Phase G)."""
 
     run_ts: str  # ISO timestamp of the run that tripped it
@@ -1458,7 +1475,7 @@ class EtaDriftAlert(BaseModel):
     detail: str  # human-readable message
 
 
-class EtaAccuracyResponse(BaseModel):
+class EtaAccuracyResponse(ApiModel):
     run_ts: str | None  # ISO timestamp of the latest scored run
     models: list[str]  # models present, baseline-first order
     lead_order: list[str]  # lead buckets in chronological order
@@ -1467,7 +1484,7 @@ class EtaAccuracyResponse(BaseModel):
     drift: list[EtaDriftAlert] = []  # active drift alerts from the latest run
 
 
-class EtaByTargetRow(BaseModel):
+class EtaByTargetRow(ApiModel):
     """Per-target accuracy row for one model."""
 
     target_id: str  # e.g. 'cp:suez', 'zone:rotterdam'
@@ -1483,12 +1500,12 @@ class EtaByTargetRow(BaseModel):
     naive_med_abs_err_h: float | None
 
 
-class EtaByTargetResponse(BaseModel):
+class EtaByTargetResponse(ApiModel):
     run_ts: str | None
     rows: list[EtaByTargetRow]  # physics_v1 rows, sorted best -> worst by med_abs_err_h
 
 
-class EtaTrendPoint(BaseModel):
+class EtaTrendPoint(ApiModel):
     """One run's overall aggregate accuracy for a model."""
 
     run_ts: str
@@ -1498,12 +1515,12 @@ class EtaTrendPoint(BaseModel):
     n: int  # sample count for the physics row (grows over time)
 
 
-class EtaTrendResponse(BaseModel):
+class EtaTrendResponse(ApiModel):
     points: list[EtaTrendPoint]  # chronological, one per distinct run
 
 
 # Destination predictor: candidate ports ranked by predicted probability
-class DestinationCandidate(BaseModel):
+class DestinationCandidate(ApiModel):
     """One ranked candidate destination for a vessel."""
 
     target_id: str
@@ -1517,7 +1534,7 @@ class DestinationCandidate(BaseModel):
     gc_dist_nm: float | None
 
 
-class DestinationResponse(BaseModel):
+class DestinationResponse(ApiModel):
     mmsi: int
     as_of: str
     n: int  # number of candidates scored
@@ -1525,7 +1542,7 @@ class DestinationResponse(BaseModel):
     candidates: list[DestinationCandidate]  # ranked most-likely-first
 
 
-class UpcomingVessel(BaseModel):
+class UpcomingVessel(ApiModel):
     """One vessel's predicted arrival at a specific target."""
 
     mmsi: int
@@ -1544,7 +1561,7 @@ class UpcomingVessel(BaseModel):
     lon: float | None
 
 
-class UpcomingArrivalsResponse(BaseModel):
+class UpcomingArrivalsResponse(ApiModel):
     """Predicted inbound vessels at each target within a look-ahead window."""
 
     as_of: str
@@ -1554,7 +1571,7 @@ class UpcomingArrivalsResponse(BaseModel):
     rows: list[UpcomingVessel]
 
 
-class ArrivalTarget(BaseModel):
+class ArrivalTarget(ApiModel):
     """Ground-truth arrival activity at one resolved target over the window."""
 
     target_id: str  # e.g. 'cp:suez', 'zone:rotterdam'
@@ -1568,7 +1585,7 @@ class ArrivalTarget(BaseModel):
     last_arrival_ts: str | None  # ISO timestamp of the most recent arrival
 
 
-class ArrivalsResponse(BaseModel):
+class ArrivalsResponse(ApiModel):
     """Ranking of where vessels actually arrived (mined from AIS), not where they say."""
 
     as_of: str
@@ -1579,7 +1596,7 @@ class ArrivalsResponse(BaseModel):
     rows: list[ArrivalTarget]
 
 
-class MstVoyage(BaseModel):
+class MstVoyage(ApiModel):
     """One completed trip from MyShipTracking (immutable history)."""
 
     origin: str | None
@@ -1594,7 +1611,7 @@ class MstVoyage(BaseModel):
     stops: int | None
 
 
-class MstPortCall(BaseModel):
+class MstPortCall(ApiModel):
     """One port call from MyShipTracking."""
 
     port: str | None
@@ -1602,7 +1619,7 @@ class MstPortCall(BaseModel):
     departure: str | None
 
 
-class MstVesselData(BaseModel):
+class MstVesselData(ApiModel):
     """MyShipTracking enrichment for a vessel: particulars + latest live state + history.
 
     Served read-only from mst.duckdb (written by registry/crawl_mst.py). Complements
@@ -1637,7 +1654,7 @@ class MstVesselData(BaseModel):
 # ---- Freight cycle board ----
 
 
-class CycleSignal(BaseModel):
+class CycleSignal(ApiModel):
     """One monitored signal: where it stands, what would change the read, what would break it.
 
     `tier` carries the provenance and must be shown: 'live' is computed from ingested
@@ -1673,7 +1690,7 @@ class CycleSignal(BaseModel):
     spark: list[float] = []
 
 
-class CycleSignalsResponse(BaseModel):
+class CycleSignalsResponse(ApiModel):
     """Every registry signal, resolved. Gaps are included, not filtered out."""
 
     as_of: str
@@ -1682,7 +1699,7 @@ class CycleSignalsResponse(BaseModel):
     signals: list[CycleSignal]
 
 
-class CycleSubsector(BaseModel):
+class CycleSubsector(ApiModel):
     """One of the three clocks: stage, headline rate, orderbook, coverage caveat."""
 
     id: str
@@ -1694,17 +1711,17 @@ class CycleSubsector(BaseModel):
     orderbook: CycleSignal | None = None
 
 
-class CycleSubsectorsResponse(BaseModel):
+class CycleSubsectorsResponse(ApiModel):
     as_of: str
     subsectors: list[CycleSubsector]
 
 
-class CycleSeriesPoint(BaseModel):
+class CycleSeriesPoint(ApiModel):
     date: str
     value: float
 
 
-class CycleSeriesResponse(BaseModel):
+class CycleSeriesResponse(ApiModel):
     """One freight index history. Never spliced with another series server-side."""
 
     series: str

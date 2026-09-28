@@ -42,7 +42,7 @@ const MOU_COLORS: Record<string, string> = {
   Black: RISK_TEXT.critical,
 }
 
-function mouColor(v?: string) {
+function mouColor(v?: string | null) {
   return v ? (MOU_COLORS[v] ?? 'text-muted-foreground') : 'text-muted-foreground'
 }
 
@@ -489,7 +489,7 @@ export default function FleetPage() {
                     className="hover:text-primary"
                     onClick={(e) => {
                       e.stopPropagation()
-                      set({ flag: search.flag === row.flag ? undefined : row.flag })
+                      set({ flag: search.flag === row.flag ? undefined : (row.flag ?? undefined) })
                     }}
                   >
                     {row.flag ?? '—'}
@@ -505,7 +505,7 @@ export default function FleetPage() {
                     className="hover:text-primary truncate text-left"
                     onClick={(e) => {
                       e.stopPropagation()
-                      set({ owner: search.owner === row.owner ? undefined : row.owner })
+                      set({ owner: search.owner === row.owner ? undefined : (row.owner ?? undefined) })
                       setOwnerInput(search.owner === row.owner ? '' : (row.owner ?? ''))
                     }}
                   >
