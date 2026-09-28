@@ -128,3 +128,48 @@ def test_vessels_ghost_prefers_verified_row_among_valid_imos(tmp_path, monkeypat
     ghost = {v["mmsi"]: v for v in client.get("/api/vessels").json()}[_GHOST_MMSI]
 
     assert ghost["imo"] == 9374014
+
+
+def _first_stream_event(**filters) -> list[dict]:
+    """Parse one frame from the stream's event builder (TestClient cannot end an SSE loop)."""
+    import json
+
+    from app.routers.tracker import _stream_event
+
+    frame = _stream_event(**filters)
+    assert frame is not None and frame.startswith("data: ") and frame.endswith("\n\n")
+    return json.loads(frame[len("data: ") :])
+
+
+def test_stream_event_is_valid_json_in_the_polled_shape(tmp_path, monkeypatch):
+    """The live row has cog = NaN; json.dumps used to emit a bare NaN, which no browser
+    parses, so every event was dropped."""
+    client = _client(tmp_path, monkeypatch, [])
+    conn = duckdb.connect(str(tmp_path / "ais.duckdb"))
+    conn.execute("UPDATE live_positions SET cog = 'NaN'::DOUBLE WHERE mmsi = 636000001")
+    conn.close()
+
+    event = _first_stream_event()
+
+    polled = {v["mmsi"]: v for v in client.get("/api/vessels").json()}
+    by_mmsi = {v["mmsi"]: v for v in event}
+    live = by_mmsi[636000001]
+    assert live["cog"] is None
+    # Same fields as the poll, so a merge by MMSI loses nothing.
+    assert set(live) == set(polled[636000001])
+    assert live["flag_code"] == "LR"
+    # The ghost's last fix is 6 h old: outside the stream's 30-minute window.
+    assert _GHOST_MMSI not in by_mmsi
+
+
+def test_stream_applies_the_poll_filters(tmp_path, monkeypatch):
+    _client(tmp_path, monkeypatch, [])
+
+    assert [v["mmsi"] for v in _first_stream_event(flag="LR")] == [636000001]
+    assert _stream_event_or_none(flag="PA") is None
+
+
+def _stream_event_or_none(**filters):
+    from app.routers.tracker import _stream_event
+
+    return _stream_event(**filters)

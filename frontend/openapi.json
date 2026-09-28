@@ -14199,8 +14199,106 @@
     },
     "/api/stream": {
       "get": {
-        "description": "SSE endpoint: emits all live vessels every 15 seconds.\n\nClients connect once and receive updates without re-polling. Falls back to the\nnormal /api/vessels polling if EventSource is not supported or the connection drops.\nThe X-Accel-Buffering: no header disables nginx proxy buffering for this response.",
+        "description": "SSE: every 15 s, the vessels with a fix in the last 30 minutes.\n\nTakes the same filters as ``/api/vessels`` and sends the same ``Vessel`` objects, so\nthe client merges events into its polled list by MMSI without losing fields. Until\n2026-09-28 it sent raw ``live_positions`` rows (no flag / stale / origin) through\n``json.dumps``, which wrote float NaN as a bare ``NaN``: invalid JSON, so every\nevent failed to parse in the browser and was dropped. The polled list stays the\nbackstop; ``X-Accel-Buffering: no`` disables nginx buffering for this response.",
         "operationId": "stream_vessels_api_stream_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "segment",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Segment"
+            }
+          },
+          {
+            "in": "query",
+            "name": "region",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Region"
+            }
+          },
+          {
+            "in": "query",
+            "name": "flag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Flag"
+            }
+          },
+          {
+            "in": "query",
+            "name": "foc",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Foc"
+            }
+          },
+          {
+            "in": "query",
+            "name": "shadow",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Shadow"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -14209,6 +14307,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Stream Vessels"

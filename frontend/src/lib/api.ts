@@ -49,7 +49,8 @@ async function getJSON<T>(url: string): Promise<T> {
   return res.json() as Promise<T>
 }
 
-function vesselsUrl(f: VesselFilters): string {
+/** Query string for the vessel filters, shared by the poll and the SSE stream. */
+function vesselsQuery(f: VesselFilters): string {
   const q = new URLSearchParams()
   if (f.kind) q.set('kind', f.kind)
   if (f.segment) q.set('segment', f.segment)
@@ -58,7 +59,11 @@ function vesselsUrl(f: VesselFilters): string {
   if (f.foc) q.set('foc', 'true')
   if (f.shadow) q.set('shadow', 'true')
   const s = q.toString()
-  return `/api/vessels${s ? `?${s}` : ''}`
+  return s ? `?${s}` : ''
+}
+
+function vesselsUrl(f: VesselFilters): string {
+  return `/api/vessels${vesselsQuery(f)}`
 }
 
 const REFETCH_MS = 60_000
@@ -100,27 +105,21 @@ export function useVesselStream(filters: VesselFilters, enabled: boolean) {
   useEffect(() => {
     if (!enabled || typeof EventSource === 'undefined') return
 
-    const es = new EventSource('/api/stream')
+    // Same filters as the poll, applied server-side: events are full Vessel objects
+    // for exactly the vessels the polled list would contain.
+    const es = new EventSource(`/api/stream${vesselsQuery(filters)}`)
     esRef.current = es
 
     es.onmessage = (evt) => {
       try {
-        const raw: Vessel[] = JSON.parse(evt.data)
-        // Apply the same filters that useVessels would apply server-side
-        const filtered = raw.filter((v) => {
-          if (filters.kind && v.kind !== filters.kind) return false
-          if (filters.segment && v.segment !== filters.segment) return false
-          if (filters.region && v.region !== filters.region) return false
-          return true
-        })
-        // Merge into existing cache rather than replacing. The SSE endpoint uses a
-        // 30-minute window for payload efficiency; the REST poll uses 3 hours. If we
-        // replaced the full cache with the SSE batch, vessels seen 31-180 min ago
-        // would silently disappear from the map until the next 60s poll.
+        const updated: Vessel[] = JSON.parse(evt.data)
+        // Merge into the cached list rather than replacing it: the stream carries only
+        // vessels with a fix in the last 30 minutes, the poll the whole 24 h visible set,
+        // so replacing would drop older vessels from the map until the next 60 s poll.
         queryClient.setQueryData(['vessels', filters], (prev: Vessel[] | undefined) => {
-          if (!prev || prev.length === 0) return filtered
+          if (!prev || prev.length === 0) return updated
           const merged = new Map(prev.map((v) => [v.mmsi, v]))
-          for (const v of filtered) merged.set(v.mmsi, v)
+          for (const v of updated) merged.set(v.mmsi, v)
           return Array.from(merged.values())
         })
       } catch {
@@ -136,7 +135,16 @@ export function useVesselStream(filters: VesselFilters, enabled: boolean) {
       es.close()
       esRef.current = null
     }
-  }, [enabled, filters.kind, filters.segment, filters.region, queryClient])
+  }, [
+    enabled,
+    filters.kind,
+    filters.segment,
+    filters.region,
+    filters.flag,
+    filters.foc,
+    filters.shadow,
+    queryClient,
+  ])
 }
 
 export type TrackPoint = Schemas['TrackPoint']

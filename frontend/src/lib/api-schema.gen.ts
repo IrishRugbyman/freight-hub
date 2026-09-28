@@ -1789,11 +1789,14 @@ export interface paths {
         };
         /**
          * Stream Vessels
-         * @description SSE endpoint: emits all live vessels every 15 seconds.
+         * @description SSE: every 15 s, the vessels with a fix in the last 30 minutes.
          *
-         *     Clients connect once and receive updates without re-polling. Falls back to the
-         *     normal /api/vessels polling if EventSource is not supported or the connection drops.
-         *     The X-Accel-Buffering: no header disables nginx proxy buffering for this response.
+         *     Takes the same filters as ``/api/vessels`` and sends the same ``Vessel`` objects, so
+         *     the client merges events into its polled list by MMSI without losing fields. Until
+         *     2026-09-28 it sent raw ``live_positions`` rows (no flag / stale / origin) through
+         *     ``json.dumps``, which wrote float NaN as a bare ``NaN``: invalid JSON, so every
+         *     event failed to parse in the browser and was dropped. The polled list stays the
+         *     backstop; ``X-Accel-Buffering: no`` disables nginx buffering for this response.
          */
         get: operations["stream_vessels_api_stream_get"];
         put?: never;
@@ -7135,7 +7138,14 @@ export interface operations {
     };
     stream_vessels_api_stream_get: {
         parameters: {
-            query?: never;
+            query?: {
+                kind?: string | null;
+                segment?: string | null;
+                region?: string | null;
+                flag?: string | null;
+                foc?: boolean | null;
+                shadow?: boolean | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7149,6 +7159,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

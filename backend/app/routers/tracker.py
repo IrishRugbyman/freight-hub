@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-import json as _json
-from datetime import UTC, datetime
+import logging
+from datetime import UTC, datetime, timedelta
 
 import pandas as pd
 from ais.regions import REGIONS
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
+from pydantic import TypeAdapter
 
 from quant_lib.freight import flag_from_mmsi
 
@@ -24,6 +25,11 @@ from ..schemas import (
 )
 
 router = APIRouter()
+log = logging.getLogger(__name__)
+
+_STREAM_WINDOW = timedelta(minutes=30)
+_STREAM_INTERVAL_S = 15
+_VESSEL_LIST = TypeAdapter(list[Vessel])
 
 
 @router.get("/api/health")
@@ -44,28 +50,26 @@ def health() -> dict:
     }
 
 
-@router.get("/api/vessels", response_model=list[Vessel])
-def vessels(
+def _vessel_models(
     kind: str | None = None,
     segment: str | None = None,
     region: str | None = None,
     flag: str | None = None,
     foc: bool | None = None,
     shadow: bool | None = None,
-):
-    """Live + last-known vessel positions, filtered by kind / segment / region / flag.
+    updated_since: datetime | None = None,
+) -> list[Vessel]:
+    """The tracker's vessel list: one builder shared by ``/api/vessels`` and the SSE stream.
 
-    Returns vessels seen within VISIBLE_HOURS (default 24h). Vessels not seen within
-    STALE_HOURS (default 3h) are tagged stale=True and rendered as grey markers on the
-    map; they are excluded from all analytics endpoints which still use the 3h window.
-
-    `flag` matches either the ISO2 code or the country name. `foc` / `shadow` filter
-    to flags of convenience / high-shadow-activity flags (derived from the MMSI MID).
+    ``updated_since`` (naive UTC) keeps only vessels with a newer fix; the stream uses it
+    to send just what changed, in exactly the shape the poll returns.
     """
     now_dt = datetime.now(UTC).replace(tzinfo=None)
     stale_threshold_min = db.STALE_HOURS * 60
 
     df = live_visible()
+    if not df.empty and updated_since is not None:
+        df = df[pd.to_datetime(df["updated_ts"]) >= updated_since]
     if not df.empty:
         for col, val in (("kind", kind), ("segment", segment), ("region", region)):
             if val:
@@ -132,6 +136,27 @@ def vessels(
     ]
 
 
+@router.get("/api/vessels", response_model=list[Vessel])
+def vessels(
+    kind: str | None = None,
+    segment: str | None = None,
+    region: str | None = None,
+    flag: str | None = None,
+    foc: bool | None = None,
+    shadow: bool | None = None,
+):
+    """Live + last-known vessel positions, filtered by kind / segment / region / flag.
+
+    Returns vessels seen within VISIBLE_HOURS (default 24h). Vessels not seen within
+    STALE_HOURS (default 3h) are tagged stale=True and rendered as grey markers on the
+    map; they are excluded from all analytics endpoints which still use the 3h window.
+
+    `flag` matches either the ISO2 code or the country name. `foc` / `shadow` filter
+    to flags of convenience / high-shadow-activity flags (derived from the MMSI MID).
+    """
+    return _vessel_models(kind, segment, region, flag, foc, shadow)
+
+
 @router.get("/api/chokepoints", response_model=list[ChokepointCount])
 def chokepoints():
     """Per-region live vessel counts (with bbox + per-segment breakdown)."""
@@ -181,38 +206,58 @@ def meta():
     )
 
 
-@router.get("/api/stream")
-async def stream_vessels(request: Request):
-    """SSE endpoint: emits all live vessels every 15 seconds.
+def _stream_event(
+    kind: str | None = None,
+    segment: str | None = None,
+    region: str | None = None,
+    flag: str | None = None,
+    foc: bool | None = None,
+    shadow: bool | None = None,
+) -> str | None:
+    """One SSE ``data:`` frame: vessels with a fix inside the stream window, or None.
 
-    Clients connect once and receive updates without re-polling. Falls back to the
-    normal /api/vessels polling if EventSource is not supported or the connection drops.
-    The X-Accel-Buffering: no header disables nginx proxy buffering for this response.
+    Pydantic writes non-finite floats as null, so the payload is always valid JSON.
+    """
+    since = datetime.now(UTC).replace(tzinfo=None) - _STREAM_WINDOW
+    models = _vessel_models(kind, segment, region, flag, foc, shadow, since)
+    if not models:
+        return None
+    return f"data: {_VESSEL_LIST.dump_json(models).decode()}\n\n"
+
+
+@router.get("/api/stream")
+async def stream_vessels(
+    request: Request,
+    kind: str | None = None,
+    segment: str | None = None,
+    region: str | None = None,
+    flag: str | None = None,
+    foc: bool | None = None,
+    shadow: bool | None = None,
+):
+    """SSE: every 15 s, the vessels with a fix in the last 30 minutes.
+
+    Takes the same filters as ``/api/vessels`` and sends the same ``Vessel`` objects, so
+    the client merges events into its polled list by MMSI without losing fields. Until
+    2026-09-28 it sent raw ``live_positions`` rows (no flag / stale / origin) through
+    ``json.dumps``, which wrote float NaN as a bare ``NaN``: invalid JSON, so every
+    event failed to parse in the browser and was dropped. The polled list stays the
+    backstop; ``X-Accel-Buffering: no`` disables nginx buffering for this response.
     """
 
     async def generate():
         while True:
             if await request.is_disconnected():
                 break
-
             try:
-                df = await asyncio.to_thread(
-                    db.query,
-                    "SELECT mmsi, name, lat, lon, sog, cog, heading, destination, "
-                    "       ship_type, length_m, kind, segment, region, updated_ts, "
-                    "       imo, draught, nav_status, eta "
-                    "FROM live_positions "
-                    "WHERE updated_ts >= now() - INTERVAL 30 MINUTE",
+                event = await asyncio.to_thread(
+                    _stream_event, kind, segment, region, flag, foc, shadow
                 )
-                if not df.empty:
-                    # Coerce timestamps to ISO strings for JSON serialisation
-                    df["updated_ts"] = df["updated_ts"].astype(str)
-                    records = df.where(pd.notna(df), None).to_dict("records")
-                    yield f"data: {_json.dumps(records)}\n\n"
+                if event:
+                    yield event
             except Exception:
-                pass
-
-            await asyncio.sleep(15)
+                log.exception("vessel stream tick failed")
+            await asyncio.sleep(_STREAM_INTERVAL_S)
 
     return StreamingResponse(
         generate(),
