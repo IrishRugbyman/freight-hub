@@ -182,7 +182,7 @@ What was built, tried and decided is in `docs/CHANGELOG.md` (entries 2026-09-09 
 build order, the API surface, and the things deliberately not built.
 
 Both challengers now re-derive themselves on a schedule rather than drifting:
-`freight-eta-retrain.timer` (Sun 02:20) and `freight-dest-retrain.timer` (Sat 02:20).
+`freight-eta-retrain.timer` (Sun 01:10, moved from 02:20 when the second target took the run to ~55 min) and `freight-dest-retrain.timer` (Sat 02:20).
 Each is gated and no-promote-safe, so neither can make serving worse unattended.
 
 ---

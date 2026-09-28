@@ -74,13 +74,22 @@ Use `fresh_cutoff()` / `visible_cutoff()` from `app/common.py` rather than re-de
 
 ## Batch jobs (systemd, unit files live in this directory)
 
-| Unit | Cadence | Writes |
-|---|---|---|
-| `freight-api.service` | always on, `:8003` | nothing |
-| `freight-analytics.timer` | hourly, `--skip-derived` | `data/freight_analytics.duckdb` |
-| `freight-analytics-derived.timer` | 03:20 daily, full pass | `data/freight_analytics.duckdb` |
-| `freight-registry.timer` | 04:30 daily | `data/vessel_registry.duckdb` + PG `vessels` |
-| `freight-mst.timer` | 05:00 daily | `data/mst.duckdb` |
+| Unit | Cadence | Writes | MemoryMax |
+|---|---|---|---|
+| `freight-api.service` | always on, `:8003`, `Restart=always` | nothing | - |
+| `freight-analytics.timer` | hourly, `--skip-derived` | `data/freight_analytics.duckdb` | 3G |
+| `freight-analytics-derived.timer` | 03:20 daily, full pass | `data/freight_analytics.duckdb` | 5G |
+| `freight-registry.timer` | 04:30 daily | `data/vessel_registry.duckdb` + PG `vessels` | - |
+| `freight-mst.timer` | 05:00 daily | `data/mst.duckdb` | - |
+| `freight-eta-retrain.timer` | Sun 01:10, gated | `analytics/models/eta_*` | 4G |
+| `freight-dest-retrain.timer` | Sat 02:20, gated | `analytics/models/dest_*` | 6G |
+
+The four analytics/retrain jobs serialise on `flock data/.analytics.lock` (1 h wait). Every
+batch unit alerts on failure through `OnFailure=alert-email@%N.service`: in the unit file for
+`analytics-derived` and both retrains, via an `onfailure.conf` drop-in in
+`/etc/systemd/system/<unit>.service.d/` for the other three (see `~/ops/README.md`). The
+installed unit files are copies, except `freight-mst`, which is symlinked here: after editing
+one, `sudo cp` it into `/etc/systemd/system/` and `daemon-reload`.
 
 **The analytics job is split hourly/daily and the split is load-bearing.** The hourly pass
 runs the incremental detectors only (6m31s, 962 MB); the daily one adds the full-history
@@ -89,10 +98,11 @@ on an hourly timer it ran back to back and the box was never idle. Do not fold t
 together, and do not move the derived stages onto a shorter cadence without re-measuring:
 each run overwrites the last, so only their final state matters.
 
-**Check `systemctl list-timers 'freight-analytics*'`, never the service status.**
-`systemctl stop freight-analytics` also stops its timer, because the timer `Requires=` the
-service. Three separate sessions have left the timer inactive after hand-running the job
-and not noticed, because the service itself looked fine.
+**Check `systemctl list-timers 'freight-*'`, never only the service status.** Until
+2026-08-16 each timer carried `Requires=` on its service, so stopping a hand-run job also stopped
+its timer, and three sessions left the timer inactive without noticing. `~/ops/fix-timer-requires.sh`
+removed those lines (verified 2026-09-28: no freight timer requires its service); keep them out,
+since `Unit=` already defaults to the same-named service.
 
 `analytics/build.py` is incremental off a `meta_watermark` row with a 6 h overlap, idempotent
 (`INSERT OR REPLACE`), and writes to `freight_analytics.new.duckdb` before an atomic rename, so
