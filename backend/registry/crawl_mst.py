@@ -92,13 +92,16 @@ def priority_order(
 
     never = [m for m in live_mmsis if m not in seen]
     stale = [
-        m for m in live_mmsis
+        m
+        for m in live_mmsis
         if m in seen and (now - seen[m]).total_seconds() > _REFRESH_DAYS * 86400
     ]
     return (never + stale)[:limit]
 
 
-def _persist(conn: duckdb.DuckDBPyConnection, snap: VesselSnapshot, now: datetime) -> tuple[int, int]:
+def _persist(
+    conn: duckdb.DuckDBPyConnection, snap: VesselSnapshot, now: datetime
+) -> tuple[int, int]:
     """Append new immutable voyages/port-calls and upsert state. Returns (new_voyages, new_calls)."""
     mmsi = snap.mmsi
     nv = nc = 0
@@ -111,9 +114,21 @@ def _persist(conn: duckdb.DuckDBPyConnection, snap: VesselSnapshot, now: datetim
             continue
         conn.execute(
             "INSERT OR IGNORE INTO mst_voyages VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            [mmsi, v.key(), v.origin, v.departure, v.destination, v.arrival,
-             v.distance_nm, v.duration, v.draught_m, v.avg_speed_kn, v.max_speed_kn,
-             v.stops, now],
+            [
+                mmsi,
+                v.key(),
+                v.origin,
+                v.departure,
+                v.destination,
+                v.arrival,
+                v.distance_nm,
+                v.duration,
+                v.draught_m,
+                v.avg_speed_kn,
+                v.max_speed_kn,
+                v.stops,
+                now,
+            ],
         )
         nv += 1
 
@@ -133,11 +148,31 @@ def _persist(conn: duckdb.DuckDBPyConnection, snap: VesselSnapshot, now: datetim
     conn.execute(
         "INSERT OR REPLACE INTO mst_vessel_state VALUES "
         "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        [mmsi, snap.imo, snap.name, snap.flag, snap.call_sign, snap.ship_type,
-         snap.length_m, snap.beam_m, snap.gross_tonnage, snap.dwt, snap.year_built,
-         snap.lat, snap.lon, snap.status, snap.course, snap.area, snap.station,
-         snap.draught_m, snap.destination, snap.eta, snap.position_received_utc,
-         now, True],
+        [
+            mmsi,
+            snap.imo,
+            snap.name,
+            snap.flag,
+            snap.call_sign,
+            snap.ship_type,
+            snap.length_m,
+            snap.beam_m,
+            snap.gross_tonnage,
+            snap.dwt,
+            snap.year_built,
+            snap.lat,
+            snap.lon,
+            snap.status,
+            snap.course,
+            snap.area,
+            snap.station,
+            snap.draught_m,
+            snap.destination,
+            snap.eta,
+            snap.position_received_utc,
+            now,
+            True,
+        ],
     )
     return nv, nc
 
@@ -148,6 +183,12 @@ def run(
     limit: int = _MAX_PER_RUN,
     dry_run: bool = False,
 ) -> None:
+    """One crawl pass: scrape MyShipTracking for up to ``limit`` live-fleet MMSIs.
+
+    Only ship MMSIs (MID 2-7) are considered, ordered by ``priority_order``. Immutable
+    voyages are written once; live state is overwritten. Aborts the run on a block page.
+    ``dry_run`` logs the plan without fetching.
+    """
     ais_path = ais_path or _DEFAULT_AIS_DB
     mst_path = mst_path or _MST_DB
 
@@ -188,9 +229,7 @@ def run(
         try:
             snap = get_vessel(mmsi, use_cache=False)
         except MyShipTrackingBlocked:
-            logger.error(
-                "myshiptracking BLOCKED - aborting after %d ok / %d skipped", n_ok, n_skip
-            )
+            logger.error("myshiptracking BLOCKED - aborting after %d ok / %d skipped", n_ok, n_skip)
             blocked = True
             break
         except Exception as exc:
@@ -213,14 +252,26 @@ def run(
     status = "ABORTED (blocked)" if blocked else "complete"
     logger.info(
         "MST crawl %s: %d ok, %d skipped, +%d voyages, +%d port calls (of %d candidates)",
-        status, n_ok, n_skip, tot_v, tot_c, len(candidates),
+        status,
+        n_ok,
+        n_skip,
+        tot_v,
+        tot_c,
+        len(candidates),
     )
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    ap = argparse.ArgumentParser(description="Scrape myshiptracking voyage history for the live fleet")
-    ap.add_argument("--limit", type=int, default=_MAX_PER_RUN, help=f"Max vessels per run (default {_MAX_PER_RUN})")
+    ap = argparse.ArgumentParser(
+        description="Scrape myshiptracking voyage history for the live fleet"
+    )
+    ap.add_argument(
+        "--limit",
+        type=int,
+        default=_MAX_PER_RUN,
+        help=f"Max vessels per run (default {_MAX_PER_RUN})",
+    )
     ap.add_argument("--dry-run", action="store_true", help="Print candidates without scraping")
     args = ap.parse_args()
     run(limit=args.limit, dry_run=args.dry_run)

@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta
 
 import pandas as pd
-import pytest
-
-import json
-
 from analytics.detect import (
     ais_gap_events,
     anchored_episodes,
     current_anchored,
+    dark_voyage_events,
+    gps_spoof_events,
     laden_status,
     loitering_events,
     sts_candidates,
@@ -73,7 +72,9 @@ def test_laden_unknown_segment():
 _BASE_TS = datetime(2026, 6, 10, 0, 0, 0)
 
 
-def _make_snap(mmsi, minutes_offset, lat, lon, region, sog=10.0, segment="VLCC", kind="tanker", draught=20.0):
+def _make_snap(
+    mmsi, minutes_offset, lat, lon, region, sog=10.0, segment="VLCC", kind="tanker", draught=20.0
+):
     return {
         "mmsi": mmsi,
         "snapshot_ts": _BASE_TS + timedelta(minutes=minutes_offset),
@@ -204,20 +205,19 @@ def _anc_snap(mmsi, minutes, lat, lon, nav_status=1, sog=0.1, zone_inside=True):
             "segment": "Capesize",
             "destination": "SGSIN",
         }
-    else:
-        return {
-            "mmsi": mmsi,
-            "snapshot_ts": _BASE_TS + timedelta(minutes=minutes),
-            "lat": lat,
-            "lon": lon,
-            "sog": sog,
-            "nav_status": nav_status,
-            "draught": 12.0,
-            "region": "singapore_malacca",
-            "kind": "bulk",
-            "segment": "Capesize",
-            "destination": "SGSIN",
-        }
+    return {
+        "mmsi": mmsi,
+        "snapshot_ts": _BASE_TS + timedelta(minutes=minutes),
+        "lat": lat,
+        "lon": lon,
+        "sog": sog,
+        "nav_status": nav_status,
+        "draught": 12.0,
+        "region": "singapore_malacca",
+        "kind": "bulk",
+        "segment": "Capesize",
+        "destination": "SGSIN",
+    }
 
 
 def test_anchored_empty_df():
@@ -294,13 +294,26 @@ def test_anchored_by_low_sog():
 _GAP_MAX_TS = _NOW  # treat now as max_ts for gap tests
 
 
-def _gap_df(mmsi: int, fix_times: list, lat: float = 25.2, lon: float = 56.5,
-            region: str = "hormuz", sog: float = 9.0) -> pd.DataFrame:
+def _gap_df(
+    mmsi: int,
+    fix_times: list,
+    lat: float = 25.2,
+    lon: float = 56.5,
+    region: str = "hormuz",
+    sog: float = 9.0,
+) -> pd.DataFrame:
     rows = [
         {
-            "mmsi": mmsi, "snapshot_ts": t, "lat": lat, "lon": lon,
-            "sog": sog, "nav_status": 0, "draught": 12.0,
-            "kind": "tanker", "segment": "Aframax", "region": region,
+            "mmsi": mmsi,
+            "snapshot_ts": t,
+            "lat": lat,
+            "lon": lon,
+            "sog": sog,
+            "nav_status": 0,
+            "draught": 12.0,
+            "kind": "tanker",
+            "segment": "Aframax",
+            "region": region,
             "destination": None,
         }
         for t in fix_times
@@ -365,13 +378,27 @@ def test_gap_not_fired_at_region_edge():
 # Phase 3: loitering_events
 # ---------------------------------------------------------------------------
 
-def _loiter_df(mmsi: int, fix_times: list, lat: float = 25.2, lon: float = 56.5,
-               region: str = "hormuz", sog: float = 0.3) -> pd.DataFrame:
+
+def _loiter_df(
+    mmsi: int,
+    fix_times: list,
+    lat: float = 25.2,
+    lon: float = 56.5,
+    region: str = "hormuz",
+    sog: float = 0.3,
+) -> pd.DataFrame:
     rows = [
         {
-            "mmsi": mmsi, "snapshot_ts": t, "lat": lat, "lon": lon,
-            "sog": sog, "nav_status": 0, "draught": 12.0,
-            "kind": "tanker", "segment": "Aframax", "region": region,
+            "mmsi": mmsi,
+            "snapshot_ts": t,
+            "lat": lat,
+            "lon": lon,
+            "sog": sog,
+            "nav_status": 0,
+            "draught": 12.0,
+            "kind": "tanker",
+            "segment": "Aframax",
+            "region": region,
             "destination": None,
         }
         for t in fix_times
@@ -385,7 +412,7 @@ def test_loiter_detected():
     """14h of slow movement, deep inside hormuz, outside anchorages."""
     # hormuz interior: lat [24.5+0.2, 27.5-0.2] x lon [54+0.2, 58.5-0.2]
     # Use lat=26, lon=56 (well inside)
-    fix_times = [_NOW - timedelta(hours=h) for h in reversed(range(0, 14))]
+    fix_times = [_NOW - timedelta(hours=h) for h in reversed(range(14))]
     df = _loiter_df(9010, fix_times, lat=26.0, lon=56.0)
     result = loitering_events(df)
     assert len(result) >= 1
@@ -396,7 +423,7 @@ def test_loiter_detected():
 
 def test_loiter_not_fired_short_episode():
     """Episode only 6h: below the 12h minimum."""
-    fix_times = [_NOW - timedelta(hours=h) for h in reversed(range(0, 6))]
+    fix_times = [_NOW - timedelta(hours=h) for h in reversed(range(6))]
     df = _loiter_df(9011, fix_times, lat=26.0, lon=56.0)
     result = loitering_events(df)
     assert len(result) == 0
@@ -405,7 +432,7 @@ def test_loiter_not_fired_short_episode():
 def test_loiter_not_fired_in_anchorage():
     """Slow vessel inside fujairah anchorage: should NOT loiter-detect."""
     # fujairah: lat [24.9, 25.4], lon [56.3, 56.85]
-    fix_times = [_NOW - timedelta(hours=h) for h in reversed(range(0, 14))]
+    fix_times = [_NOW - timedelta(hours=h) for h in reversed(range(14))]
     df = _loiter_df(9012, fix_times, lat=25.1, lon=56.5, region="hormuz")
     result = loitering_events(df)
     assert len(result) == 0
@@ -413,7 +440,7 @@ def test_loiter_not_fired_in_anchorage():
 
 def test_loiter_not_fired_fast_vessel():
     """Mean SOG >= 1 kn: not a loiter."""
-    fix_times = [_NOW - timedelta(hours=h) for h in reversed(range(0, 14))]
+    fix_times = [_NOW - timedelta(hours=h) for h in reversed(range(14))]
     df = _loiter_df(9013, fix_times, lat=26.0, lon=56.0, sog=2.5)
     result = loitering_events(df)
     assert len(result) == 0
@@ -423,17 +450,26 @@ def test_loiter_not_fired_fast_vessel():
 # Phase 3: sts_candidates
 # ---------------------------------------------------------------------------
 
+
 def _sts_df(pairs: list[dict]) -> pd.DataFrame:
     """pairs: list of dicts with keys mmsi, snapshot_ts, lat, lon, kind, segment."""
     rows = []
     for p in pairs:
-        rows.append({
-            "mmsi": p["mmsi"], "snapshot_ts": p["snapshot_ts"],
-            "lat": p.get("lat", 26.0), "lon": p.get("lon", 56.0),
-            "sog": p.get("sog", 0.1), "nav_status": 1, "draught": 12.0,
-            "kind": p.get("kind", "tanker"), "segment": p.get("segment", "Aframax"),
-            "region": p.get("region", "hormuz"), "destination": None,
-        })
+        rows.append(
+            {
+                "mmsi": p["mmsi"],
+                "snapshot_ts": p["snapshot_ts"],
+                "lat": p.get("lat", 26.0),
+                "lon": p.get("lon", 56.0),
+                "sog": p.get("sog", 0.1),
+                "nav_status": 1,
+                "draught": 12.0,
+                "kind": p.get("kind", "tanker"),
+                "segment": p.get("segment", "Aframax"),
+                "region": p.get("region", "hormuz"),
+                "destination": None,
+            }
+        )
     df = pd.DataFrame(rows)
     df["snapshot_ts"] = pd.to_datetime(df["snapshot_ts"])
     return df
@@ -441,7 +477,7 @@ def _sts_df(pairs: list[dict]) -> pd.DataFrame:
 
 def test_sts_detected():
     """Two tankers within 50m for 3h, outside anchorages."""
-    fix_times = [_NOW - timedelta(hours=h) for h in reversed(range(0, 3))]
+    fix_times = [_NOW - timedelta(hours=h) for h in reversed(range(3))]
     rows = []
     for t in fix_times:
         rows.append({"mmsi": 9020, "snapshot_ts": t, "lat": 26.0, "lon": 56.0})
@@ -456,7 +492,7 @@ def test_sts_detected():
 
 def test_sts_not_fired_far_apart():
     """Two tankers 2km apart: below 500m threshold."""
-    fix_times = [_NOW - timedelta(hours=h) for h in reversed(range(0, 3))]
+    fix_times = [_NOW - timedelta(hours=h) for h in reversed(range(3))]
     rows = []
     for t in fix_times:
         rows.append({"mmsi": 9022, "snapshot_ts": t, "lat": 26.0, "lon": 56.0})
@@ -468,7 +504,7 @@ def test_sts_not_fired_far_apart():
 
 def test_sts_not_fired_short_duration():
     """Two tankers within 50m but only for 1h (below 2h minimum)."""
-    fix_times = [_NOW - timedelta(hours=h) for h in reversed(range(0, 1))]
+    fix_times = [_NOW - timedelta(hours=h) for h in reversed(range(1))]
     rows = []
     for t in fix_times:
         rows.append({"mmsi": 9024, "snapshot_ts": t, "lat": 26.0, "lon": 56.0})
@@ -481,8 +517,6 @@ def test_sts_not_fired_short_duration():
 # ---------------------------------------------------------------------------
 # dark_voyage_events
 # ---------------------------------------------------------------------------
-
-from analytics.detect import dark_voyage_events
 
 
 def _dark_df(rows: list[dict]) -> pd.DataFrame:
@@ -498,15 +532,33 @@ def _dark_df(rows: list[dict]) -> pd.DataFrame:
 def test_dark_voyage_fires_gap_sts_gap():
     """Gap -> STS -> trailing gap within 72h should fire a dark_voyage event."""
     rows = [
-        {"event_id": "gap0001", "type": "gap",     "mmsi": 1111,
-         "start_ts": _NOW - timedelta(hours=50), "end_ts": _NOW - timedelta(hours=40),
-         "lat": 26.0, "lon": 56.0},
-        {"event_id": "sts0001", "type": "sts",     "mmsi": 1111,
-         "start_ts": _NOW - timedelta(hours=38), "end_ts": _NOW - timedelta(hours=30),
-         "lat": 26.0, "lon": 56.0},
-        {"event_id": "gap0002", "type": "gap",     "mmsi": 1111,
-         "start_ts": _NOW - timedelta(hours=28), "end_ts": _NOW - timedelta(hours=20),
-         "lat": 26.0, "lon": 56.0},
+        {
+            "event_id": "gap0001",
+            "type": "gap",
+            "mmsi": 1111,
+            "start_ts": _NOW - timedelta(hours=50),
+            "end_ts": _NOW - timedelta(hours=40),
+            "lat": 26.0,
+            "lon": 56.0,
+        },
+        {
+            "event_id": "sts0001",
+            "type": "sts",
+            "mmsi": 1111,
+            "start_ts": _NOW - timedelta(hours=38),
+            "end_ts": _NOW - timedelta(hours=30),
+            "lat": 26.0,
+            "lon": 56.0,
+        },
+        {
+            "event_id": "gap0002",
+            "type": "gap",
+            "mmsi": 1111,
+            "start_ts": _NOW - timedelta(hours=28),
+            "end_ts": _NOW - timedelta(hours=20),
+            "lat": 26.0,
+            "lon": 56.0,
+        },
     ]
     result = dark_voyage_events(_dark_df(rows))
     assert len(result) == 1
@@ -514,6 +566,7 @@ def test_dark_voyage_fires_gap_sts_gap():
     assert d["type"] == "dark_voyage"
     assert d["mmsi"] == 1111
     import json
+
     det = json.loads(d["details"])
     assert det["sts_count"] == 1
 
@@ -521,12 +574,27 @@ def test_dark_voyage_fires_gap_sts_gap():
 def test_dark_voyage_fires_gap_loiter_gap():
     """Gap -> loiter -> trailing gap should also fire."""
     rows = [
-        {"event_id": "gap0003", "type": "gap",    "mmsi": 2222,
-         "start_ts": _NOW - timedelta(hours=60), "end_ts": _NOW - timedelta(hours=50)},
-        {"event_id": "loi0001", "type": "loiter", "mmsi": 2222,
-         "start_ts": _NOW - timedelta(hours=48), "end_ts": _NOW - timedelta(hours=36)},
-        {"event_id": "gap0004", "type": "gap",    "mmsi": 2222,
-         "start_ts": _NOW - timedelta(hours=30), "end_ts": _NOW - timedelta(hours=20)},
+        {
+            "event_id": "gap0003",
+            "type": "gap",
+            "mmsi": 2222,
+            "start_ts": _NOW - timedelta(hours=60),
+            "end_ts": _NOW - timedelta(hours=50),
+        },
+        {
+            "event_id": "loi0001",
+            "type": "loiter",
+            "mmsi": 2222,
+            "start_ts": _NOW - timedelta(hours=48),
+            "end_ts": _NOW - timedelta(hours=36),
+        },
+        {
+            "event_id": "gap0004",
+            "type": "gap",
+            "mmsi": 2222,
+            "start_ts": _NOW - timedelta(hours=30),
+            "end_ts": _NOW - timedelta(hours=20),
+        },
     ]
     result = dark_voyage_events(_dark_df(rows))
     assert len(result) == 1
@@ -536,10 +604,20 @@ def test_dark_voyage_fires_gap_loiter_gap():
 def test_dark_voyage_no_trailing_gap():
     """Gap -> STS with no trailing gap should NOT fire."""
     rows = [
-        {"event_id": "gap0005", "type": "gap", "mmsi": 3333,
-         "start_ts": _NOW - timedelta(hours=40), "end_ts": _NOW - timedelta(hours=30)},
-        {"event_id": "sts0002", "type": "sts", "mmsi": 3333,
-         "start_ts": _NOW - timedelta(hours=28), "end_ts": _NOW - timedelta(hours=20)},
+        {
+            "event_id": "gap0005",
+            "type": "gap",
+            "mmsi": 3333,
+            "start_ts": _NOW - timedelta(hours=40),
+            "end_ts": _NOW - timedelta(hours=30),
+        },
+        {
+            "event_id": "sts0002",
+            "type": "sts",
+            "mmsi": 3333,
+            "start_ts": _NOW - timedelta(hours=28),
+            "end_ts": _NOW - timedelta(hours=20),
+        },
     ]
     result = dark_voyage_events(_dark_df(rows))
     assert len(result) == 0
@@ -548,12 +626,27 @@ def test_dark_voyage_no_trailing_gap():
 def test_dark_voyage_covert_too_late():
     """STS starting > 24h after gap start should not trigger (too large a gap)."""
     rows = [
-        {"event_id": "gap0006", "type": "gap", "mmsi": 4444,
-         "start_ts": _NOW - timedelta(hours=60), "end_ts": _NOW - timedelta(hours=50)},
-        {"event_id": "sts0003", "type": "sts", "mmsi": 4444,
-         "start_ts": _NOW - timedelta(hours=30), "end_ts": _NOW - timedelta(hours=20)},  # 30h after gap start
-        {"event_id": "gap0007", "type": "gap", "mmsi": 4444,
-         "start_ts": _NOW - timedelta(hours=10), "end_ts": _NOW - timedelta(hours=5)},
+        {
+            "event_id": "gap0006",
+            "type": "gap",
+            "mmsi": 4444,
+            "start_ts": _NOW - timedelta(hours=60),
+            "end_ts": _NOW - timedelta(hours=50),
+        },
+        {
+            "event_id": "sts0003",
+            "type": "sts",
+            "mmsi": 4444,
+            "start_ts": _NOW - timedelta(hours=30),
+            "end_ts": _NOW - timedelta(hours=20),
+        },  # 30h after gap start
+        {
+            "event_id": "gap0007",
+            "type": "gap",
+            "mmsi": 4444,
+            "start_ts": _NOW - timedelta(hours=10),
+            "end_ts": _NOW - timedelta(hours=5),
+        },
     ]
     result = dark_voyage_events(_dark_df(rows))
     assert len(result) == 0
@@ -567,14 +660,34 @@ def test_dark_voyage_empty_input():
 def test_dark_voyage_no_duplicates():
     """Same vessel with multiple qualifying windows should deduplicate by gap start."""
     rows = [
-        {"event_id": "gap0008", "type": "gap",    "mmsi": 5555,
-         "start_ts": _NOW - timedelta(hours=50), "end_ts": _NOW - timedelta(hours=40)},
-        {"event_id": "sts0004", "type": "sts",    "mmsi": 5555,
-         "start_ts": _NOW - timedelta(hours=38), "end_ts": _NOW - timedelta(hours=30)},
-        {"event_id": "gap0009", "type": "gap",    "mmsi": 5555,
-         "start_ts": _NOW - timedelta(hours=28), "end_ts": _NOW - timedelta(hours=20)},
-        {"event_id": "sts0005", "type": "sts",    "mmsi": 5555,
-         "start_ts": _NOW - timedelta(hours=18), "end_ts": _NOW - timedelta(hours=10)},
+        {
+            "event_id": "gap0008",
+            "type": "gap",
+            "mmsi": 5555,
+            "start_ts": _NOW - timedelta(hours=50),
+            "end_ts": _NOW - timedelta(hours=40),
+        },
+        {
+            "event_id": "sts0004",
+            "type": "sts",
+            "mmsi": 5555,
+            "start_ts": _NOW - timedelta(hours=38),
+            "end_ts": _NOW - timedelta(hours=30),
+        },
+        {
+            "event_id": "gap0009",
+            "type": "gap",
+            "mmsi": 5555,
+            "start_ts": _NOW - timedelta(hours=28),
+            "end_ts": _NOW - timedelta(hours=20),
+        },
+        {
+            "event_id": "sts0005",
+            "type": "sts",
+            "mmsi": 5555,
+            "start_ts": _NOW - timedelta(hours=18),
+            "end_ts": _NOW - timedelta(hours=10),
+        },
     ]
     result = dark_voyage_events(_dark_df(rows))
     event_ids = [r["event_id"] for r in result]
@@ -584,8 +697,6 @@ def test_dark_voyage_no_duplicates():
 # ---------------------------------------------------------------------------
 # gps_spoof_events
 # ---------------------------------------------------------------------------
-
-from analytics.detect import gps_spoof_events
 
 
 def _spoof_df(rows: list[dict]) -> pd.DataFrame:
@@ -600,14 +711,27 @@ def _spoof_df(rows: list[dict]) -> pd.DataFrame:
 def test_spoof_fires_large_jump():
     """Vessel moving 300km in 15 minutes should fire a spoof event."""
     rows = [
-        {"mmsi": 7001, "snapshot_ts": _NOW - timedelta(minutes=20), "lat": 0.0, "lon": 0.0, "sog": 12.0},
-        {"mmsi": 7001, "snapshot_ts": _NOW - timedelta(minutes=5), "lat": 2.7, "lon": 0.0, "sog": 14.0},
+        {
+            "mmsi": 7001,
+            "snapshot_ts": _NOW - timedelta(minutes=20),
+            "lat": 0.0,
+            "lon": 0.0,
+            "sog": 12.0,
+        },
+        {
+            "mmsi": 7001,
+            "snapshot_ts": _NOW - timedelta(minutes=5),
+            "lat": 2.7,
+            "lon": 0.0,
+            "sog": 14.0,
+        },
         # ~300 km jump in 15 min
     ]
     result = gps_spoof_events(_spoof_df(rows))
     assert len(result) >= 1
     assert result[0]["type"] == "spoof"
     import json
+
     det = json.loads(result[0]["details"])
     assert det["jump_km"] > 50
 
@@ -615,8 +739,20 @@ def test_spoof_fires_large_jump():
 def test_spoof_no_fire_slow_vessel():
     """Anchored vessel (SOG < threshold) should not fire spoof."""
     rows = [
-        {"mmsi": 7002, "snapshot_ts": _NOW - timedelta(minutes=20), "lat": 0.0, "lon": 0.0, "sog": 0.1},
-        {"mmsi": 7002, "snapshot_ts": _NOW - timedelta(minutes=5), "lat": 2.7, "lon": 0.0, "sog": 0.2},
+        {
+            "mmsi": 7002,
+            "snapshot_ts": _NOW - timedelta(minutes=20),
+            "lat": 0.0,
+            "lon": 0.0,
+            "sog": 0.1,
+        },
+        {
+            "mmsi": 7002,
+            "snapshot_ts": _NOW - timedelta(minutes=5),
+            "lat": 2.7,
+            "lon": 0.0,
+            "sog": 0.2,
+        },
     ]
     result = gps_spoof_events(_spoof_df(rows))
     assert len(result) == 0
@@ -625,8 +761,20 @@ def test_spoof_no_fire_slow_vessel():
 def test_spoof_no_fire_small_jump():
     """Small jump (< 50km) should not fire."""
     rows = [
-        {"mmsi": 7003, "snapshot_ts": _NOW - timedelta(minutes=20), "lat": 0.0, "lon": 0.0, "sog": 15.0},
-        {"mmsi": 7003, "snapshot_ts": _NOW - timedelta(minutes=10), "lat": 0.05, "lon": 0.0, "sog": 15.0},
+        {
+            "mmsi": 7003,
+            "snapshot_ts": _NOW - timedelta(minutes=20),
+            "lat": 0.0,
+            "lon": 0.0,
+            "sog": 15.0,
+        },
+        {
+            "mmsi": 7003,
+            "snapshot_ts": _NOW - timedelta(minutes=10),
+            "lat": 0.05,
+            "lon": 0.0,
+            "sog": 15.0,
+        },
         # ~5.5 km
     ]
     result = gps_spoof_events(_spoof_df(rows))
@@ -636,7 +784,13 @@ def test_spoof_no_fire_small_jump():
 def test_spoof_no_fire_long_gap():
     """Jump over a long time gap (> 30 min) should not fire - could be a real gap."""
     rows = [
-        {"mmsi": 7004, "snapshot_ts": _NOW - timedelta(hours=2), "lat": 0.0, "lon": 0.0, "sog": 15.0},
+        {
+            "mmsi": 7004,
+            "snapshot_ts": _NOW - timedelta(hours=2),
+            "lat": 0.0,
+            "lon": 0.0,
+            "sog": 15.0,
+        },
         {"mmsi": 7004, "snapshot_ts": _NOW, "lat": 2.7, "lon": 0.0, "sog": 14.0},
     ]
     result = gps_spoof_events(_spoof_df(rows))
@@ -691,8 +845,8 @@ def test_current_anchored_splits_on_gap():
     # Two separate anchorings split by a >2h gap; only the recent one counts,
     # and dwell reflects just that span (not bridged across the gap).
     rows = [
-        _ep(3, "busan", 30, 24),   # old anchoring, ends 24h ago
-        _ep(3, "busan", 6, 0),     # current anchoring, 6h span
+        _ep(3, "busan", 30, 24),  # old anchoring, ends 24h ago
+        _ep(3, "busan", 6, 0),  # current anchoring, 6h span
     ]
     out = current_anchored(pd.DataFrame(rows), _MAXEND)
     assert len(out) == 1
@@ -703,7 +857,7 @@ def test_current_anchored_one_zone_per_vessel():
     # A vessel with episodes at two zones is assigned only to its latest span.
     rows = [
         _ep(4, "singapore_west", 20, 14),  # earlier, elsewhere
-        _ep(4, "rotterdam", 5, 0),         # latest -> current zone
+        _ep(4, "rotterdam", 5, 0),  # latest -> current zone
     ]
     out = current_anchored(pd.DataFrame(rows), _MAXEND)
     assert len(out) == 1

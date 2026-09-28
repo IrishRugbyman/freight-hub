@@ -65,7 +65,7 @@ def test_to_iso2_normalization():
     assert to_iso2("LBR") == "LR"  # ISO3 -> ISO2
     assert to_iso2("PAN") == "PA"
     assert to_iso2("gbr") == "GB"  # case-insensitive
-    assert to_iso2("LR") == "LR"   # already ISO2
+    assert to_iso2("LR") == "LR"  # already ISO2
     assert to_iso2("XCA") is None  # Equasis special code, unmappable
     assert to_iso2(None) is None
     assert to_iso2("") is None

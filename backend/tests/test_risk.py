@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 from registry.risk import risk_score
 
 
@@ -166,16 +165,30 @@ def test_score_capped_at_100():
 def test_age_threshold_15_vs_25():
     """Tankers age 15-24 get _W_OLD_TANKER (20), age 25+ get _W_OLD_TANKER_SEVERE (30)."""
     score_15, ind_15 = risk_score(
-        imo=1, ship_type="Crude Oil Tanker", year_built=2010,  # 16y
-        pi_club="Gard", class_society="DNV GL (IACS)",
-        paris_mou="White", tokyo_mou="White", detention_rate_pct=0.0,
-        event_counts={}, owner="CO", single_ship_owner=False,
+        imo=1,
+        ship_type="Crude Oil Tanker",
+        year_built=2010,  # 16y
+        pi_club="Gard",
+        class_society="DNV GL (IACS)",
+        paris_mou="White",
+        tokyo_mou="White",
+        detention_rate_pct=0.0,
+        event_counts={},
+        owner="CO",
+        single_ship_owner=False,
     )
     score_25, ind_25 = risk_score(
-        imo=2, ship_type="Crude Oil Tanker", year_built=1999,  # 27y
-        pi_club="Gard", class_society="DNV GL (IACS)",
-        paris_mou="White", tokyo_mou="White", detention_rate_pct=0.0,
-        event_counts={}, owner="CO", single_ship_owner=False,
+        imo=2,
+        ship_type="Crude Oil Tanker",
+        year_built=1999,  # 27y
+        pi_club="Gard",
+        class_society="DNV GL (IACS)",
+        paris_mou="White",
+        tokyo_mou="White",
+        detention_rate_pct=0.0,
+        event_counts={},
+        owner="CO",
+        single_ship_owner=False,
     )
     assert score_25 > score_15
     assert any(">= 25" in ind for ind in ind_25)
@@ -206,7 +219,7 @@ def test_ofac_sanctioned_returns_100():
         imo=9123456,
         ship_type="Chemical/Oil Products Tanker",
         year_built=2020,  # new vessel - no age penalty
-        pi_club="Gard",   # IG member - no PI penalty
+        pi_club="Gard",  # IG member - no PI penalty
         class_society="DNV GL (IACS)",
         paris_mou="White",
         tokyo_mou="White",

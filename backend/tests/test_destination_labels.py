@@ -11,17 +11,36 @@ from __future__ import annotations
 import duckdb
 import pandas as pd
 import pytest
-
 from analytics import destination_labels as dl
 
 
 def _arrivals() -> pd.DataFrame:
     return pd.DataFrame(
         [
-            {"mmsi": 1, "target_id": "port:a", "arrival_ts": pd.Timestamp("2026-01-01"), "segment": "VLCC"},
-            {"mmsi": 1, "target_id": "port:b", "arrival_ts": pd.Timestamp("2026-01-05"), "segment": "VLCC"},
-            {"mmsi": 1, "target_id": "port:a", "arrival_ts": pd.Timestamp("2026-01-10"), "segment": "VLCC"},
-            {"mmsi": 2, "target_id": "port:b", "arrival_ts": pd.Timestamp("2026-01-02"), "segment": "Capesize"},
+            {
+                "mmsi": 1,
+                "target_id": "port:a",
+                "arrival_ts": pd.Timestamp("2026-01-01"),
+                "segment": "VLCC",
+            },
+            {
+                "mmsi": 1,
+                "target_id": "port:b",
+                "arrival_ts": pd.Timestamp("2026-01-05"),
+                "segment": "VLCC",
+            },
+            {
+                "mmsi": 1,
+                "target_id": "port:a",
+                "arrival_ts": pd.Timestamp("2026-01-10"),
+                "segment": "VLCC",
+            },
+            {
+                "mmsi": 2,
+                "target_id": "port:b",
+                "arrival_ts": pd.Timestamp("2026-01-02"),
+                "segment": "Capesize",
+            },
         ]
     )
 
@@ -30,11 +49,15 @@ def test_build_transitions_counts_consecutive_pairs_and_rollup():
     trans = dl.build_transitions(_arrivals())
     # a -> b (VLCC) observed once, plus its segment-agnostic rollup.
     row = trans[
-        (trans.prev_target_id == "port:a") & (trans.next_target_id == "port:b") & (trans.segment == "VLCC")
+        (trans.prev_target_id == "port:a")
+        & (trans.next_target_id == "port:b")
+        & (trans.segment == "VLCC")
     ]
     assert row["cnt"].iloc[0] == 1
     rollup = trans[
-        (trans.prev_target_id == "port:a") & (trans.next_target_id == "port:b") & (trans.segment == "__all__")
+        (trans.prev_target_id == "port:a")
+        & (trans.next_target_id == "port:b")
+        & (trans.segment == "__all__")
     ]
     assert rollup["cnt"].iloc[0] == 1
     # First-ever arrival for mmsi=1 (port:a) has no prior port -> only the marginal.

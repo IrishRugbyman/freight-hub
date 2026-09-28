@@ -99,9 +99,7 @@ def test_run_in_conn_persists_alert(tmp_path):
         )
     n = dr.run_in_conn(conn)
     assert n == 1
-    stored = conn.execute(
-        "SELECT kind, severity FROM eta_drift_alerts"
-    ).fetchall()
+    stored = conn.execute("SELECT kind, severity FROM eta_drift_alerts").fetchall()
     assert stored == [("coverage", "alert")]
     # Idempotent: a second pass over the same data must not duplicate rows.
     dr.run_in_conn(conn)

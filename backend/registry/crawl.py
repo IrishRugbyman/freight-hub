@@ -16,6 +16,7 @@ Priority order per run:
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import random
@@ -23,26 +24,23 @@ import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-import json
-
 import duckdb
 import pandas as pd
 import psycopg2
-
 from app.db import analytics_db_path as _analytics_db_path
 from app.db import query as _db_query
+from app.equasis import EquasisAccountLocked, get_ship_info
+
+from registry.risk import risk_score as _risk_score
 
 _PG_DSN = os.environ.get("DATABASE_URL", "postgresql:///market_data")
-from app.equasis import EquasisAccountLocked, get_ship_info
-from registry.risk import risk_score as _risk_score
 
 logger = logging.getLogger(__name__)
 
 _REGISTRY_DB = Path(__file__).resolve().parents[1] / "data" / "vessel_registry.duckdb"
-_DEFAULT_AIS_DB = Path(os.environ.get(
-    "AIS_POSITIONS_DB",
-    "~/quant/shared/market-data/data/ais_positions.duckdb"
-)).expanduser()
+_DEFAULT_AIS_DB = Path(
+    os.environ.get("AIS_POSITIONS_DB", "~/quant/shared/market-data/data/ais_positions.duckdb")
+).expanduser()
 
 # Equasis enforces a per-account consultation quota; exceeding it locks the
 # account for 7 days. With a daily timer this cap keeps us comfortably under that
@@ -111,14 +109,16 @@ def priority_order(
     never_fetched = [imo for imo in live_imos if imo not in reg_by_imo]
 
     retry_failed = [
-        imo for imo in live_imos
+        imo
+        for imo in live_imos
         if imo in reg_by_imo
         and not reg_by_imo[imo][0]
         and (now - reg_by_imo[imo][1]).total_seconds() > _RETRY_FAILED_DAYS * 86400
     ]
 
     stale = [
-        imo for imo in live_imos
+        imo
+        for imo in live_imos
         if imo in reg_by_imo
         and reg_by_imo[imo][0]
         and (now - reg_by_imo[imo][1]).total_seconds() > _REFRESH_STALE_DAYS * 86400
@@ -134,6 +134,11 @@ def run(
     limit: int = _MAX_PER_RUN,
     dry_run: bool = False,
 ) -> None:
+    """One crawl pass: fetch Equasis particulars for up to ``limit`` IMOs in the live fleet.
+
+    IMOs come from ``live_positions`` and are ordered by ``priority_order``. Stops the
+    whole run on ``EquasisAccountLocked``. ``dry_run`` logs the plan without fetching.
+    """
     ais_path = ais_path or _DEFAULT_AIS_DB
     reg_path = reg_path or _REGISTRY_DB
 
@@ -151,7 +156,7 @@ def run(
         return
 
     imo_to_mmsi: dict[int, int] = dict(
-        zip(live_df["imo"].astype(int), live_df["mmsi"].astype(int))
+        zip(live_df["imo"].astype(int), live_df["mmsi"].astype(int), strict=True)
     )
     live_imos: set[int] = set(imo_to_mmsi.keys())
     logger.info("Found %d distinct IMOs in live fleet", len(live_imos))
@@ -161,10 +166,8 @@ def run(
     reg_conn = duckdb.connect(str(reg_path))
     reg_conn.execute(_SCHEMA)
     for mig in _MIGRATIONS:
-        try:
-            reg_conn.execute(mig)
-        except Exception:
-            pass  # column already exists
+        # IF NOT EXISTS makes these idempotent; any other failure should surface.
+        reg_conn.execute(mig)
 
     try:
         reg_df = reg_conn.execute(
@@ -177,7 +180,9 @@ def run(
     candidates = priority_order(live_imos, reg_df, now, limit)
     logger.info(
         "Crawl plan: %d candidates (limit %d), dry_run=%s",
-        len(candidates), limit, dry_run,
+        len(candidates),
+        limit,
+        dry_run,
     )
 
     # Build single-vessel owner set from current registry state (approximation:
@@ -209,6 +214,7 @@ def run(
 
     # Fetch OFAC SDN sanctioned vessel IMOs (non-fatal if network is unavailable)
     from .ofac import fetch_sanctioned_imos
+
     sanctioned_imos: set[int] = fetch_sanctioned_imos()
     logger.info("OFAC: %d sanctioned vessel IMOs loaded", len(sanctioned_imos))
 
@@ -238,7 +244,9 @@ def run(
             # are left untouched (not marked failed) and retried next run.
             logger.error(
                 "Equasis account LOCKED - aborting run after %d new / %d refreshed / %d failed",
-                n_new, n_refreshed, n_failed,
+                n_new,
+                n_refreshed,
+                n_failed,
             )
             n_locked_abort = True
             break
@@ -280,7 +288,11 @@ def run(
         status = "ABORTED (account locked)" if n_locked_abort else "complete"
         logger.info(
             "Crawl %s: %d new, %d refreshed, %d failed (of %d candidates)",
-            status, n_new, n_refreshed, n_failed, len(candidates),
+            status,
+            n_new,
+            n_refreshed,
+            n_failed,
+            len(candidates),
         )
 
     reg_conn.close()
@@ -403,10 +415,15 @@ def _upsert_failed(conn: duckdb.DuckDBPyConnection, imo: int, now: datetime) -> 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    parser = argparse.ArgumentParser(description="Fetch Equasis registry data for live fleet vessels")
-    parser.add_argument("--limit", type=int, default=_MAX_PER_RUN,
-                        help=f"Max vessels to fetch per run (default {_MAX_PER_RUN})")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Print candidates without fetching")
+    parser = argparse.ArgumentParser(
+        description="Fetch Equasis registry data for live fleet vessels"
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=_MAX_PER_RUN,
+        help=f"Max vessels to fetch per run (default {_MAX_PER_RUN})",
+    )
+    parser.add_argument("--dry-run", action="store_true", help="Print candidates without fetching")
     args = parser.parse_args()
     run(limit=args.limit, dry_run=args.dry_run)

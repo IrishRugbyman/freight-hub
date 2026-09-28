@@ -201,16 +201,55 @@ def test_laden_uses_global_max_draught_not_per_approach(tmp_path, analytics_conn
     conn.execute(_AIS_SCHEMA)
     approach = []
     for i in range(11):
-        approach.append((
-            _T0 + timedelta(hours=i), 2001, "tanker", "VLCC", None,
-            0.0, -2.0 + 0.2 * i, 80, 330, 12.0, 0, 12.0, None,
-        ))
+        approach.append(
+            (
+                _T0 + timedelta(hours=i),
+                2001,
+                "tanker",
+                "VLCC",
+                None,
+                0.0,
+                -2.0 + 0.2 * i,
+                80,
+                330,
+                12.0,
+                0,
+                12.0,
+                None,
+            )
+        )
     # Laden history elsewhere (outside the target radius) at 22 m draught.
     history = [
-        (_T0 - timedelta(days=10), 2001, "tanker", "VLCC", None,
-         40.0, 40.0, 80, 330, 13.0, 0, 22.0, None),
-        (_T0 - timedelta(days=9), 2001, "tanker", "VLCC", None,
-         40.0, 40.0, 80, 330, 13.0, 0, 22.0, None),
+        (
+            _T0 - timedelta(days=10),
+            2001,
+            "tanker",
+            "VLCC",
+            None,
+            40.0,
+            40.0,
+            80,
+            330,
+            13.0,
+            0,
+            22.0,
+            None,
+        ),
+        (
+            _T0 - timedelta(days=9),
+            2001,
+            "tanker",
+            "VLCC",
+            None,
+            40.0,
+            40.0,
+            80,
+            330,
+            13.0,
+            0,
+            22.0,
+            None,
+        ),
     ]
     conn.executemany(
         "INSERT INTO ais_snapshots VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", approach + history
@@ -230,8 +269,7 @@ def test_cross_check_chokepoints(analytics_conn):
         "('cp:hormuz','chokepoint','hormuz',26.57,56.25,30.0,false)"
     )
     analytics_conn.execute(
-        "INSERT OR REPLACE INTO eta_arrivals VALUES "
-        "(3001,'cp:hormuz',?,5.0,'VLCC',true,?)",
+        "INSERT OR REPLACE INTO eta_arrivals VALUES (3001,'cp:hormuz',?,5.0,'VLCC',true,?)",
         [_T0, _T0 - timedelta(hours=3)],
     )
     analytics_conn.execute(
@@ -240,8 +278,7 @@ def test_cross_check_chokepoints(analytics_conn):
         "direction VARCHAR, kind VARCHAR, segment VARCHAR, laden BOOLEAN)"
     )
     analytics_conn.execute(
-        "INSERT INTO transit_events VALUES "
-        "(3001,'hormuz',?,?,'outbound','tanker','VLCC',true)",
+        "INSERT INTO transit_events VALUES (3001,'hormuz',?,?,'outbound','tanker','VLCC',true)",
         [_T0 - timedelta(hours=2), _T0 - timedelta(hours=1)],
     )
     df = el.cross_check_chokepoints(analytics_conn)
@@ -351,9 +388,7 @@ def test_ensure_lead_basis_migration_preserves_history(tmp_path):
     cols = [d[0] for d in conn.execute("SELECT * FROM eta_model_metrics LIMIT 0").description]
     assert "lead_basis" in cols
     # History preserved, tagged: overall -> 'all', per-bucket -> 'actual'.
-    got = dict(
-        conn.execute("SELECT lead_bucket, lead_basis FROM eta_model_metrics").fetchall()
-    )
+    got = dict(conn.execute("SELECT lead_bucket, lead_basis FROM eta_model_metrics").fetchall())
     assert got == {"all": "all", "0-6h": "actual"}
     # Idempotent: a second call is a no-op.
     bt._ensure_lead_basis(conn)
@@ -450,8 +485,13 @@ def test_enrich_and_persist_samples_roundtrip(ais_db, analytics_conn):
     analytics_conn.execute(
         "INSERT OR REPLACE INTO eta_targets VALUES (?,?,?,?,?,?,?)",
         [
-            _TARGET["target_id"], _TARGET["target_type"], _TARGET["name"],
-            _TARGET["lat"], _TARGET["lon"], _TARGET["reach_nm"], _TARGET["is_canal"],
+            _TARGET["target_id"],
+            _TARGET["target_type"],
+            _TARGET["name"],
+            _TARGET["lat"],
+            _TARGET["lon"],
+            _TARGET["reach_nm"],
+            _TARGET["is_canal"],
         ],
     )
     el.mine_arrivals(analytics_conn, q, targets=[_TARGET])
@@ -551,7 +591,6 @@ def test_add_physics_features_service_speed_and_canal_queue():
 def test_interval_model_offsets_ordered_and_cover():
     import numpy as np
     import pandas as pd
-
     from analytics import eta_physics as ph
 
     # Build samples whose actual remaining brackets the physics prediction with a
@@ -582,7 +621,11 @@ def test_interval_model_offsets_ordered_and_cover():
     fn = ph.make_physics_fn(iv)
     res = [fn(r) for r in df.to_dict("records")]
     covered = np.mean(
-        [r["low"] <= a <= r["high"] for r, a in zip(res, actual) if isinstance(r, dict)]
+        [
+            r["low"] <= a <= r["high"]
+            for r, a in zip(res, actual, strict=True)
+            if isinstance(r, dict)
+        ]
     )
     assert 0.7 <= covered <= 0.9  # ~80% in-sample coverage
     # low never implies a negative ETA.
@@ -596,8 +639,13 @@ def test_build_samples_populates_phase_c_features(ais_db, analytics_conn):
     analytics_conn.execute(
         "INSERT OR REPLACE INTO eta_targets VALUES (?,?,?,?,?,?,?)",
         [
-            _TARGET["target_id"], _TARGET["target_type"], _TARGET["name"],
-            _TARGET["lat"], _TARGET["lon"], _TARGET["reach_nm"], _TARGET["is_canal"],
+            _TARGET["target_id"],
+            _TARGET["target_type"],
+            _TARGET["name"],
+            _TARGET["lat"],
+            _TARGET["lon"],
+            _TARGET["reach_nm"],
+            _TARGET["is_canal"],
         ],
     )
     el.mine_arrivals(analytics_conn, q, targets=[_TARGET])
@@ -674,6 +722,7 @@ def test_score_vectorized_matches_row_loop(ais_db, analytics_conn):
 
     # Median absolute error should match closely (float ordering may differ by epsilon)
     import numpy as np
+
     for key in ["med_abs_err_h", "bias_h"]:
         old_val = old[key].dropna().to_numpy()
         new_val = agg[key].dropna().to_numpy()

@@ -46,13 +46,13 @@ COVERAGE_BAND = (0.70, 0.90)
 
 # Trailing window used as the reference for the median-|err| regression check.
 TRAIL_DAYS = 7
-MIN_TRAIL_RUNS = 3            # need a few prior runs before a comparison is meaningful
+MIN_TRAIL_RUNS = 3  # need a few prior runs before a comparison is meaningful
 
 # Flag a regression only when the latest run is BOTH this much worse in relative
 # terms AND this much worse in absolute hours (the abs floor kills noise on the
 # short, near-zero-error buckets).
-ERR_REGRESSION_FRAC = 0.5    # +50% vs the trailing median
-ERR_REGRESSION_ABS_H = 1.0   # and at least +1h
+ERR_REGRESSION_FRAC = 0.5  # +50% vs the trailing median
+ERR_REGRESSION_ABS_H = 1.0  # and at least +1h
 
 
 DRIFT_SCHEMA = """
@@ -125,8 +125,12 @@ def assess_drift(
         if cov < lo:
             alerts.append(
                 {
-                    "run_ts": run_ts, "model": model, "kind": "coverage",
-                    "severity": "alert", "metric": cov, "reference": lo,
+                    "run_ts": run_ts,
+                    "model": model,
+                    "kind": "coverage",
+                    "severity": "alert",
+                    "metric": cov,
+                    "reference": lo,
                     "detail": (
                         f"interval coverage {cov:.1%} below {lo:.0%} floor "
                         f"(P10-P90 band too tight / underconfident labels)"
@@ -136,8 +140,12 @@ def assess_drift(
         elif cov > hi:
             alerts.append(
                 {
-                    "run_ts": run_ts, "model": model, "kind": "coverage",
-                    "severity": "warn", "metric": cov, "reference": hi,
+                    "run_ts": run_ts,
+                    "model": model,
+                    "kind": "coverage",
+                    "severity": "warn",
+                    "metric": cov,
+                    "reference": hi,
                     "detail": (
                         f"interval coverage {cov:.1%} above {hi:.0%} ceiling "
                         f"(P10-P90 band too wide / overcautious)"
@@ -159,8 +167,12 @@ def assess_drift(
             if worse_rel and worse_abs:
                 alerts.append(
                     {
-                        "run_ts": run_ts, "model": model, "kind": "med_abs_err",
-                        "severity": "warn", "metric": cur_err, "reference": trail_med,
+                        "run_ts": run_ts,
+                        "model": model,
+                        "kind": "med_abs_err",
+                        "severity": "warn",
+                        "metric": cur_err,
+                        "reference": trail_med,
                         "detail": (
                             f"median |err| {cur_err:.1f}h is "
                             f"{(cur_err / trail_med - 1):.0%} above the "
@@ -209,8 +221,15 @@ def run_in_conn(conn: duckdb.DuckDBPyConnection) -> int:
             "INSERT OR REPLACE INTO eta_drift_alerts "
             "(run_ts, model, kind, severity, metric, reference, detail) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            [a["run_ts"], a["model"], a["kind"], a["severity"],
-             a["metric"], a["reference"], a["detail"]],
+            [
+                a["run_ts"],
+                a["model"],
+                a["kind"],
+                a["severity"],
+                a["metric"],
+                a["reference"],
+                a["detail"],
+            ],
         )
         log.warning("ETA drift [%s/%s]: %s", a["severity"], a["kind"], a["detail"])
 

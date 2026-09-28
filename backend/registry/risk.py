@@ -25,7 +25,7 @@ _IG_CLUBS = [
     "north of england",
     "standard",
     "swedish club",
-    "steamship",           # Steamship Mutual, Britannia Steamship
+    "steamship",  # Steamship Mutual, Britannia Steamship
     "britannia",
     "skuld",
     "london p&i",
@@ -37,24 +37,24 @@ _IG_CLUBS = [
 # ---------------------------------------------------------------------------
 # Scoring weights (0-100 scale)
 # ---------------------------------------------------------------------------
-_W_OFAC = 100               # OFAC SDN sanction (immediate max score)
-_W_OLD_TANKER = 20          # tanker AND age >= 15y
-_W_OLD_TANKER_SEVERE = 30   # tanker AND age >= 25y (override of above)
-_W_NO_PI = 20               # no P&I or not an IG member
-_W_NON_IACS = 15            # class society not in IACS
+_W_OFAC = 100  # OFAC SDN sanction (immediate max score)
+_W_OLD_TANKER = 20  # tanker AND age >= 15y
+_W_OLD_TANKER_SEVERE = 30  # tanker AND age >= 25y (override of above)
+_W_NO_PI = 20  # no P&I or not an IG member
+_W_NON_IACS = 15  # class society not in IACS
 _W_PARIS_GREY = 8
 _W_PARIS_BLACK = 18
 _W_TOKYO_GREY = 8
 _W_TOKYO_BLACK = 18
-_W_DETENTION_5 = 8          # detention_rate_pct >= 5%
-_W_DETENTION_10 = 16        # detention_rate_pct >= 10% (overrides above)
-_W_GAP_PER = 12             # per AIS gap event (90d)
-_W_STS_PER = 10             # per STS event (90d)
-_W_LOITER_PER = 5           # per loitering event (90d)
-_W_DARK_VOYAGE = 25         # dark voyage composite (gap -> STS/loiter -> gap within 72h)
-_W_SPOOF_PER = 15           # per GPS position-jump event (50km+ in < 30 min)
-_W_SINGLE_SHIP = 8          # single-vessel owner
-_MAX_BEHAVIOURAL = 50       # cap on behavioural contribution (raised for dark voyage)
+_W_DETENTION_5 = 8  # detention_rate_pct >= 5%
+_W_DETENTION_10 = 16  # detention_rate_pct >= 10% (overrides above)
+_W_GAP_PER = 12  # per AIS gap event (90d)
+_W_STS_PER = 10  # per STS event (90d)
+_W_LOITER_PER = 5  # per loitering event (90d)
+_W_DARK_VOYAGE = 25  # dark voyage composite (gap -> STS/loiter -> gap within 72h)
+_W_SPOOF_PER = 15  # per GPS position-jump event (50km+ in < 30 min)
+_W_SINGLE_SHIP = 8  # single-vessel owner
+_MAX_BEHAVIOURAL = 50  # cap on behavioural contribution (raised for dark voyage)
 
 
 def _is_ig_member(pi_club: str | None) -> bool:
@@ -79,7 +79,9 @@ def risk_score(
     paris_mou: str | None,
     tokyo_mou: str | None,
     detention_rate_pct: float | None,
-    event_counts: dict[str, int],   # {"gap": N, "sts": N, "loiter": N, "dark_voyage": N} for last 90d
+    event_counts: dict[
+        str, int
+    ],  # {"gap": N, "sts": N, "loiter": N, "dark_voyage": N} for last 90d
     owner: str | None,
     single_ship_owner: bool,
     ofac_sanctioned: bool = False,
@@ -108,9 +110,7 @@ def risk_score(
     # P&I club
     if not _is_ig_member(pi_club):
         score += _W_NO_PI
-        fired.append(
-            "P&I club not in International Group" if pi_club else "No P&I club on record"
-        )
+        fired.append("P&I club not in International Group" if pi_club else "No P&I club on record")
 
     # Classification society
     if not _is_iacs(class_society):

@@ -24,6 +24,11 @@ _DEFAULT_LIMIT = 200
 
 
 def run(limit: int = _DEFAULT_LIMIT, delay: float = _DEFAULT_DELAY) -> None:
+    """Fill missing call signs in the PG ``vessels`` master from ITU MARS.
+
+    Looks up at most ``limit`` MMSIs that have no call sign, ``delay`` seconds apart.
+    Only null ``call_sign`` rows are written, so re-running is safe.
+    """
     pg = psycopg2.connect(_PG_DSN)
     cur = pg.cursor()
 
@@ -67,7 +72,9 @@ def run(limit: int = _DEFAULT_LIMIT, delay: float = _DEFAULT_DELAY) -> None:
 
 
 def main() -> None:
+    """CLI entry point: ``--limit`` and ``--delay`` map onto ``run``."""
     import logging
+
     logging.basicConfig(level=logging.INFO)
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=_DEFAULT_LIMIT)

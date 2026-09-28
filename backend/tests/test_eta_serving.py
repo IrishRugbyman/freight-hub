@@ -195,8 +195,22 @@ def test_build_predictions_scores_resolved_destination(tmp_path):
     # Vessel ~130 nm south of Port Said, steaming north; AIS destination "PORT SAID".
     mem.execute(
         "INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        [8001, "DEST SHIP", 29.0, 32.34, 12.0, 0.0, 1.0, "tanker", "VLCC", "suez",
-         9100001, 20.0, _NOW, "PORT SAID"],
+        [
+            8001,
+            "DEST SHIP",
+            29.0,
+            32.34,
+            12.0,
+            0.0,
+            1.0,
+            "tanker",
+            "VLCC",
+            "suez",
+            9100001,
+            20.0,
+            _NOW,
+            "PORT SAID",
+        ],
     )
 
     def q(sql, params=None):
@@ -207,7 +221,7 @@ def test_build_predictions_scores_resolved_destination(tmp_path):
     assert not dest.empty, "resolvable destination should yield a dest row"
     row = dest.iloc[0]
     assert row["target_id"].startswith("dest:")
-    assert "Said" in row["target_name"]           # Port Said
+    assert "Said" in row["target_name"]  # Port Said
     assert row["method"] in ("physics", "naive")  # ML not applied to destinations
     assert row["eta_low_h"] <= row["eta_p50_h"] <= row["eta_high_h"]
     assert row["eta_p50_h"] > 0 and row["eta_arrival_ts"] > _NOW
@@ -237,8 +251,22 @@ def test_destination_change_is_hysteresis_gated(tmp_path):
         mem.execute("DELETE FROM live_positions")
         mem.execute(
             "INSERT INTO live_positions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            [8001, "DEST SHIP", 29.0, 32.34, 12.0, 0.0, 1.0, "tanker", "VLCC", "suez",
-             9100001, 20.0, _NOW, dest],
+            [
+                8001,
+                "DEST SHIP",
+                29.0,
+                32.34,
+                12.0,
+                0.0,
+                1.0,
+                "tanker",
+                "VLCC",
+                "suez",
+                9100001,
+                20.0,
+                _NOW,
+                dest,
+            ],
         )
 
     def q(sql, params=None):
@@ -301,7 +329,21 @@ def test_build_predictions_caps_absurd_long_eta(tmp_path):
     mem.execute(
         "INSERT INTO live_positions (mmsi, name, lat, lon, sog, cog, heading, kind, "
         "segment, region, imo, draught, updated_ts) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        (8001, "CRAWLER", 18.0, 40.0, 1.2, 330.0, 330.0, "tanker", "VLCC", "suez", 8000001, 20.0, _NOW),
+        (
+            8001,
+            "CRAWLER",
+            18.0,
+            40.0,
+            1.2,
+            330.0,
+            330.0,
+            "tanker",
+            "VLCC",
+            "suez",
+            8000001,
+            20.0,
+            _NOW,
+        ),
     )
 
     def q(sql, params=None):
@@ -478,9 +520,7 @@ def test_eta_accuracy_serves_latest_run_only(metrics_client):
         x for x in body["rows"] if x["model"] == "physics_v1" and x["lead_bucket"] == "all"
     )
     assert phys_all["interval_coverage"] == 0.80
-    naive_all = next(
-        x for x in body["rows"] if x["model"] == "naive" and x["lead_bucket"] == "all"
-    )
+    naive_all = next(x for x in body["rows"] if x["model"] == "naive" and x["lead_bucket"] == "all")
     assert naive_all["interval_coverage"] is None
 
 
@@ -489,9 +529,7 @@ def test_eta_accuracy_default_basis_is_actual(metrics_client):
     # so the served physics 0-6h row is the by-actual one (med |err| 1.09).
     body = metrics_client.get("/api/analytics/eta-accuracy").json()
     assert body["lead_basis"] == "actual"
-    phys_06 = [
-        x for x in body["rows"] if x["model"] == "physics_v1" and x["lead_bucket"] == "0-6h"
-    ]
+    phys_06 = [x for x in body["rows"] if x["model"] == "physics_v1" and x["lead_bucket"] == "0-6h"]
     assert len(phys_06) == 1
     assert phys_06[0]["med_abs_err_h"] == 1.09
     assert phys_06[0]["lead_basis"] == "actual"
@@ -502,9 +540,7 @@ def test_eta_accuracy_predicted_basis_swaps_per_bucket_rows(metrics_client):
     # while the unconditional overall row (lead_basis='all') is still present.
     body = metrics_client.get("/api/analytics/eta-accuracy?lead_basis=predicted").json()
     assert body["lead_basis"] == "predicted"
-    phys_06 = [
-        x for x in body["rows"] if x["model"] == "physics_v1" and x["lead_bucket"] == "0-6h"
-    ]
+    phys_06 = [x for x in body["rows"] if x["model"] == "physics_v1" and x["lead_bucket"] == "0-6h"]
     assert len(phys_06) == 1
     assert phys_06[0]["med_abs_err_h"] == 9.10
     assert phys_06[0]["lead_basis"] == "predicted"
@@ -537,7 +573,9 @@ def test_eta_upcoming_returns_within_horizon(eta_client):
 
 def test_eta_upcoming_chokepoint_filter(eta_client):
     # target_type=chokepoint must only return chokepoint targets.
-    r = eta_client.get("/api/analytics/eta-upcoming", params={"horizon_h": 96, "target_type": "chokepoint"})
+    r = eta_client.get(
+        "/api/analytics/eta-upcoming", params={"horizon_h": 96, "target_type": "chokepoint"}
+    )
     assert r.status_code == 200
     body = r.json()
     assert all(row["target_type"] == "chokepoint" for row in body["rows"])

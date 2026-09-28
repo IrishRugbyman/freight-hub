@@ -111,7 +111,7 @@ def build_atom(events: list[dict], self_url: str) -> str:
         f"  <id>{escape(SITE_URL)}/api/feed.xml</id>",
         f"  <updated>{updated}</updated>",
         f"  <author><name>{escape(AUTHOR_NAME)}</name></author>",
-        f'  <generator>{escape(GENERATOR)}</generator>',
+        f"  <generator>{escape(GENERATOR)}</generator>",
     ]
 
     for ev in events:

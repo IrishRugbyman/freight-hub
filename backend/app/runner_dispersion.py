@@ -24,6 +24,11 @@ _CONFIG = project_dir("freight-dispersion") / "configs" / "dispersion_meanrev.js
 
 @lru_cache(maxsize=1)
 def run_dispersion_default() -> DispersionResponse:
+    """Run the Capesize dispersion backtest on its default config.
+
+    Memoised for the process lifetime; ``precompute_freight.py`` writes the result to
+    ``app/static/`` so the API normally never calls this.
+    """
     cfg = DispersionConfig.from_json(_CONFIG)
     df = load_merged(cfg.start_date, cfg.end_date, cfg.db_path)
     df = build_signals(df, cfg)

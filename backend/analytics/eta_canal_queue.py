@@ -91,9 +91,12 @@ def measure_canal_queue(samples: pd.DataFrame) -> dict[str, float]:
     return out
 
 
-def persist(conn: duckdb.DuckDBPyConnection, measured: dict[str, float],
-            n_transits: dict[str, int] | None = None,
-            now: datetime | None = None) -> None:
+def persist(
+    conn: duckdb.DuckDBPyConnection,
+    measured: dict[str, float],
+    n_transits: dict[str, int] | None = None,
+    now: datetime | None = None,
+) -> None:
     """Replace `eta_canal_queue` with the freshly measured per-canal staging."""
     conn.execute(CANAL_QUEUE_SCHEMA)
     conn.execute("DELETE FROM eta_canal_queue")

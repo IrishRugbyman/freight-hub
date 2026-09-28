@@ -19,8 +19,9 @@ from math import atan2, cos, radians, sin, sqrt
 
 import numpy as np
 import pandas as pd
+from ais.regions import REGIONS
 
-from .zones import ANCHORAGE_ZONES, CHOKEPOINT_AXES, DESIGN_DRAUGHT, REGIONS
+from .zones import ANCHORAGE_ZONES, CHOKEPOINT_AXES, DESIGN_DRAUGHT
 
 # --- constants ---------------------------------------------------------------
 
@@ -97,7 +98,12 @@ def _in_any_zone_vec(lats: pd.Series, lons: pd.Series) -> pd.Series:
     lon_arr = lons.to_numpy(dtype=float)
     inside = np.zeros(len(lat_arr), dtype=bool)
     for (lat_min, lon_min), (lat_max, lon_max) in ANCHORAGE_ZONES.values():
-        inside |= (lat_arr >= lat_min) & (lat_arr <= lat_max) & (lon_arr >= lon_min) & (lon_arr <= lon_max)
+        inside |= (
+            (lat_arr >= lat_min)
+            & (lat_arr <= lat_max)
+            & (lon_arr >= lon_min)
+            & (lon_arr <= lon_max)
+        )
     return pd.Series(inside, index=lats.index)
 
 
@@ -176,7 +182,9 @@ def transit_episodes(df: pd.DataFrame) -> list[dict]:
             direction = pos_label if displacement > 0 else neg_label
 
             # Laden status: use draught from last fix and max seen in the episode
-            draughts = ep["draught"].dropna() if "draught" in ep.columns else pd.Series([], dtype=float)
+            draughts = (
+                ep["draught"].dropna() if "draught" in ep.columns else pd.Series([], dtype=float)
+            )
             last_draught = float(draughts.iloc[-1]) if not draughts.empty else None
             max_draught = float(draughts.max()) if not draughts.empty else None
             segment = str(first.get("segment", None) or "")
@@ -242,11 +250,13 @@ def anchored_episodes(df: pd.DataFrame) -> list[dict]:
         active_rows: list[int] = []
         active_zone: str | None = None
 
-        def _flush(rows: list[int], zone: str) -> None:
+        def _flush(rows: list[int], zone: str, grp: pd.DataFrame = grp, mmsi=mmsi) -> None:
             if not rows:
                 return
             ep = grp.iloc[rows]
-            duration = (ep["snapshot_ts"].iloc[-1] - ep["snapshot_ts"].iloc[0]).total_seconds() / 3600
+            duration = (
+                ep["snapshot_ts"].iloc[-1] - ep["snapshot_ts"].iloc[0]
+            ).total_seconds() / 3600
             if duration >= _MIN_ANCHOR_HOURS:
                 results.append(
                     {
@@ -327,8 +337,7 @@ def merge_anchored_spans(episodes: pd.DataFrame, gap_h: float = _EPISODE_GAP_H) 
         .reset_index()
     )
     return [
-        {"mmsi": int(r.mmsi), "zone": str(r.zone),
-         "start_ts": r.start_ts, "end_ts": r.end_ts}
+        {"mmsi": int(r.mmsi), "zone": str(r.zone), "start_ts": r.start_ts, "end_ts": r.end_ts}
         for r in agg.itertuples(index=False)
     ]
 
@@ -381,12 +390,14 @@ def current_from_spans(
     for mmsi, sp in latest.items():
         if sp["end_ts"] >= cutoff:
             dwell = (sp["end_ts"] - sp["start_ts"]).total_seconds() / 3600
-            out.append({
-                "mmsi": int(mmsi),
-                "zone": sp["zone"],
-                "dwell_hours": round(float(dwell), 1),
-                "end_ts": sp["end_ts"].to_pydatetime(),
-            })
+            out.append(
+                {
+                    "mmsi": int(mmsi),
+                    "zone": sp["zone"],
+                    "dwell_hours": round(float(dwell), 1),
+                    "end_ts": sp["end_ts"].to_pydatetime(),
+                }
+            )
     return out
 
 
@@ -402,7 +413,9 @@ def fleet_density_rows(df: pd.DataFrame, ts: pd.Timestamp, vessel_states: dict) 
     if df.empty or "region" not in df.columns:
         return []
 
-    work = df[["mmsi", "region", "kind", "segment"] + (["draught"] if "draught" in df.columns else [])].copy()
+    work = df[
+        ["mmsi", "region", "kind", "segment"] + (["draught"] if "draught" in df.columns else [])
+    ].copy()
     mmsi_arr = work["mmsi"].astype("int64").to_numpy()
     seg_arr = work["segment"].astype(str).to_numpy()
 
@@ -504,8 +517,7 @@ def _in_region_interior(lat: float, lon: float, region: str, margin: float) -> b
     lat_min, lon_min = bbox[0]
     lat_max, lon_max = bbox[1]
     return (
-        lat_min + margin <= lat <= lat_max - margin
-        and lon_min + margin <= lon <= lon_max - margin
+        lat_min + margin <= lat <= lat_max - margin and lon_min + margin <= lon <= lon_max - margin
     )
 
 
@@ -628,9 +640,15 @@ def loitering_events(df: pd.DataFrame) -> list[dict]:
                 continue
 
             start_ts_raw = ep["snapshot_ts"].iloc[0]
-            start_ts = start_ts_raw.to_pydatetime() if hasattr(start_ts_raw, "to_pydatetime") else start_ts_raw
+            start_ts = (
+                start_ts_raw.to_pydatetime()
+                if hasattr(start_ts_raw, "to_pydatetime")
+                else start_ts_raw
+            )
             end_ts_raw = ep["snapshot_ts"].iloc[-1]
-            end_ts = end_ts_raw.to_pydatetime() if hasattr(end_ts_raw, "to_pydatetime") else end_ts_raw
+            end_ts = (
+                end_ts_raw.to_pydatetime() if hasattr(end_ts_raw, "to_pydatetime") else end_ts_raw
+            )
 
             mid = ep.iloc[len(ep) // 2]
             region = str(mid.get("region") or "")
@@ -663,6 +681,7 @@ def loitering_events(df: pd.DataFrame) -> list[dict]:
 
 # --- Destination change detection -------------------------------------------
 
+
 def _dest_edit_dist(a, b) -> int:
     """Compute Levenshtein edit distance between two destination strings.
 
@@ -672,6 +691,7 @@ def _dest_edit_dist(a, b) -> int:
     Accepts any input type; non-strings (NaN, None, float) are treated as "".
     """
     import math
+
     a = "" if (a is None or (isinstance(a, float) and math.isnan(a))) else str(a)
     b = "" if (b is None or (isinstance(b, float) and math.isnan(b))) else str(b)
     if not a or not b:
@@ -725,7 +745,7 @@ def destination_change_events(df: pd.DataFrame) -> list[dict]:
         run_start_idx: int = 0
         run_len: int = 0
 
-        for i, row in grp.iterrows():
+        for i in range(len(grp)):
             cur_dest = dest_clean.iloc[i]
             if cur_dest == prev_dest:
                 run_len += 1
@@ -739,7 +759,10 @@ def destination_change_events(df: pd.DataFrame) -> list[dict]:
                     old_duration_min = (
                         grp["snapshot_ts"].iloc[i - 1] - grp["snapshot_ts"].iloc[run_start_idx]
                     ).total_seconds() / 60
-                    if old_duration_min >= _DEST_MIN_STABLE_MIN and _dest_edit_dist(prev_dest, cur_dest) >= _DEST_MIN_EDIT_DIST:
+                    if (
+                        old_duration_min >= _DEST_MIN_STABLE_MIN
+                        and _dest_edit_dist(prev_dest, cur_dest) >= _DEST_MIN_EDIT_DIST
+                    ):
                         change_fix = grp.iloc[i]
                         change_ts_raw = change_fix["snapshot_ts"]
                         change_ts = (
@@ -839,8 +862,10 @@ def sts_candidates(df: pd.DataFrame) -> list[dict]:
                         continue
                     checked.add(pair)
                     dist = _haversine_m(
-                        float(vessels[i]["lat"]), float(vessels[i]["lon"]),
-                        float(vessels[j]["lat"]), float(vessels[j]["lon"]),
+                        float(vessels[i]["lat"]),
+                        float(vessels[i]["lon"]),
+                        float(vessels[j]["lat"]),
+                        float(vessels[j]["lon"]),
                     )
                     if dist <= _STS_MAX_DIST_M:
                         pair_timestamps[pair].append(ts)
@@ -860,11 +885,17 @@ def sts_candidates(df: pd.DataFrame) -> list[dict]:
             continue
         fix = first_fix.iloc[0]
 
-        v2_fix = tankers[tankers["mmsi"] == mmsi2].sort_values("snapshot_ts").iloc[-1] if not tankers[tankers["mmsi"] == mmsi2].empty else None
+        v2_fix = (
+            tankers[tankers["mmsi"] == mmsi2].sort_values("snapshot_ts").iloc[-1]
+            if not tankers[tankers["mmsi"] == mmsi2].empty
+            else None
+        )
 
         start_ts_raw = timestamps[0]
         end_ts_raw = timestamps[-1]
-        start_ts = start_ts_raw.to_pydatetime() if hasattr(start_ts_raw, "to_pydatetime") else start_ts_raw
+        start_ts = (
+            start_ts_raw.to_pydatetime() if hasattr(start_ts_raw, "to_pydatetime") else start_ts_raw
+        )
         end_ts = end_ts_raw.to_pydatetime() if hasattr(end_ts_raw, "to_pydatetime") else end_ts_raw
 
         results.append(
@@ -884,7 +915,9 @@ def sts_candidates(df: pd.DataFrame) -> list[dict]:
                     {
                         "duration_hours": round(duration_h, 1),
                         "co_location_fixes": len(timestamps),
-                        "segment2": str(v2_fix.get("segment") or "") if v2_fix is not None else None,
+                        "segment2": str(v2_fix.get("segment") or "")
+                        if v2_fix is not None
+                        else None,
                     }
                 ),
             }
@@ -919,7 +952,18 @@ def dark_voyage_events(events_df: pd.DataFrame) -> list[dict]:
     if events_df.empty:
         return []
 
-    required_cols = {"event_id", "type", "mmsi", "start_ts", "end_ts", "lat", "lon", "region", "kind", "segment"}
+    required_cols = {
+        "event_id",
+        "type",
+        "mmsi",
+        "start_ts",
+        "end_ts",
+        "lat",
+        "lon",
+        "region",
+        "kind",
+        "segment",
+    }
     if not required_cols.issubset(events_df.columns):
         return []
 
@@ -953,8 +997,7 @@ def dark_voyage_events(events_df: pd.DataFrame) -> list[dict]:
             # Find a second gap that starts after the earliest covert event start
             first_covert_ts = nearby_covert["start_ts"].min()
             trailing_gaps = gaps[
-                (gaps["start_ts"] > first_covert_ts)
-                & (gaps["start_ts"] <= window_end)
+                (gaps["start_ts"] > first_covert_ts) & (gaps["start_ts"] <= window_end)
             ]
             if trailing_gaps.empty:
                 continue
@@ -966,9 +1009,7 @@ def dark_voyage_events(events_df: pd.DataFrame) -> list[dict]:
             seen.add(event_key)
 
             last_gap_end = trailing_gaps["end_ts"].max()
-            window_hours = round(
-                (last_gap_end - gap_start).total_seconds() / 3600, 1
-            )
+            window_hours = round((last_gap_end - gap_start).total_seconds() / 3600, 1)
 
             # Position: use covert event location (most incriminating point)
             ref = nearby_covert.iloc[0]
@@ -978,7 +1019,14 @@ def dark_voyage_events(events_df: pd.DataFrame) -> list[dict]:
             kind = str(ref.get("kind") or "") or None
             segment = str(ref.get("segment") or "") or None
 
-            eid = _event_id("dark", mmsi_int, gap["start_ts"].to_pydatetime() if hasattr(gap["start_ts"], "to_pydatetime") else gap["start_ts"], 0)
+            eid = _event_id(
+                "dark",
+                mmsi_int,
+                gap["start_ts"].to_pydatetime()
+                if hasattr(gap["start_ts"], "to_pydatetime")
+                else gap["start_ts"],
+                0,
+            )
 
             results.append(
                 {
@@ -986,8 +1034,12 @@ def dark_voyage_events(events_df: pd.DataFrame) -> list[dict]:
                     "type": "dark_voyage",
                     "mmsi": mmsi_int,
                     "mmsi2": None,
-                    "start_ts": gap_start.to_pydatetime() if hasattr(gap_start, "to_pydatetime") else gap_start,
-                    "end_ts": last_gap_end.to_pydatetime() if hasattr(last_gap_end, "to_pydatetime") else last_gap_end,
+                    "start_ts": gap_start.to_pydatetime()
+                    if hasattr(gap_start, "to_pydatetime")
+                    else gap_start,
+                    "end_ts": last_gap_end.to_pydatetime()
+                    if hasattr(last_gap_end, "to_pydatetime")
+                    else last_gap_end,
                     "lat": lat,
                     "lon": lon,
                     "region": region,
@@ -1010,9 +1062,9 @@ def dark_voyage_events(events_df: pd.DataFrame) -> list[dict]:
 # --- GPS spoofing / position anomaly detection --------------------------------
 
 # A vessel reporting a position jump > X km in a short interval is likely spoofed
-_SPOOF_JUMP_KM = 50.0        # minimum jump distance to flag
-_SPOOF_MAX_GAP_H = 0.5       # max time between fixes to call it a jump (not a gap)
-_SPOOF_MIN_SOG_KN = 2.0      # only flag if vessel was nominally moving
+_SPOOF_JUMP_KM = 50.0  # minimum jump distance to flag
+_SPOOF_MAX_GAP_H = 0.5  # max time between fixes to call it a jump (not a gap)
+_SPOOF_MIN_SOG_KN = 2.0  # only flag if vessel was nominally moving
 
 
 def gps_spoof_events(df: pd.DataFrame) -> list[dict]:
@@ -1046,18 +1098,28 @@ def gps_spoof_events(df: pd.DataFrame) -> list[dict]:
             if dt_h <= 0 or dt_h > _SPOOF_MAX_GAP_H:
                 continue
 
-            sog = float(curr["sog"]) if curr.get("sog") is not None and not (isinstance(curr.get("sog"), float) and pd.isna(curr["sog"])) else 0.0
+            sog = (
+                float(curr["sog"])
+                if curr.get("sog") is not None
+                and not (isinstance(curr.get("sog"), float) and pd.isna(curr["sog"]))
+                else 0.0
+            )
             if sog < _SPOOF_MIN_SOG_KN:
                 continue
 
-            dist_m = _haversine_m(float(prev["lat"]), float(prev["lon"]),
-                                   float(curr["lat"]), float(curr["lon"]))
+            dist_m = _haversine_m(
+                float(prev["lat"]), float(prev["lon"]), float(curr["lat"]), float(curr["lon"])
+            )
             jump_km = dist_m / 1000.0
 
             if jump_km < _SPOOF_JUMP_KM:
                 continue
 
-            start_ts = curr["snapshot_ts"].to_pydatetime() if hasattr(curr["snapshot_ts"], "to_pydatetime") else curr["snapshot_ts"]
+            start_ts = (
+                curr["snapshot_ts"].to_pydatetime()
+                if hasattr(curr["snapshot_ts"], "to_pydatetime")
+                else curr["snapshot_ts"]
+            )
 
             results.append(
                 {

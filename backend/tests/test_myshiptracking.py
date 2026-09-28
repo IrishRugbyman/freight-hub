@@ -126,7 +126,9 @@ def test_state_overwritten_on_refresh(conn, snap):
     # simulate a later visit where the live destination changed
     snap.destination = "VALENCIA"
     cm._persist(conn, snap, now)
-    dest = conn.execute("SELECT destination FROM mst_vessel_state WHERE mmsi = ?", [snap.mmsi]).fetchone()[0]
+    dest = conn.execute(
+        "SELECT destination FROM mst_vessel_state WHERE mmsi = ?", [snap.mmsi]
+    ).fetchone()[0]
     assert dest == "VALENCIA"
     # but history is unchanged (still one row per trip)
     assert conn.execute("SELECT count(*) FROM mst_vessel_state").fetchone()[0] == 1

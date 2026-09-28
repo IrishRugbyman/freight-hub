@@ -11,7 +11,6 @@ Rate limit: ~1 request / 2s is polite for a government resource.
 
 from __future__ import annotations
 
-import re
 import time
 from dataclasses import dataclass
 
@@ -21,16 +20,15 @@ from loguru import logger
 
 _URL = "https://www.itu.int/mmsapp/ShipStation/list"
 _HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-        "Chrome/124.0 Safari/537.36"
-    ),
+    "User-Agent": ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36"),
     "Referer": _URL,
 }
 
 
 @dataclass
 class MarsRecord:
+    """One ITU MARS ship-station result, keyed by MMSI."""
+
     mmsi: int
     ship_name: str | None
     call_sign: str | None
@@ -41,6 +39,7 @@ class MarsSession:
     """Stateful session that carries the CSRF Breadcrumb token between requests."""
 
     def __init__(self) -> None:
+        """Open a requests session; the CSRF breadcrumb is fetched lazily on the first query."""
         self._s = requests.Session()
         self._s.headers.update(_HEADERS)
         self._breadcrumb: str = ""
@@ -61,9 +60,8 @@ class MarsSession:
 
     def fetch(self, mmsi: int, delay: float = 2.0) -> MarsRecord | None:
         """Query MARS by MMSI. Returns None on no result or network error."""
-        if not self._breadcrumb:
-            if not self._refresh_token():
-                return None
+        if not self._breadcrumb and not self._refresh_token():
+            return None
 
         time.sleep(delay)
 

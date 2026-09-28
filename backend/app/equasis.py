@@ -6,6 +6,7 @@ Results are cached in-process for 12 hours (Equasis data is updated at most dail
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import re
@@ -53,6 +54,7 @@ def _is_locked(html: str) -> bool:
 def _looks_like_ship_page(html: str) -> bool:
     return any(m in html for m in _SHIP_MARKERS)
 
+
 # Bootstrap label -> result key mapping
 _LABEL_MAP = {
     "Flag": "flag",
@@ -68,7 +70,15 @@ _KNOWN_LABELS = set(_LABEL_MAP)
 
 
 class EquasisClient:
+    """Logged-in Equasis session with a small in-process result cache.
+
+    Credentials come from ``EQUASIS_EMAIL`` / ``EQUASIS_PWD``. Once the account reports
+    itself locked the client stays locked and raises ``EquasisAccountLocked``, so a crawl
+    stops instead of burning the per-account quota.
+    """
+
     def __init__(self) -> None:
+        """Read credentials from the environment; the HTTP session is opened lazily on first use."""
         self._email = os.getenv("EQUASIS_EMAIL", "")
         self._pwd = os.getenv("EQUASIS_PWD", "")
         self._client: httpx.Client | None = None
@@ -97,10 +107,8 @@ class EquasisClient:
         try:
             # Seed the JSESSIONID cookie from the public home before posting creds;
             # Equasis ties the authenticated session to that cookie.
-            try:
+            with contextlib.suppress(Exception):
                 client.get(_PUBLIC_HOME)
-            except Exception:
-                pass
             resp = client.post(
                 _LOGIN_URL,
                 data={"j_email": self._email, "j_password": self._pwd, "submit": "login"},
@@ -183,12 +191,19 @@ _client = EquasisClient()
 
 
 def get_ship_info(imo: int) -> dict | None:
+    """Registry particulars for one IMO via the module's shared client.
+
+    Returns ``None`` when Equasis has no usable page for it, and raises
+    ``EquasisAccountLocked`` when the account is locked. Only the scheduled crawler may
+    call this: every call spends the account's consultation quota.
+    """
     return _client.fetch_ship_info(imo)
 
 
 # ---------------------------------------------------------------------------
 # HTML parser
 # ---------------------------------------------------------------------------
+
 
 def _parse(html: str, imo: int) -> dict:
     soup = BeautifulSoup(html, "html.parser")
@@ -197,11 +212,17 @@ def _parse(html: str, imo: int) -> dict:
     # Ship name: first <b> that is not a known label and looks like a vessel name
     for b in soup.find_all("b"):
         text = b.get_text(strip=True)
-        if text and text not in _KNOWN_LABELS and len(text) > 3 and text[0].isupper():
-            # Skip picture links, IMO numbers, percentages
-            if not re.match(r"^\d+", text) and "picture" not in text.lower():
-                out["ship_name"] = text
-                break
+        # Skip labels, picture links, IMO numbers, percentages
+        if (
+            text
+            and text not in _KNOWN_LABELS
+            and len(text) > 3
+            and text[0].isupper()
+            and not re.match(r"^\d+", text)
+            and "picture" not in text.lower()
+        ):
+            out["ship_name"] = text
+            break
 
     # Ship particulars: Bootstrap rows with col-lg-4 label/value pairs
     for row in soup.find_all("div", class_=re.compile(r"\brow\b")):

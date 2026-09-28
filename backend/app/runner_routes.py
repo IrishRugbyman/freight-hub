@@ -24,6 +24,11 @@ def _clean(v: float) -> float:
 
 @lru_cache(maxsize=1)
 def run_routes_default() -> RoutesResponse:
+    """Run the transport-arb route matrix on its default config.
+
+    Memoised for the process lifetime; ``precompute_freight.py`` writes the result to
+    ``app/static/`` so the API normally never calls this.
+    """
     cfg = TransportArbConfig.from_json(_CONFIG)
     r = run_once(cfg)
 

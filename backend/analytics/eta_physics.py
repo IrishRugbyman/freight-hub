@@ -106,13 +106,23 @@ def vectorized_physics_p50(samples: pd.DataFrame) -> np.ndarray:
     )
 
     sog = samples["sog"].to_numpy(dtype=float)
-    sog_trail = samples["sog_trail6h"].to_numpy(dtype=float) if "sog_trail6h" in samples.columns else np.full(len(samples), np.nan)
+    sog_trail = (
+        samples["sog_trail6h"].to_numpy(dtype=float)
+        if "sog_trail6h" in samples.columns
+        else np.full(len(samples), np.nan)
+    )
 
     if "service_speed" in samples.columns:
         svc_spd = samples["service_speed"].to_numpy(dtype=float)
     else:
-        seg = samples["segment"] if "segment" in samples.columns else pd.Series(index=samples.index, dtype=str)
-        base_spd = seg.map(SEGMENT_SERVICE_SPEED).fillna(DEFAULT_SERVICE_SPEED).to_numpy(dtype=float)
+        seg = (
+            samples["segment"]
+            if "segment" in samples.columns
+            else pd.Series(index=samples.index, dtype=str)
+        )
+        base_spd = (
+            seg.map(SEGMENT_SERVICE_SPEED).fillna(DEFAULT_SERVICE_SPEED).to_numpy(dtype=float)
+        )
         if "laden" in samples.columns:
             laden = samples["laden"].to_numpy(dtype=object, na_value=None)
         else:
@@ -176,6 +186,7 @@ class IntervalModel:
     """
 
     def __init__(self) -> None:
+        """Start unfitted: offsets fall back to zero until ``fit`` runs."""
         self._lo: dict[str, float] = {}
         self._hi: dict[str, float] = {}
         self._lo_global = 0.0
@@ -183,6 +194,12 @@ class IntervalModel:
         self.fitted = False
 
     def fit(self, samples: pd.DataFrame) -> IntervalModel:
+        """Learn per-bucket P10/P90 residual offsets from labelled samples.
+
+        Rows whose physics P50 is not finite are dropped. A bucket needs at least 50
+        residuals to get its own offsets; smaller buckets use the global quantiles.
+        Returns ``self``, unchanged and unfitted when there is nothing to learn from.
+        """
         if samples.empty:
             return self
         p50 = vectorized_physics_p50(samples)
@@ -206,6 +223,7 @@ class IntervalModel:
         return self
 
     def offsets(self, p50: float) -> tuple[float, float]:
+        """Additive (low, high) offsets for a P50 prediction, from its bucket or the global fallback."""
         b = _pred_bucket(p50)
         return self._lo.get(b, self._lo_global), self._hi.get(b, self._hi_global)
 

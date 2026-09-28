@@ -182,6 +182,12 @@ def query_fleet(
     order: str = "asc",
     page: int = 1,
 ) -> FleetResponse:
+    """One page of the registry fleet table, filtered, sorted, and joined to live positions.
+
+    Registry rows come from the PG ``vessels`` master; ``live_only`` keeps vessels with a
+    fresh AIS fix. Pages are ``_PAGE_SIZE`` rows, and ``summary`` describes the whole
+    filtered set, not just the page.
+    """
     reg_df = _load_registry(
         q,
         flag,
@@ -344,6 +350,7 @@ def query_fleet(
 
 
 def query_facets() -> FleetFacets:
+    """Top values and counts for each registry filter (flag, class, P&I, MOU lists, owner)."""
     reg_df = db.pg_query(
         "SELECT flag, class_society, pi_club, paris_mou, tokyo_mou, owner "
         "FROM vessels WHERE fetch_ok = true",
@@ -392,6 +399,7 @@ def export_csv(
     live_only: bool = False,
 ) -> str:
     # Reuse query_fleet but fetch all pages at once
+    """The filtered fleet table as CSV, unpaged, with the same filters as ``query_fleet``."""
     reg_df = _load_registry(
         q,
         flag,

@@ -202,7 +202,9 @@ def enrich_routes(conn: duckdb.DuckDBPyConnection, samples: pd.DataFrame) -> pd.
     lons = out["obs_lon"].to_numpy(dtype=float)
     cell_lats = np.floor(lats / ROUTE_CACHE_GRID) * ROUTE_CACHE_GRID + ROUTE_CACHE_GRID / 2.0
     cell_lons = np.floor(lons / ROUTE_CACHE_GRID) * ROUTE_CACHE_GRID + ROUTE_CACHE_GRID / 2.0
-    from_cells = np.array([f"{clat:.3f},{clon:.3f}" for clat, clon in zip(cell_lats, cell_lons)])
+    from_cells = np.array(
+        [f"{clat:.3f},{clon:.3f}" for clat, clon in zip(cell_lats, cell_lons, strict=True)]
+    )
     tids = out["target_id"].to_numpy(dtype=str)
     sogs = out["sog"].fillna(0.0).to_numpy(dtype=float)
 
@@ -220,6 +222,7 @@ def enrich_routes(conn: duckdb.DuckDBPyConnection, samples: pd.DataFrame) -> pd.
         tids[routable_mask],
         cell_lats[routable_mask],
         cell_lons[routable_mask],
+        strict=True,
     ):
         key = (fc, tid)
         if key not in unique_pairs:
@@ -239,14 +242,17 @@ def enrich_routes(conn: duckdb.DuckDBPyConnection, samples: pd.DataFrame) -> pd.
 
     # Step 3: look up per-pair values for every row (one Python list comprehension each).
     cell_route_arr = np.array(
-        [pair_route.get((fc, tid), np.nan) for fc, tid in zip(from_cells, tids)],
+        [pair_route.get((fc, tid), np.nan) for fc, tid in zip(from_cells, tids, strict=True)],
         dtype=float,
     )
     gc_cell_arr = np.array(
-        [unique_pairs.get((fc, tid), (0.0, 0.0, np.nan))[2] for fc, tid in zip(from_cells, tids)],
+        [
+            unique_pairs.get((fc, tid), (0.0, 0.0, np.nan))[2]
+            for fc, tid in zip(from_cells, tids, strict=True)
+        ],
         dtype=float,
     )
-    method_arr = [pair_method.get((fc, tid)) for fc, tid in zip(from_cells, tids)]
+    method_arr = [pair_method.get((fc, tid)) for fc, tid in zip(from_cells, tids, strict=True)]
 
     # Step 4: vectorized snap correction and gate logic.
     gc_fix = out["gc_dist_nm"].to_numpy(dtype=float)

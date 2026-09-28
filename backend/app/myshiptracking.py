@@ -120,11 +120,14 @@ class Voyage:
     stops: int | None = None
 
     def key(self) -> str:
+        """Identity of an immutable trip (origin, departure, destination): the dedup key in ``mst_voyages``."""
         return f"{self.origin}|{self.departure}|{self.destination}"
 
 
 @dataclass
 class PortCall:
+    """One port call from the vessel page's history table; timestamps are as displayed."""
+
     port: str | None = None
     arrival: str | None = None
     departure: str | None = None
@@ -162,6 +165,7 @@ class VesselSnapshot:
     port_calls: list[PortCall] = field(default_factory=list)
 
     def to_dict(self) -> dict:
+        """Plain nested dict of the snapshot, voyages and port calls included."""
         return asdict(self)
 
 
@@ -178,10 +182,12 @@ def _th_td(table) -> dict[str, str]:
 
 
 def is_blocked(html: str) -> bool:
+    """Whether the page is a rate-limit or bot-wall response rather than content."""
     return bool(_BLOCKED_RE.search(html))
 
 
 def looks_like_vessel_page(html: str) -> bool:
+    """Whether the HTML carries the markers of a real vessel page."""
     return any(m in html for m in _VESSEL_MARKERS)
 
 
@@ -312,6 +318,10 @@ def parse(html: str, mmsi: int | None = None) -> VesselSnapshot:
 # fetch
 # --------------------------------------------------------------------------- #
 def fetch_html(mmsi: int | str, imo: int | str = "", *, client: httpx.Client | None = None) -> str:
+    """GET the vessel page for an MMSI (and optional IMO); raises on HTTP errors.
+
+    Uses ``client`` when given, otherwise a short-lived client that is closed afterwards.
+    """
     url = _VESSEL_URL.format(mmsi=mmsi, imo=imo)
     own = client is None
     client = client or httpx.Client(follow_redirects=True, timeout=30, headers={"User-Agent": _UA})

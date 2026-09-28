@@ -10,14 +10,14 @@ from __future__ import annotations
 import duckdb
 import pandas as pd
 import pytest
+from analytics import eta_canal_queue as cq
+
 from quant_lib.freight.eta import (
     CANAL_STAGING_HOURS,
     canal_staging_hours,
     queue_wait,
     set_measured_staging,
 )
-
-from analytics import eta_canal_queue as cq
 
 
 @pytest.fixture(autouse=True)

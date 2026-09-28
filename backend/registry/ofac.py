@@ -15,7 +15,6 @@ from __future__ import annotations
 import logging
 import re
 import xml.etree.ElementTree as ET
-from io import BytesIO
 from urllib.request import Request, urlopen
 
 log = logging.getLogger(__name__)
@@ -57,12 +56,15 @@ def _extract_vessel_imos(xml_bytes: bytes) -> set[int]:
         for id_el in entry.iter(f"{ns_prefix}id" if ns_prefix else "id"):
             id_type = id_el.find(f"{ns_prefix}idType" if ns_prefix else "idType")
             id_number = id_el.find(f"{ns_prefix}idNumber" if ns_prefix else "idNumber")
-            if id_type is not None and id_number is not None:
-                if "imo" in (id_type.text or "").lower():
-                    raw = (id_number.text or "").strip()
-                    m = re.search(r"(\d{7})", raw)
-                    if m:
-                        imos.add(int(m.group(1)))
+            if (
+                id_type is not None
+                and id_number is not None
+                and "imo" in (id_type.text or "").lower()
+            ):
+                raw = (id_number.text or "").strip()
+                m = re.search(r"(\d{7})", raw)
+                if m:
+                    imos.add(int(m.group(1)))
 
         # Also scrape remarks / aka fields for IMO mentions (belt and suspenders)
         for el in entry.iter():

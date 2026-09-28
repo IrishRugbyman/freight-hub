@@ -1714,11 +1714,10 @@ def test_port_congestion_sorted_by_factor(congestion_client):
 def test_port_congestion_dwell_hours(congestion_client):
     r = congestion_client.get("/api/analytics/port-congestion?days=14")
     rows = {row["zone"]: row for row in r.json()["rows"]}
-    sg = rows.get("singapore_west")
-    if sg:
-        # 2 current vessels anchored 8h and 10h -> avg ~9h
-        if sg["avg_current_dwell_hours"] is not None:
-            assert 7.0 <= sg["avg_current_dwell_hours"] <= 12.0
+    # The fixture seeds 2 vessels currently anchored there, 8h and 10h -> avg ~9h.
+    sg = rows["singapore_west"]
+    assert sg["avg_current_dwell_hours"] is not None
+    assert 7.0 <= sg["avg_current_dwell_hours"] <= 12.0
 
 
 # ---------------------------------------------------------------------------
@@ -1869,11 +1868,10 @@ def test_chokepoint_congestion_sorted_by_factor(chokepoint_congestion_client):
 def test_chokepoint_congestion_dwell_hours(chokepoint_congestion_client):
     r = chokepoint_congestion_client.get("/api/analytics/chokepoint-congestion?days=14")
     rows = {row["chokepoint"]: row for row in r.json()["rows"]}
-    suez = rows.get("suez")
-    if suez:
-        # 2 current vessels transiting 6h and 8h -> avg ~7h
-        if suez["avg_current_dwell_hours"] is not None:
-            assert 5.0 <= suez["avg_current_dwell_hours"] <= 10.0
+    # The fixture seeds 2 vessels currently transiting, 6h and 8h -> avg ~7h.
+    suez = rows["suez"]
+    assert suez["avg_current_dwell_hours"] is not None
+    assert 5.0 <= suez["avg_current_dwell_hours"] <= 10.0
 
 
 def test_chokepoint_congestion_baseline_higher_than_current(chokepoint_congestion_client):
@@ -2116,10 +2114,8 @@ def test_market_summary_zero_events(flow_client):
 # Phase 30: vessel behavioral risk leaderboard
 # ---------------------------------------------------------------------------
 
-import pytest as _pytest_ph30
 
-
-@_pytest_ph30.fixture
+@pytest.fixture
 def risk_leaderboard_client(tmp_path, monkeypatch):
     """Fixture for vessel-risk-scores endpoint.
 
@@ -5463,8 +5459,6 @@ def test_port_arrival_kind_filter(port_arrival_client):
 # ---------------------------------------------------------------------------
 # Phase 48: Crude Oil on Water
 # ---------------------------------------------------------------------------
-
-import pytest
 
 
 @pytest.fixture
