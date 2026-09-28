@@ -1,0 +1,15 @@
+# freight-api-errors.timer - scan the freight-api journal for 5xx every 5 minutes.
+#
+# NO Requires= here (see ~/ops/fix-timer-requires.sh). [Timer] Unit= defaults to the
+# same-named .service.
+
+[Unit]
+Description=Scan freight-api for 5xx every 5 minutes
+
+[Timer]
+OnBootSec=5min
+OnCalendar=*:0/5
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,22 @@
+# freight-api-errors.service - alert when freight-api answers 5xx.
+#
+# /api/health reports on the process, not its endpoints, so UptimeRobot stayed green
+# while /api/vessels returned 500 on 2026-09-28. This reads the freight-api journal
+# since the last run and exits 1 on a new 5xx signature (path + status, suppressed for
+# 6 h once alerted), which fires the standard alert-email with the failing requests and
+# the traceback. See scripts/api_error_watch.py.
+
+[Unit]
+Description=Freight API 5xx watcher (journal scan, emails on new error signatures)
+After=freight-api.service
+OnFailure=alert-email@%N.service
+
+[Service]
+Type=oneshot
+User=lbzgiu
+WorkingDirectory=/home/lbzgiu/quant/freight/backend
+ExecStart=/home/lbzgiu/quant/freight/backend/.venv/bin/python scripts/api_error_watch.py
+# Journal cursor + per-signature alert times; systemd creates it owned by User=.
+StateDirectory=freight-api-errors
+StandardOutput=journal
+StandardError=journal

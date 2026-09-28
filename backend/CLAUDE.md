@@ -83,6 +83,7 @@ Use `fresh_cutoff()` / `visible_cutoff()` from `app/common.py` rather than re-de
 | `freight-mst.timer` | 05:00 daily | `data/mst.duckdb` | - |
 | `freight-eta-retrain.timer` | Sun 01:10, gated | `analytics/models/eta_*` | 4G |
 | `freight-dest-retrain.timer` | Sat 02:20, gated | `analytics/models/dest_*` | 6G |
+| `freight-api-errors.timer` | every 5 min | `/var/lib/freight-api-errors/state.json` | - |
 
 The four analytics/retrain jobs serialise on `flock data/.analytics.lock` (1 h wait). Every
 batch unit alerts on failure through `OnFailure=alert-email@%N.service`: in the unit file for
@@ -90,6 +91,13 @@ batch unit alerts on failure through `OnFailure=alert-email@%N.service`: in the 
 `/etc/systemd/system/<unit>.service.d/` for the other three (see `~/ops/README.md`). The
 installed unit files are copies, except `freight-mst`, which is symlinked here: after editing
 one, `sudo cp` it into `/etc/systemd/system/` and `daemon-reload`.
+
+**5xx alerting.** `/api/health` reports on the process, not its endpoints, so UptimeRobot stays
+green while an endpoint 500s (it did, for `/api/vessels`, on 2026-09-28). `freight-api-errors`
+scans this service's journal every 5 min (`scripts/api_error_watch.py`) and exits 1 on a new
+5xx signature (normalised path + status), which emails the failing requests and traceback
+through `alert-email`. One email per signature per 6 h. Replay a window to test the chain:
+write an older journal cursor into its `state.json` and `systemctl start` it.
 
 **The analytics job is split hourly/daily and the split is load-bearing.** The hourly pass
 runs the incremental detectors only (6m31s, 962 MB); the daily one adds the full-history
