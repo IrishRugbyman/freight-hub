@@ -31,6 +31,7 @@ from pathlib import Path
 import duckdb
 import numpy as np
 import pandas as pd
+from app.ports import EUR_TERMINALS, LNG_EU_TERMINALS, US_LNG_LOADING_TERMINALS
 
 from analytics.detect import laden_status
 from analytics.zones import ANCHORAGE_ZONES
@@ -59,15 +60,15 @@ _HISTORY_FLOOR = datetime(2026, 1, 1)
 # facts (chokepoint locations), not tuning knobs.
 #   key -> (gate_lat, gate_lon)   [region key kept for the transit_events cross-check]
 _CHOKEPOINT_GATES: dict[str, tuple[float, float]] = {
-    "singapore_malacca": (1.23, 103.83),       # Singapore Strait narrows
-    "suez": (30.50, 32.34),                     # Suez Canal (Ismailia reach)
-    "hormuz": (26.57, 56.25),                   # Strait of Hormuz narrowest
-    "panama": (9.12, -79.75),                   # Panama Canal (Gatun-Pacific axis)
-    "gibraltar": (35.95, -5.50),               # Strait of Gibraltar narrows
-    "bosphorus_dardanelles": (41.05, 29.03),    # Bosphorus narrows
-    "dover_channel": (51.00, 1.50),            # Dover Strait
-    "cape_good_hope": (-34.45, 18.30),         # Cape of Good Hope rounding lane (AIS-validated)
-    "bab_el_mandeb": (12.58, 43.33),           # Bab-el-Mandeb (Perim) narrows
+    "singapore_malacca": (1.23, 103.83),  # Singapore Strait narrows
+    "suez": (30.50, 32.34),  # Suez Canal (Ismailia reach)
+    "hormuz": (26.57, 56.25),  # Strait of Hormuz narrowest
+    "panama": (9.12, -79.75),  # Panama Canal (Gatun-Pacific axis)
+    "gibraltar": (35.95, -5.50),  # Strait of Gibraltar narrows
+    "bosphorus_dardanelles": (41.05, 29.03),  # Bosphorus narrows
+    "dover_channel": (51.00, 1.50),  # Dover Strait
+    "cape_good_hope": (-34.45, 18.30),  # Cape of Good Hope rounding lane (AIS-validated)
+    "bab_el_mandeb": (12.58, 43.33),  # Bab-el-Mandeb (Perim) narrows
 }
 _CHOKEPOINTS = list(_CHOKEPOINT_GATES)
 # Canals add transit + queue dwell (used from Phase C); only true canals here.
@@ -195,28 +196,15 @@ def _slug(name: str) -> str:
 
 
 def _curated_port_points() -> list[dict]:
-    """Curated point-terminals pulled from the app's terminal dictionaries.
+    """Curated point-terminals from the app's port reference data (``app/ports.py``).
 
-    Imported lazily and tolerantly: if app.main is unavailable (e.g. a minimal
-    test env) we fall back to a small vendored core so seeding still works.
+    ``app.ports`` is pure data with no FastAPI or DB imports, so this is a plain
+    import. It used to be a tolerant import of ``app.main`` with a four-terminal
+    fallback, which would have shrunk the target set silently on any import error.
     """
-    eur: dict[str, dict] = {}
-    lng: list[dict] = []
-    eu_lng: dict[str, dict] = {}
-    try:  # pragma: no cover - exercised in production, bypassed in unit tests
-        from app.main import _EUR_TERMINALS, _LNG_EU_TERMINALS, _US_LNG_LOADING_TERMINALS
-
-        eur = _EUR_TERMINALS
-        lng = _US_LNG_LOADING_TERMINALS
-        eu_lng = _LNG_EU_TERMINALS
-    except Exception as exc:  # noqa: BLE001 - degrade gracefully
-        log.warning("could not import app terminal dicts (%s); using vendored core", exc)
-        eur = {
-            "Rotterdam": {"lat": 51.96, "lon": 4.10},
-            "Antwerp": {"lat": 51.26, "lon": 4.40},
-            "Fos-Marseille": {"lat": 43.40, "lon": 5.10},
-        }
-        lng = [{"name": "Sabine Pass", "lat": 29.73, "lon": -93.87}]
+    eur = EUR_TERMINALS
+    lng = US_LNG_LOADING_TERMINALS
+    eu_lng = LNG_EU_TERMINALS
 
     points: list[dict] = []
     for name, d in eur.items():
@@ -267,43 +255,43 @@ def _curated_port_points() -> list[dict]:
 # _TARGET_DEDUPE_NM of each other.
 _LOCODE_PORT_TARGETS: dict[str, tuple[float, float, float]] = {
     # UK / Ireland
-    "Fawley":           (50.83, -1.34, 15.0),   # Esso refinery, Southampton Water
-    "Tilbury":          (51.46,  0.35, 15.0),   # Thames/London gateway
-    "Liverpool":        (53.45, -3.02, 15.0),   # Mersey
-    "Dublin":           (53.35, -6.22, 15.0),   # Dublin Bay
+    "Fawley": (50.83, -1.34, 15.0),  # Esso refinery, Southampton Water
+    "Tilbury": (51.46, 0.35, 15.0),  # Thames/London gateway
+    "Liverpool": (53.45, -3.02, 15.0),  # Mersey
+    "Dublin": (53.35, -6.22, 15.0),  # Dublin Bay
     # Scandinavia / Finland / Baltic
-    "Gothenburg":       (57.67, 11.95, 20.0),   # Swedish bulk/tanker port
-    "Helsinki":         (60.15, 25.00, 20.0),   # Vuosaari / Helsinki outer roads
-    "Naantali":         (60.47, 22.28, 15.0),   # Finnish oil terminal (Neste refinery)
-    "Hamina":           (60.57, 27.20, 15.0),   # Finnish bulk/LNG
-    "Kaliningrad":      (54.72, 20.56, 15.0),   # Russian Baltic enclave
+    "Gothenburg": (57.67, 11.95, 20.0),  # Swedish bulk/tanker port
+    "Helsinki": (60.15, 25.00, 20.0),  # Vuosaari / Helsinki outer roads
+    "Naantali": (60.47, 22.28, 15.0),  # Finnish oil terminal (Neste refinery)
+    "Hamina": (60.57, 27.20, 15.0),  # Finnish bulk/LNG
+    "Kaliningrad": (54.72, 20.56, 15.0),  # Russian Baltic enclave
     # Russia - Gulf of Finland (oil export terminals)
-    "Primorsk":         (60.37, 28.63, 15.0),   # Primorsk crude export (CPC pipeline)
-    "Ust-Luga":         (59.68, 28.37, 15.0),   # Ust-Luga oil/bulk
-    "St. Petersburg":   (59.93, 29.72, 25.0),   # Kronstadt outer roads / Neva bay
+    "Primorsk": (60.37, 28.63, 15.0),  # Primorsk crude export (CPC pipeline)
+    "Ust-Luga": (59.68, 28.37, 15.0),  # Ust-Luga oil/bulk
+    "St. Petersburg": (59.93, 29.72, 25.0),  # Kronstadt outer roads / Neva bay
     # Black Sea - Romania / Bulgaria
-    "Constanta":        (44.17, 28.65, 15.0),   # Romanian crude/bulk
-    "Bourgas":          (42.49, 27.47, 15.0),   # Bulgarian Black Sea
+    "Constanta": (44.17, 28.65, 15.0),  # Romanian crude/bulk
+    "Bourgas": (42.49, 27.47, 15.0),  # Bulgarian Black Sea
     # Black Sea - Russia
-    "Novorossiysk":     (44.73, 37.80, 15.0),   # Novorossiysk/CPC crude export
-    "Taman":            (45.21, 36.70, 15.0),   # Taman/Kavkaz, Kerch Strait area
+    "Novorossiysk": (44.73, 37.80, 15.0),  # Novorossiysk/CPC crude export
+    "Taman": (45.21, 36.70, 15.0),  # Taman/Kavkaz, Kerch Strait area
     # Turkey - Sea of Marmara
-    "Izmit Bay":        (40.77, 29.47, 25.0),   # Izmit/Dilovasi/Gemlik petrochemical cluster
-    "Ambarli":          (40.95, 28.70, 15.0),   # NW Istanbul container/bulk
+    "Izmit Bay": (40.77, 29.47, 25.0),  # Izmit/Dilovasi/Gemlik petrochemical cluster
+    "Ambarli": (40.95, 28.70, 15.0),  # NW Istanbul container/bulk
     # Mediterranean
-    "Valencia":         (39.45, -0.32, 15.0),   # Spanish east coast
+    "Valencia": (39.45, -0.32, 15.0),  # Spanish east coast
     # Levant / Israel
-    "Ashdod":           (31.82, 34.64, 15.0),   # Israeli crude/bulk terminal
+    "Ashdod": (31.82, 34.64, 15.0),  # Israeli crude/bulk terminal
     # Africa
-    "Cape Town":        (-33.91, 18.43, 20.0),  # Cape STS / waypoint / Milnerton refinery
-    "Durban":           (-29.87, 31.03, 15.0),  # South African bulk / Richards Bay-adjacent
+    "Cape Town": (-33.91, 18.43, 20.0),  # Cape STS / waypoint / Milnerton refinery
+    "Durban": (-29.87, 31.03, 15.0),  # South African bulk / Richards Bay-adjacent
     # Americas - US Gulf
-    "Houston":          (29.70, -94.97, 20.0),  # Houston ship channel / La Porte
-    "Beaumont":         (29.95, -93.92, 15.0),  # Sabine-Neches / Port Arthur
+    "Houston": (29.70, -94.97, 20.0),  # Houston ship channel / La Porte
+    "Beaumont": (29.95, -93.92, 15.0),  # Sabine-Neches / Port Arthur
     # Americas - US East / West
-    "New York":         (40.65, -74.06, 25.0),  # NY/NJ harbour, Kill Van Kull area
-    "Seattle/Tacoma":   (47.35, -122.42, 20.0), # Puget Sound
-    "Norfolk":          (36.95, -76.32, 20.0),  # Hampton Roads
+    "New York": (40.65, -74.06, 25.0),  # NY/NJ harbour, Kill Van Kull area
+    "Seattle/Tacoma": (47.35, -122.42, 20.0),  # Puget Sound
+    "Norfolk": (36.95, -76.32, 20.0),  # Hampton Roads
 }
 
 
@@ -405,6 +393,7 @@ def seed_targets(conn: duckdb.DuckDBPyConnection) -> int:
 # Arrival miner
 # ---------------------------------------------------------------------------
 
+
 def _laden_bool(draught: float | None, max_seen: float | None, segment: str | None) -> bool | None:
     """Map detect.laden_status' 'laden'/'ballast'/'unknown' to True/False/None.
 
@@ -420,7 +409,9 @@ def _laden_bool(draught: float | None, max_seen: float | None, segment: str | No
     return None
 
 
-def _mine_target(df: pd.DataFrame, target: dict, max_draught_by_mmsi: dict[int, float]) -> list[dict]:
+def _mine_target(
+    df: pd.DataFrame, target: dict, max_draught_by_mmsi: dict[int, float]
+) -> list[dict]:
     """Mine arrivals for one target from its pre-filtered snapshot frame.
 
     `df` must already be limited to fixes near the target and carry a `dist_nm`
@@ -492,7 +483,9 @@ def mine_arrivals(
         "WHERE draught IS NOT NULL AND draught > 0 GROUP BY mmsi"
     )
     max_draught_by_mmsi: dict[int, float] = (
-        {int(r.mmsi): float(r.m) for r in md.itertuples()} if md is not None and not md.empty else {}
+        {int(r.mmsi): float(r.m) for r in md.itertuples()}
+        if md is not None and not md.empty
+        else {}
     )
 
     # Full re-mine: clear prior arrivals for every target being mined first. The PK
@@ -548,10 +541,18 @@ def mine_arrivals(
     # These stay seeded as legal targets and populate as collector coverage grows.
     empty = [t["target_id"] for t in targets if t["target_id"] not in _seen_target_ids(conn)]
     if empty:
-        log.warning("%d/%d targets have 0 arrivals (likely no collector coverage): %s",
-                    len(empty), len(targets), ", ".join(empty))
-    log.info("mined %d eta_arrivals across %d targets (%d targets with data)",
-             total, len(targets), len(targets) - len(empty))
+        log.warning(
+            "%d/%d targets have 0 arrivals (likely no collector coverage): %s",
+            len(empty),
+            len(targets),
+            ", ".join(empty),
+        )
+    log.info(
+        "mined %d eta_arrivals across %d targets (%d targets with data)",
+        total,
+        len(targets),
+        len(targets) - len(empty),
+    )
     return total
 
 
@@ -601,7 +602,10 @@ def cross_check_chokepoints(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
         level = log.warning if r.rel_diff > _CROSS_CHECK_TOL else log.info
         level(
             "cross-check %s: eta=%d transit=%d rel_diff=%.0f%%",
-            r.cp, r.eta_vessels, r.transit_vessels, r.rel_diff * 100,
+            r.cp,
+            r.eta_vessels,
+            r.transit_vessels,
+            r.rel_diff * 100,
         )
     return df
 

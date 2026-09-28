@@ -4,6 +4,38 @@
 
 - [2026-Q2](changelog/2026-Q2.md) - 53 entries, 2026-06-10 to 2026-06-30
 
+## 2026-09-28 - main.py split into routers; ETA target seeding stops depending on the web app
+
+`backend/app/main.py` had grown to 8,963 lines holding all 83 endpoints plus the
+port reference data, the live-positions cache and every shared helper. It is now
+a ~60-line app factory (limiter, GZip, CORS, `include_router`), and the code lives in:
+
+- `app/routers/` - one module per page (`tracker`, `vessels`, `fleet`, `events`,
+  `pipelines`, `cycle`, `research`) and six `analytics_*` modules split the same way
+  as the frontend's `routes/analytics/-*Cards.tsx` (fleet, risk, chokepoints, ports,
+  cargo, eta). The largest is `analytics_risk.py` at ~1.9k lines.
+- `app/common.py` (freshness cutoffs, coercion, `haversine_nm`, `write_atomic`),
+  `app/live.py` (the cached `live_positions` frame and feed status), `app/ports.py`
+  (port and terminal reference data plus destination canonicalisation).
+
+The move was done by an AST script, not by hand: each top-level statement moved
+verbatim with its comments, imports were recomputed from `symtable` scope analysis
+and pruned by ruff, and a shared name became public only where another module uses
+it. **Acceptance was an identical `GET /openapi.json`** (paths and components) between
+the old and new app, plus the full suite (736 passed). The suite caught two
+regressions the OpenAPI comparison cannot see, both fixed: the static-JSON path was
+computed from `__file__` and pointed into `app/routers/`, and three function-local
+`from .schemas import` lines needed the extra dot. The stale "Phase NN" section
+banners were dropped, and `_SEG_TYPICAL_SOG`, a speed-range table nothing read, was
+deleted.
+
+**`analytics/eta_labels.py` no longer imports the web app.** It pulled the
+terminal dictionaries from `app.main`, which loaded FastAPI and every endpoint into
+the batch job, inside a `try/except Exception` that fell back to a four-terminal
+"vendored core" on any failure: target seeding would have shrunk from 47 curated
+points to 4 with only a log warning. `app/ports.py` has no FastAPI or DB imports,
+so this is now a plain import that fails loudly.
+
 ## 2026-09-27 - a second ML target, conformal calibrated on the cells the gate judges, and the served band held to the gate
 
 The weekly ETA retrain log showed ML 4-5x worse than physics at short lead (5.35h vs

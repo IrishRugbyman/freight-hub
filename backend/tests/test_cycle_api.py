@@ -86,6 +86,7 @@ def cycle_client(tmp_path, monkeypatch) -> TestClient:
     """App wired to a fixture registry with stubbed resolvers and a cold cache."""
     from app import cycle as _cycle
     from app import main as _main
+    from app.routers import cycle as _cycle_router
 
     path = tmp_path / "registry.yaml"
     path.write_text(
@@ -110,14 +111,14 @@ def cycle_client(tmp_path, monkeypatch) -> TestClient:
             spark=[2700.0, 2725.0, 2743.0],
         ),
     )
-    monkeypatch.setitem(_main._cycle_cache, "signals", None)
-    monkeypatch.setitem(_main._cycle_cache, "ts", 0.0)
+    monkeypatch.setitem(_cycle_router._cycle_cache, "signals", None)
+    monkeypatch.setitem(_cycle_router._cycle_cache, "ts", 0.0)
 
     yield TestClient(_main.app)
 
     _cycle._cached_registry.cache_clear()
-    _main._cycle_cache["signals"] = None
-    _main._cycle_cache["ts"] = 0.0
+    _cycle_router._cycle_cache["signals"] = None
+    _cycle_router._cycle_cache["ts"] = 0.0
 
 
 def _by_id(payload: dict) -> dict:

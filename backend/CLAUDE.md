@@ -7,8 +7,10 @@ cautions, cycle board rules) has already been read; this file covers only what i
 ## Shape of the tree
 
 ```
-app/          FastAPI service. main.py (~8k lines, 83 GET endpoints) + schemas.py (~1.7k lines
-              of pydantic response models) + per-domain modules (cycle, fleet, feed, equasis,
+app/          FastAPI service. main.py builds the app (middleware + router registration only);
+              routers/ holds the 83 GET endpoints, one module per page or analytics area;
+              schemas.py (~1.7k lines of pydantic response models); shared helpers in
+              common.py / live.py / ports.py; per-domain modules (cycle, fleet, feed, equasis,
               myshiptracking) + runner_*.py bridges into research/ projects.
 analytics/    Hourly batch job (build.py) and the True ETA / destination-predictor stack.
               Writes freight_analytics.duckdb. Not imported by the API except via serving modules.
@@ -19,9 +21,23 @@ ingest_*.py   One-shot pipeline-route ingest scripts (root level, run by hand, n
 data/         DuckDB files owned by the batch jobs. Never commit, never hand-edit.
 ```
 
-`app/main.py` is one module by design (single `app`, no routers). New endpoints go at the
-bottom of the relevant `# ---` banner section, with the response model added to `schemas.py`.
-Do not split it into routers as a drive-by refactor.
+### Where code goes
+
+| Module | Holds |
+|---|---|
+| `app/main.py` | The `FastAPI` app, limiter, GZip, CORS, and the `include_router` list. No endpoints. |
+| `app/routers/tracker.py` | `/api/vessels`, `/api/chokepoints`, `/api/meta`, `/api/health`, `/api/stream` |
+| `app/routers/vessels.py` | `/api/vessels/{id}/...` detail endpoints (track, state, voyages, Equasis, MST) |
+| `app/routers/fleet.py`, `events.py`, `pipelines.py`, `cycle.py`, `research.py` | one page each |
+| `app/routers/analytics_*.py` | `/api/analytics/*`, split `fleet` / `risk` / `chokepoints` / `ports` / `cargo` / `eta`, mirroring the frontend's `routes/analytics/-*Cards.tsx` |
+| `app/common.py` | freshness cutoffs, `valid_imo` / `str_or_none` / `iso` coercion, `haversine_nm`, `write_atomic` |
+| `app/live.py` | the cached `live_positions` frame (`live_all`, `live_visible`, `query_live`), `covered_regions`, `feed_status` |
+| `app/ports.py` | port + terminal reference data and destination canonicalisation. Pure: no FastAPI, no DB, so the batch job imports it too (`analytics/eta_labels.py`) |
+
+A new endpoint goes in the router for its page, with its response model in `schemas.py`. A
+helper used by one router stays private (`_name`) in that router; it moves to a shared module,
+public, only once a second module needs it. Routers import shared modules, never each other.
+`GET /openapi.json` is the contract: a refactor that moves code must leave it byte-identical.
 
 ## Hard rules
 
@@ -44,7 +60,7 @@ Do not split it into routers as a drive-by refactor.
 
 `db.STALE_HOURS` (3, `FREIGHT_STALE_HOURS`) and `db.VISIBLE_HOURS` (24, `FREIGHT_VISIBLE_HOURS`)
 are the two cutoffs. Beyond stale a vessel is "dark" and greyed; beyond visible it disappears.
-Use `_fresh_cutoff()` / `_visible_cutoff()` in `main.py` rather than re-deriving a timedelta.
+Use `fresh_cutoff()` / `visible_cutoff()` from `app/common.py` rather than re-deriving a timedelta.
 
 ## Middleware and serving conventions
 
@@ -52,9 +68,9 @@ Use `_fresh_cutoff()` / `_visible_cutoff()` in `main.py` rather than re-deriving
 - GZip above 2048 bytes (the vessels payload is 1.5 MB+ raw).
 - CORS is an explicit allow-list: `https://freight.lbzgiu.xyz` + `http://localhost:5173`, GET only.
 - Static-backed endpoints (`/api/routes`, `/api/dispersion`) serve precomputed JSON from
-  `app/static/` via `_serve_cached()` and fall back to a live compute when the file is absent.
+  `app/static/` via `_serve_cached()` (`routers/research.py`) and fall back to a live compute when the file is absent.
   Regenerate with `.venv/bin/python precompute_freight.py`.
-- Writing any file at runtime uses `_write_atomic()` (tempfile + `os.replace`).
+- Writing any file at runtime uses `common.write_atomic()` (tempfile + `os.replace`).
 
 ## Batch jobs (systemd, unit files live in this directory)
 
