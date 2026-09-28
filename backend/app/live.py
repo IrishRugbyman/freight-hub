@@ -121,9 +121,15 @@ def live_visible():
             # Enrich ghost rows: pull name + imo from vessels PG table (no duplication,
             # just a keyed lookup - ais_name is written by the collector, ship_name by Equasis).
             mmsi_list = ghost_df["mmsi"].tolist()
+            # MMSI is not unique in `vessels` (reuse between hulls, rows built from
+            # garbled AIS static data), and a duplicate makes the .map() below raise.
+            # One row per MMSI: a valid 7-digit IMO first, then an Equasis-verified
+            # row, then the most recently updated.
             reg = db.pg_query(
-                "SELECT mmsi, imo, COALESCE(ship_name, ais_name) AS name "
-                "FROM vessels WHERE mmsi = ANY(%s)",
+                "SELECT DISTINCT ON (mmsi) mmsi, imo, COALESCE(ship_name, ais_name) AS name "
+                "FROM vessels WHERE mmsi = ANY(%s) "
+                "ORDER BY mmsi, (imo BETWEEN 1000000 AND 9999999) DESC, "
+                "fetch_ok IS TRUE DESC, updated_at DESC NULLS LAST",
                 [mmsi_list],
             )
             if not reg.empty:
