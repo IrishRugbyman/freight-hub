@@ -36,6 +36,30 @@ the batch job, inside a `try/except Exception` that fell back to a four-terminal
 points to 4 with only a log warning. `app/ports.py` has no FastAPI or DB imports,
 so this is now a plain import that fails loudly.
 
+### Same day: generated API types, script move, card split
+
+- **Frontend response types are generated from the backend schema.** `api.ts` hand-kept
+  150 types mirroring `schemas.py`; they are now aliases into `api-schema.gen.ts`
+  (`npm run gen:api`, from a committed `frontend/openapi.json` that
+  `test_openapi_snapshot.py` holds to the live schema). `api.ts` went 2,556 -> 1,305 lines.
+  `tsc` then found **a shipped bug**: the Fleet-at-time card read `laden` / `ballast` /
+  `underway` while the API sends `*_count`, so every row showed blank counts since the card
+  shipped. It also found that the fleet table pushed a `null` flag or owner into the URL filter.
+  Response models now share an `ApiModel` base marking defaulted fields required in the
+  serialisation schema (FastAPI always sends them), and `bbox` is a typed `(lat, lon)` pair.
+- **Equasis panel 500'd for 97% of vessels** (6,900 of 7,078): the registry's integer `mmsi`
+  and `ais_ship_type` columns came back as `numpy.int64`, which FastAPI cannot encode. Found
+  while smoke-testing the router split; it predates it. Fixed, with a regression test.
+- **The 13 pipeline ingest scripts moved to `backend/scripts/pipelines/`**, with a README
+  listing each one's source and target table. Their `sys.path` inserts all pointed at paths
+  that do not exist and were removed; data paths now resolve from `backend/`.
+- **`-PortsCargoCards.tsx` (2,207 lines) split** into `-PortsCards`, `-CargoCards`,
+  `-EuropeanSupplyCards` and `-EtaCards`, the original file keeping only the tab's
+  composition. `useGoToTracker`, byte-identical in four files, now lives once in
+  `-analyticsShared.tsx`.
+- **Fleet-trend fixture no longer straddles midnight.** Two density rows seeded at `now - 2h`
+  and `now - 1h` fell on different days between 00:00 and 02:00 UTC, failing two tests.
+
 ## 2026-09-27 - a second ML target, conformal calibrated on the cells the gate judges, and the served band held to the gate
 
 The weekly ETA retrain log showed ML 4-5x worse than physics at short lead (5.35h vs

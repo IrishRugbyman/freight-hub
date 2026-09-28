@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { useNavigate } from '@tanstack/react-router'
 import {
   Bar, CartesianGrid, ComposedChart, Legend, Line,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -10,19 +9,11 @@ import {
   useFlagRisk, useFleetAge, useTransitRisk, useAnchorageDwell, useStsRisk,
   useFlagMismatches, useChokepoints,
 } from '@/lib/api'
-import { fmt, EmptyState, ChartSkeleton, TOOLTIP_STYLE, LEGEND_STYLE } from './-analyticsShared'
+import { fmt, EmptyState, ChartSkeleton, TOOLTIP_STYLE, LEGEND_STYLE, useGoToTracker } from './-analyticsShared'
 
 // ---------------------------------------------------------------------------
 // Local helpers (Risk tab only)
 // ---------------------------------------------------------------------------
-function useGoToTracker() {
-  const navigate = useNavigate()
-  return (mmsi: number, lat?: number | null, lon?: number | null) => {
-    const search: Record<string, unknown> = { mmsi }
-    if (lat != null && lon != null) { search.lat = lat; search.lon = lon }
-    navigate({ to: '/tracker', search: search as never })
-  }
-}
 
 function riskColor(score: number): string {
   if (score >= 70) return 'text-red-400'

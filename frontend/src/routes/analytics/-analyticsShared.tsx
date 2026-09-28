@@ -1,6 +1,7 @@
 // Shared helpers and constants used across multiple analytics tab modules.
 // Card-local-only helpers stay co-located in their tab file.
 
+import { useNavigate } from '@tanstack/react-router'
 import { Skeleton } from '@/components/ui/skeleton'
 
 export function fmt(s: string): string {
@@ -36,4 +37,14 @@ export const REGION_LABELS: Record<string, string> = {
   black_sea: 'Black Sea', med: 'Med', us_east_coast: 'US East',
   us_west_coast: 'US West', brazil: 'Brazil', australia: 'Australia',
   saldanha_richards_bay: 'S Africa', unknown: '?',
+}
+
+/** Navigate to the tracker with a vessel selected, centred on it when a position is known. */
+export function useGoToTracker() {
+  const navigate = useNavigate()
+  return (mmsi: number, lat?: number | null, lon?: number | null) => {
+    const search: Record<string, unknown> = { mmsi }
+    if (lat != null && lon != null) { search.lat = lat; search.lon = lon }
+    navigate({ to: '/tracker', search: search as never })
+  }
 }

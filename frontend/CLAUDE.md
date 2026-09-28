@@ -30,9 +30,19 @@ Nav lives in `src/routes/__root.tsx`. Disabled entries render as a "soon" chip v
 
 ## Data layer
 
-`src/lib/api.ts` is the single API surface: ~79 exported `use*` hooks, all typed against the
-backend's pydantic models, all going through one `getJSON<T>()` helper. Do not call `fetch`
-from a component and do not put a raw URL in a route file - add a hook here.
+`src/lib/api.ts` is the single API surface: ~79 exported `use*` hooks, all going through one
+`getJSON<T>()` helper. Do not call `fetch` from a component and do not put a raw URL in a route
+file - add a hook here.
+
+**Response types are generated, not written.** `export type Vessel = Schemas['Vessel']` aliases
+into `src/lib/api-schema.gen.ts`, which `npm run gen:api` builds from `openapi.json` (a snapshot
+of the backend's schema). After a backend model changes: `.venv/bin/python
+scripts/export_openapi.py` in `backend/`, then `npm run gen:api` here, then `tsc -b` shows every
+consumer the change breaks. The backend test `test_openapi_snapshot.py` fails if the snapshot is
+stale. Never hand-edit the `.gen.ts` file; only the few types with no backend model (request
+params like `VesselFilters`, and `EquasisData`, whose endpoint returns a plain dict) are
+hand-written. The generator runs through a pinned `npx` because it declares a TypeScript 5 peer
+and this project is on 6; the generated file is committed, so builds never need it.
 
 Cadence constants, matched to how the data is actually produced:
 
@@ -112,8 +122,10 @@ initial chunk.
 ## Conventions worth keeping
 
 - Big analytics tabs are split into `-*Cards.tsx` modules under `routes/analytics/`, with shared
-  helpers (`fmt`, `ChartSkeleton`, `EmptyState`, `TOOLTIP_STYLE`, `REGION_LABELS`) in
-  `-analyticsShared.tsx`. Card-local helpers stay co-located.
+  helpers (`fmt`, `ChartSkeleton`, `EmptyState`, `TOOLTIP_STYLE`, `REGION_LABELS`,
+  `useGoToTracker`) in `-analyticsShared.tsx`. Card-local helpers stay co-located. A tab file
+  that outgrows ~700 lines becomes a composer over per-area modules, as `-PortsCargoCards.tsx`
+  does over `-PortsCards` / `-CargoCards` / `-EuropeanSupplyCards` / `-EtaCards`.
 - Every panel handles three states: loading (`Skeleton` / `ChartSkeleton`), empty
   (`EmptyState` with a reason), and data. The backend returns empty-but-valid bodies routinely,
   so the empty state is a normal path, not an error path.
