@@ -2,7 +2,7 @@
 Scrape US natural gas pipeline specs from RexTag.com.
 
 Usage:
-    .venv/bin/python scrape_rextag.py [--out rextag_pipelines.json] [--resume]
+    .venv/bin/python scripts/pipelines/scrape_rextag.py [--out rextag_pipelines.json] [--resume]
 
 Fetches ~125 FERC-regulated pipeline/storage pages and extracts:
   name, slug, owner, operator, length_miles, capacity_bcfd,
@@ -102,7 +102,7 @@ def fetch_slugs(session: requests.Session) -> list[tuple[str, str]]:
 
 
 def parse_pipeline_page(soup: BeautifulSoup, name: str, slug: str) -> dict:
-    lines = [l for l in soup.get_text("\n", strip=True).split("\n") if l]
+    lines = [ln for ln in soup.get_text("\n", strip=True).split("\n") if ln]
     record: dict = {"name": name, "slug": slug}
 
     # Line-by-line: label line followed by value line
@@ -140,7 +140,7 @@ def parse_pipeline_page(soup: BeautifulSoup, name: str, slug: str) -> dict:
     return record
 
 
-_BASE_DIR = Path(__file__).resolve().parent
+_BASE_DIR = Path(__file__).resolve().parents[2]  # backend/
 
 
 def _resolve_out_path(raw: str) -> Path:

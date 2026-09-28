@@ -18,7 +18,7 @@ Target pipelines (all intra-provincial Alberta, not CER-regulated):
 
 Usage:
     cd backend
-    .venv/bin/python ingest_aer_pipeline_routes.py [--db <path>] [--dry-run] [--force]
+    .venv/bin/python scripts/pipelines/ingest_aer_pipeline_routes.py [--db <path>] [--dry-run] [--force]
 
 Options:
     --force    Overwrite existing routes (default: skip already-routed WM IDs)
@@ -35,7 +35,7 @@ from pathlib import Path
 
 import duckdb
 
-DB_DEFAULT = Path(__file__).parent / "data" / "freight_analytics.duckdb"
+DB_DEFAULT = Path(__file__).resolve().parents[2] / "data" / "freight_analytics.duckdb"
 
 AER_URL = (
     "https://gis.energy.gov.ab.ca/arcgis/rest/services/Geoview/ERCB_Ext_PROD/MapServer/10/query"

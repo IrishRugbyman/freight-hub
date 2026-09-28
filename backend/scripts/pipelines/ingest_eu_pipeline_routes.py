@@ -7,7 +7,7 @@ table in freight_analytics.duckdb.
 
 Usage:
     cd backend
-    uv run python ingest_eu_pipeline_routes.py
+    .venv/bin/python scripts/pipelines/ingest_eu_pipeline_routes.py
     # or re-run to refresh (idempotent, overwrites table)
 """
 
@@ -16,13 +16,12 @@ from __future__ import annotations
 import heapq
 import json
 import math
-import sys
 import zipfile
 from pathlib import Path
 
-ANALYTICS_DB = Path(__file__).parent / "data" / "freight_analytics.duckdb"
+ANALYTICS_DB = Path(__file__).resolve().parents[2] / "data" / "freight_analytics.duckdb"
 IGGIELGN_URL = "https://zenodo.org/api/records/4767098/files/IGGIELGN.zip/content"
-TMP_DIR = Path(__file__).parent / "data" / "eu_pipelines_tmp"
+TMP_DIR = Path(__file__).resolve().parents[2] / "data" / "eu_pipelines_tmp"
 
 # ---- Haversine ----
 
@@ -124,7 +123,7 @@ def load_iggielgn(geojson_path: Path) -> dict:
 
         coords: list[tuple] = [(lat_s, lon_s)]
         if path_lat:
-            for la, lo in zip(path_lat, path_lon):
+            for la, lo in zip(path_lat, path_lon, strict=False):
                 coords.append((la, lo))
         coords.append((lat_e, lon_e))
 
@@ -244,7 +243,6 @@ def path_to_coords(path: list[int], segments: list[dict], start_node: int) -> li
 
 def load_wm_eu_pipelines() -> list[dict]:
     """Load World Monitor EU pipelines with start/end coordinates."""
-    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "shared" / "market-data"))
     from loaders.worldmonitor import load_pipeline_registry
 
     df = load_pipeline_registry()

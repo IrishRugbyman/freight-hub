@@ -10,7 +10,7 @@ RDP simplification (epsilon=0.05 deg ~5 km) reduces this to a renderable count.
 
 Usage:
     cd backend
-    .venv/bin/python ingest_cer_pipeline_routes.py [--db <path>] [--dry-run] [--force]
+    .venv/bin/python scripts/pipelines/ingest_cer_pipeline_routes.py [--db <path>] [--dry-run] [--force]
 
 Options:
     --force    Overwrite existing routes (default: skip already-routed WM IDs)
@@ -27,7 +27,7 @@ from pathlib import Path
 
 import duckdb
 
-DB_DEFAULT = Path(__file__).parent / "data" / "freight_analytics.duckdb"
+DB_DEFAULT = Path(__file__).resolve().parents[2] / "data" / "freight_analytics.duckdb"
 
 CER_URL = (
     "https://services5.arcgis.com/vNzamREXvX2WcX6d/arcgis/rest/services"
@@ -59,35 +59,35 @@ _MIN_PATH_KM: dict[str, float] = {
 # ---------------------------------------------------------------------------
 _CER_TO_WM: dict[str, list[str]] = {
     # --- Gas pipelines ---
-    "NGTL":      ["nova-gas-transmission-ngtl-pipeline-alberta-gas-pipeline-sys-ca"],
+    "NGTL": ["nova-gas-transmission-ngtl-pipeline-alberta-gas-pipeline-sys-ca"],
     "Westcoast": ["bc-gas-pipeline-westcoast-pipeline-ca"],
     "Foothills": ["foothills-system-gas-pipeline-ca"],
-    "TCPL":      ["canadian-mainline-gas-pipeline-ca"],
-    "Alliance":  [],  # already routed from OSM
-    "MNP":       [],  # maritimes-and-northeast-gas-pipeline-ca already routed
-    "TQM":       [],  # already routed
-    "Vector":    [],  # great-lakes-gas-transmission-pipeline-ca already routed
+    "TCPL": ["canadian-mainline-gas-pipeline-ca"],
+    "Alliance": [],  # already routed from OSM
+    "MNP": [],  # maritimes-and-northeast-gas-pipeline-ca already routed
+    "TQM": [],  # already routed
+    "Vector": [],  # great-lakes-gas-transmission-pipeline-ca already routed
     "ManyIslands": [],
     "Brunswick": [],
     # --- Liquid pipelines ---
-    "Cochin":         ["cochin-pipeline-system-ca"],
+    "Cochin": ["cochin-pipeline-system-ca"],
     "EnbridgeBakken": ["enbridge-line-65-oil-pipeline-ca"],
-    "Wascana":        ["saskatchewan-oil-pipeline-ca"],
-    "TransMountain":  [],  # trans-mountain already routed from EIA/OSM
-    "Keystone":       [],  # keystone already routed from EIA
+    "Wascana": ["saskatchewan-oil-pipeline-ca"],
+    "TransMountain": [],  # trans-mountain already routed from EIA/OSM
+    "Keystone": [],  # keystone already routed from EIA
     "EnbridgeMainline": [],  # enbridge-mainline already routed
-    "EnbridgeLine9":  [],  # already routed
-    "Express":        [],  # express-oil-pipeline-system-ca already routed
-    "NormanWells":    [],  # norman-wells-oil-pipeline-ca already routed
+    "EnbridgeLine9": [],  # already routed
+    "Express": [],  # express-oil-pipeline-system-ca already routed
+    "NormanWells": [],  # norman-wells-oil-pipeline-ca already routed
     "SouthernLights": [],  # already routed (enbridge-mainline shares corridor)
-    "EnbridgeLine7":  [],
+    "EnbridgeLine7": [],
     "EnbridgeLine11": [],
-    "TransNorthern":  [],
-    "Montreal":       [],
-    "Genesis":        [],
-    "Westspur":       [],  # westpur-oil-pipeline-ca already routed
-    "Aurora":         [],
-    "MilkRiver":      [],
+    "TransNorthern": [],
+    "Montreal": [],
+    "Genesis": [],
+    "Westspur": [],  # westpur-oil-pipeline-ca already routed
+    "Aurora": [],
+    "MilkRiver": [],
     "EnbridgeLine65": [],  # not a real PipelineID - covered by EnbridgeBakken above
 }
 
@@ -95,6 +95,7 @@ _CER_TO_WM: dict[str, list[str]] = {
 # ---------------------------------------------------------------------------
 # Geometry utilities
 # ---------------------------------------------------------------------------
+
 
 def _hav(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     R = 6371.0
@@ -160,18 +161,21 @@ def _path_km(segments: list) -> float:
 # CER fetch
 # ---------------------------------------------------------------------------
 
+
 def fetch_cer_pipelines() -> list[dict]:
     """Return list of {pipeline_id, pipeline_name, company, commodity, paths} dicts.
 
     Each path is a list of [lat, lon] pairs (coordinates swapped from GeoJSON [lng,lat]).
     """
-    params = urllib.parse.urlencode({
-        "where": "1=1",
-        "outFields": "PipelineID,Pipeline_Name,Company,Commodity",
-        "returnGeometry": "true",
-        "f": "geojson",
-        "resultRecordCount": 2000,
-    })
+    params = urllib.parse.urlencode(
+        {
+            "where": "1=1",
+            "outFields": "PipelineID,Pipeline_Name,Company,Commodity",
+            "returnGeometry": "true",
+            "f": "geojson",
+            "resultRecordCount": 2000,
+        }
+    )
     url = f"{CER_URL}?{params}"
     with urllib.request.urlopen(url, timeout=60) as resp:
         data = json.loads(resp.read())
@@ -200,13 +204,15 @@ def fetch_cer_pipelines() -> list[dict]:
         if not paths:
             continue
 
-        results.append({
-            "pipeline_id": pid,
-            "pipeline_name": (props.get("Pipeline_Name") or "").strip(),
-            "company": (props.get("Company") or "").strip(),
-            "commodity": (props.get("Commodity") or "").strip(),
-            "paths": paths,
-        })
+        results.append(
+            {
+                "pipeline_id": pid,
+                "pipeline_name": (props.get("Pipeline_Name") or "").strip(),
+                "company": (props.get("Company") or "").strip(),
+                "commodity": (props.get("Commodity") or "").strip(),
+                "paths": paths,
+            }
+        )
 
     return results
 
@@ -214,6 +220,7 @@ def fetch_cer_pipelines() -> list[dict]:
 # ---------------------------------------------------------------------------
 # DB helpers
 # ---------------------------------------------------------------------------
+
 
 def _already_routed(con: duckdb.DuckDBPyConnection) -> set[str]:
     """Return set of WM IDs that already have routes in global_pipeline_routes."""
@@ -238,12 +245,14 @@ def _ensure_table(con: duckdb.DuckDBPyConnection) -> None:
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--db", default=str(DB_DEFAULT))
     ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--force", action="store_true",
-                    help="Overwrite routes for already-routed WM IDs")
+    ap.add_argument(
+        "--force", action="store_true", help="Overwrite routes for already-routed WM IDs"
+    )
     args = ap.parse_args()
 
     print("=== CER Pipeline Routes Ingest ===\n")

@@ -11,7 +11,7 @@ each segment a [[lat,lon], ...] array.
 
 Usage:
     cd backend
-    .venv/bin/python ingest_eia_oil_routes.py [--db <path>] [--dry-run]
+    .venv/bin/python scripts/pipelines/ingest_eia_oil_routes.py [--db <path>] [--dry-run]
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from pathlib import Path
 
 import duckdb
 
-DB_DEFAULT = Path(__file__).parent / "data" / "freight_analytics.duckdb"
+DB_DEFAULT = Path(__file__).resolve().parents[2] / "data" / "freight_analytics.duckdb"
 
 # EIA FeatureServer endpoints
 CRUDE_OIL_URL = (
@@ -53,7 +53,10 @@ _MANUAL: dict[tuple[str, str], list[str]] = {
     ("ENBRIDGE", "Lakehead"): ["enbridge-mainline"],
     ("ENBRIDGE", "Southern Access"): ["enbridge-mainline"],
     # Alberta Clipper (Line 67) / Line 93: two WM IDs for same physical pipe
-    ("ENBRIDGE", "Alberta Clipper"): ["enbridge-line-93-oil-pipeline-ca", "alberta-clipper-oil-pipeline-ca"],
+    ("ENBRIDGE", "Alberta Clipper"): [
+        "enbridge-line-93-oil-pipeline-ca",
+        "alberta-clipper-oil-pipeline-ca",
+    ],
     # Enbridge North Dakota system = Lines 14/62/64 (Berthold ND -> Clearbrook MN)
     ("ENBRIDGE", "North Dakota System"): ["enbridge-line-14-64-oil-pipeline-us"],
     # Ozark / Midcontinent: Patoka IL -> Cushing OK (and Patoka-Lima expansion)
@@ -94,8 +97,12 @@ _MANUAL: dict[tuple[str, str], list[str]] = {
     ("MAGELLAN MIDSTREAM PARTNERS", "BridgeTex"): ["bridgetex-oil-pipeline-us"],
     ("MAGELLAN MIDSTREAM PARTNERS", "Longhorn"): ["longhorn-oil-pipeline-crude-oil-system-us"],
     # Saddlehorn and Grand Mesa share same DJ Basin -> Cushing corridor
-    ("MAGELLAN MIDSTREAM PARTNERS", "Saddlehorn Pipeline"): ["saddlehorn-oil-pipeline-expansion-us"],
-    ("MAGELLAN MIDSTREAM PARTNERS", "Saddlehorn Grand Mesa Pipeline"): ["grand-mesa-oil-pipeline-us"],
+    ("MAGELLAN MIDSTREAM PARTNERS", "Saddlehorn Pipeline"): [
+        "saddlehorn-oil-pipeline-expansion-us"
+    ],
+    ("MAGELLAN MIDSTREAM PARTNERS", "Saddlehorn Grand Mesa Pipeline"): [
+        "grand-mesa-oil-pipeline-us"
+    ],
     # Capline (Shell, St James LA -> Patoka IL - reversed direction post-2021)
     ("SHELL PIPELINE COMPANY", "Capline"): ["capline-oil-pipeline-us"],
     # Basin and Cactus (Plains All American)
@@ -150,26 +157,26 @@ _OP_SLUG_MAP: dict[str, str] = {}
 # Text normalisation for fuzzy matching
 # ---------------------------------------------------------------------------
 _EXPAND = {
-    r'\bpl\b': 'pipeline',
-    r'\bpipe\b': 'pipeline',
-    r'\bcorp\b': 'corporation',
-    r'\binc\b': 'incorporated',
-    r'\bllc\b': '',
-    r'\blp\b': '',
-    r'\bcrud[eo]?\b': 'crude',
-    r'\boil\b': 'oil',
-    r'\btrans\b': 'trans',
-    r'\bsys\b': 'system',
-    r'\bpetroleum\b': 'petroleum',
-    r'\bproducts?\b': 'product',
-    r'\brefined\b': 'refined',
+    r"\bpl\b": "pipeline",
+    r"\bpipe\b": "pipeline",
+    r"\bcorp\b": "corporation",
+    r"\binc\b": "incorporated",
+    r"\bllc\b": "",
+    r"\blp\b": "",
+    r"\bcrud[eo]?\b": "crude",
+    r"\boil\b": "oil",
+    r"\btrans\b": "trans",
+    r"\bsys\b": "system",
+    r"\bpetroleum\b": "petroleum",
+    r"\bproducts?\b": "product",
+    r"\brefined\b": "refined",
 }
 
 
 def _norm(s: str) -> set[str]:
-    s = unicodedata.normalize('NFKD', str(s)).encode('ascii', 'ignore').decode()
+    s = unicodedata.normalize("NFKD", str(s)).encode("ascii", "ignore").decode()
     s = s.lower()
-    s = re.sub(r'[^a-z0-9\s]', ' ', s)
+    s = re.sub(r"[^a-z0-9\s]", " ", s)
     for pat, repl in _EXPAND.items():
         s = re.sub(pat, repl, s)
     return {w for w in s.split() if len(w) > 1}
@@ -200,7 +207,7 @@ def _rdp(pts: list[list[float]], eps: float) -> list[list[float]]:
         if dist > max_dist:
             max_dist, max_idx = dist, i
     if max_dist > eps:
-        return _rdp(pts[:max_idx + 1], eps)[:-1] + _rdp(pts[max_idx:], eps)
+        return _rdp(pts[: max_idx + 1], eps)[:-1] + _rdp(pts[max_idx:], eps)
     return [pts[0], pts[-1]]
 
 
@@ -238,11 +245,11 @@ def _fetch_features(base_url: str, op_field: str, name_field: str) -> list[dict]
         )
         with urllib.request.urlopen(url, timeout=30) as r:
             d = json.loads(r.read())
-        batch_feats = d.get('features', [])
+        batch_feats = d.get("features", [])
         for feat in batch_feats:
-            a = feat.get('attributes', {})
-            geom = feat.get('geometry', {})
-            paths = geom.get('paths', [])
+            a = feat.get("attributes", {})
+            geom = feat.get("geometry", {})
+            paths = geom.get("paths", [])
             # paths: [[[lon, lat], ...], ...]  -> flip to [[lat, lon], ...]
             converted: list[list[list[float]]] = []
             for path in paths:
@@ -250,11 +257,13 @@ def _fetch_features(base_url: str, op_field: str, name_field: str) -> list[dict]
                 if len(seg) >= 2:
                     converted.append(seg)
             if converted:
-                features.append({
-                    'opername': (a.get(op_field) or '').strip(),
-                    'pipename': (a.get(name_field) or '').strip(),
-                    'paths': converted,
-                })
+                features.append(
+                    {
+                        "opername": (a.get(op_field) or "").strip(),
+                        "pipename": (a.get(name_field) or "").strip(),
+                        "paths": converted,
+                    }
+                )
         print(f"  offset={offset}: {len(batch_feats)} records", flush=True)
         if len(batch_feats) < batch:
             break
@@ -269,8 +278,8 @@ def _group_features(features: list[dict]) -> dict[tuple[str, str], list[list[lis
     """Group by (opername, pipename), merging all path segments."""
     by_key: dict[tuple[str, str], list[list[list[float]]]] = defaultdict(list)
     for feat in features:
-        key = (feat['opername'], feat['pipename'])
-        by_key[key].extend(feat['paths'])
+        key = (feat["opername"], feat["pipename"])
+        by_key[key].extend(feat["paths"])
     return dict(by_key)
 
 
@@ -288,9 +297,9 @@ def match_to_wm(
     Fuzzy matching is restricted to US/CA WM pipelines to avoid false positives
     matching international WM IDs to US EIA pipeline names.
     """
-    wm_by_id = {p['id']: p for p in wm_all}
+    wm_by_id = {p["id"]: p for p in wm_all}
     # Fuzzy matching only over US/CA pipelines
-    wm_norm = {p['id']: _norm(p['id'].replace('-', ' ') + ' ' + p['name']) for p in wm_us_ca}
+    wm_norm = {p["id"]: _norm(p["id"].replace("-", " ") + " " + p["name"]) for p in wm_us_ca}
 
     results: dict[str, list[list[list[float]]]] = defaultdict(list)
 
@@ -312,7 +321,7 @@ def match_to_wm(
 
         # 3. Fuzzy match composite string against WM ids + names
         if not wm_ids:
-            composite_words = _norm(opername + ' ' + pipename)
+            composite_words = _norm(opername + " " + pipename)
             best_score, best_id = 0.0, None
             for pid, pwords in wm_norm.items():
                 score = _jaccard(composite_words, pwords)
@@ -342,17 +351,14 @@ def _load_wm_oil(db_path: str | None = None) -> tuple[list[dict], list[dict]]:
     Cross-border CA->US and US->CA pipelines are included since EIA may have
     their US segments.
     """
-    import sys
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'shared' / 'market-data' / 'src'))
     from loaders.worldmonitor import load_pipelines_for_map
+
     df = load_pipelines_for_map(disrupted_only=False)
-    oil = df[df['commodity'] == 'oil'].copy()
-    all_oil = oil[['id', 'name']].to_dict('records')
+    oil = df[df["commodity"] == "oil"].copy()
+    all_oil = oil[["id", "name"]].to_dict("records")
     # Fuzzy scope: must have US as from OR to country (not Canada-only, not international)
-    us_eligible = oil[
-        (oil['from_country'] == 'US') | (oil['to_country'] == 'US')
-    ][['id', 'name']]
-    return all_oil, us_eligible.to_dict('records')
+    us_eligible = oil[(oil["from_country"] == "US") | (oil["to_country"] == "US")][["id", "name"]]
+    return all_oil, us_eligible.to_dict("records")
 
 
 # ---------------------------------------------------------------------------
@@ -360,21 +366,21 @@ def _load_wm_oil(db_path: str | None = None) -> tuple[list[dict], list[dict]]:
 # ---------------------------------------------------------------------------
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--db', default=str(DB_DEFAULT))
-    parser.add_argument('--dry-run', action='store_true')
-    parser.add_argument('--epsilon', type=float, default=RDP_EPSILON)
+    parser.add_argument("--db", default=str(DB_DEFAULT))
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--epsilon", type=float, default=RDP_EPSILON)
     args = parser.parse_args()
 
     print("=== EIA Oil Pipeline Routes Ingest ===\n", flush=True)
 
     # Download crude oil features
     print("Downloading crude oil pipelines...", flush=True)
-    crude_feats = _fetch_features(CRUDE_OIL_URL, 'opername', 'pipename')
+    crude_feats = _fetch_features(CRUDE_OIL_URL, "opername", "pipename")
     print(f"  {len(crude_feats)} crude oil segments\n", flush=True)
 
     # Download petroleum product features
     print("Downloading petroleum product pipelines...", flush=True)
-    petro_feats = _fetch_features(PETRO_PROD_URL, 'Opername', 'Pipename')
+    petro_feats = _fetch_features(PETRO_PROD_URL, "Opername", "Pipename")
     print(f"  {len(petro_feats)} petroleum product segments\n", flush=True)
 
     # Combine and group
@@ -393,7 +399,7 @@ def main():
     print(f"  Matched: {len(matched)} WM pipelines", flush=True)
 
     # Simplify geometry
-    print("\nSimplifying geometry (RDP epsilon={:.3f} deg)...".format(args.epsilon), flush=True)
+    print(f"\nSimplifying geometry (RDP epsilon={args.epsilon:.3f} deg)...", flush=True)
     simplified: dict[str, list[list[list[float]]]] = {}
     for wm_id, segs in matched.items():
         s = simplify_segments(segs, args.epsilon)
@@ -439,5 +445,5 @@ def main():
     print("\nDone. Restart freight-api to pick up changes.")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

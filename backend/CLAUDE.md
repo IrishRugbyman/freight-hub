@@ -17,7 +17,7 @@ analytics/    Hourly batch job (build.py) and the True ETA / destination-predict
 registry/     Daily crawlers (Equasis, MyShipTracking, ITU MARS, OFAC) + risk scoring.
               Write vessel_registry.duckdb / mst.duckdb / PG vessels.
 tests/        pytest, TestClient + seeded temp DuckDB. conftest.py owns every fixture.
-ingest_*.py   One-shot pipeline-route ingest scripts (root level, run by hand, not services).
+scripts/pipelines/  One-shot pipeline-route ingest scripts (run by hand, not services); see its README.
 data/         DuckDB files owned by the batch jobs. Never commit, never hand-edit.
 ```
 
@@ -180,7 +180,7 @@ governs production analysis inputs, not test fixtures.
 
 ## Gotchas
 
-- `ingest_*.py` at the repo root are one-shot scripts, not part of the service. They are run by
+- `scripts/pipelines/*.py` are one-shot scripts, not part of the service. They are run by
   hand and some hit slow external sources.
 - `app/freight_api.egg-info/` is build output from the editable install; ignore it.
 - `data/*.duckdb` and `.env` are local state. Nothing in `data/` is reproducible from git alone -

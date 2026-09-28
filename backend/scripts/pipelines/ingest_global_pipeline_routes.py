@@ -12,7 +12,7 @@ Results stored in global_pipeline_routes table in freight_analytics.duckdb.
 
 Usage:
     cd backend
-    .venv/bin/python ingest_global_pipeline_routes.py
+    .venv/bin/python scripts/pipelines/ingest_global_pipeline_routes.py
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ import sys
 import time
 from pathlib import Path
 
-ANALYTICS_DB = Path(__file__).parent / "data" / "freight_analytics.duckdb"
+ANALYTICS_DB = Path(__file__).resolve().parents[2] / "data" / "freight_analytics.duckdb"
 
 # World regions to query via Overpass (south, west, north, east)
 # Excludes Europe/Russia-west/N.Africa which are already covered by IGGIELGN.
@@ -155,7 +155,7 @@ def _wait_for_slot(max_wait: int = 120) -> None:
 def _overpass_query(ql: str, timeout_s: int = 180) -> list[dict] | None:
     """Run an Overpass QL query via curl; return elements list or None on failure."""
     global _ep_idx
-    for attempt in range(3):
+    for _attempt in range(3):
         endpoint = _OVERPASS_ENDPOINTS[_ep_idx % len(_OVERPASS_ENDPOINTS)]
         result = subprocess.run(
             ["curl", "-s", "--max-time", str(timeout_s + 15), "-X", "POST", endpoint, "--data", ql],
@@ -346,7 +346,6 @@ def path_to_coords(
 
 
 def load_unrouted_wm() -> list[dict]:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "shared" / "market-data"))
     from loaders.worldmonitor import load_pipelines_for_map
 
     df = load_pipelines_for_map(disrupted_only=False)
@@ -370,7 +369,6 @@ def load_unrouted_wm() -> list[dict]:
 
 
 def load_unrouted_rextag() -> list[dict]:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "shared" / "market-data"))
     from loaders.worldmonitor import load_rextag_us_only_pipelines
 
     df = load_rextag_us_only_pipelines()
@@ -515,9 +513,9 @@ def main():
             route_json   TEXT
         )
     """)
-    already_done = set(
+    already_done = {
         r[0] for r in con.execute("SELECT wm_id FROM global_pipeline_routes").fetchall()
-    )
+    }
     con.close()
 
     if already_done:

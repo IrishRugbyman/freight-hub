@@ -10,34 +10,23 @@ the existing global_pipeline_routes table (INSERT OR REPLACE).
 
 Usage:
     cd backend
-    .venv/bin/python ingest_global_pipeline_routes_pass2.py
+    .venv/bin/python scripts/pipelines/ingest_global_pipeline_routes_pass2.py
 """
 
 from __future__ import annotations
 
-import json
-import subprocess
-import sys
 import time
-from pathlib import Path
-
-# Import shared utilities from the first-pass script
-sys.path.insert(0, str(Path(__file__).parent))
-from ingest_global_pipeline_routes import (
-    ANALYTICS_DB,
-    MAX_SNAP_KM,
-    _wait_for_slot,
-    _overpass_query,
-    _OIL_GAS_FILTER,
-    fetch_pipeline_ways,
-    build_graph,
-    route_pipelines_on_graph,
-    simplify,
-    _haversine_km,
-    load_unrouted_wm,
-)
 
 import duckdb
+
+# Import shared utilities from the first-pass script
+from ingest_global_pipeline_routes import (
+    ANALYTICS_DB,
+    build_graph,
+    fetch_pipeline_ways,
+    load_unrouted_wm,
+    route_pipelines_on_graph,
+)
 
 # Super-regions: list of (name, list of (south,west,north,east) bbox tuples)
 # Each super-region's ways are merged before routing.
@@ -45,44 +34,44 @@ SUPER_REGIONS = [
     (
         "north_america",
         [
-            (48.0, -170.0, 73.0, -100.0),   # alaska_canada_w
-            (42.0, -100.0,  65.0,  -52.0),   # canada_east
-            (24.0, -130.0,  50.0, -100.0),   # us_west
-            (24.0, -100.0,  50.0,  -86.0),   # us_central
-            (24.0,  -86.0,  50.0,  -55.0),   # us_east
-            (5.0,   -95.0,  34.0,  -75.0),   # mexico_ca (only the Canadian/US part)
+            (48.0, -170.0, 73.0, -100.0),  # alaska_canada_w
+            (42.0, -100.0, 65.0, -52.0),  # canada_east
+            (24.0, -130.0, 50.0, -100.0),  # us_west
+            (24.0, -100.0, 50.0, -86.0),  # us_central
+            (24.0, -86.0, 50.0, -55.0),  # us_east
+            (5.0, -95.0, 34.0, -75.0),  # mexico_ca (only the Canadian/US part)
         ],
     ),
     (
         "south_america",
         [
-            (-5.0, -85.0,  15.0, -50.0),   # north
-            (-60.0, -80.0,  -5.0, -30.0),   # south
+            (-5.0, -85.0, 15.0, -50.0),  # north
+            (-60.0, -80.0, -5.0, -30.0),  # south
         ],
     ),
     (
         "middle_east",
         [
-            (10.0, 24.0, 35.0, 60.0),   # gulf_states
-            (25.0, 44.0, 42.0, 65.0),   # iran_east
+            (10.0, 24.0, 35.0, 60.0),  # gulf_states
+            (25.0, 44.0, 42.0, 65.0),  # iran_east
         ],
     ),
     (
         "asia",
         [
-            (45.0,  55.0, 75.0, 100.0),   # russia_east
-            (40.0,  90.0, 75.0, 180.0),   # russia_far_east
-            (30.0,  55.0, 50.0,  80.0),   # central_asia_e
-            ( 5.0,  60.0, 37.0, 100.0),   # south_asia
-            (-15.0, 90.0, 25.0, 145.0),   # southeast_asia
-            (15.0,  95.0, 55.0, 145.0),   # east_asia
+            (45.0, 55.0, 75.0, 100.0),  # russia_east
+            (40.0, 90.0, 75.0, 180.0),  # russia_far_east
+            (30.0, 55.0, 50.0, 80.0),  # central_asia_e
+            (5.0, 60.0, 37.0, 100.0),  # south_asia
+            (-15.0, 90.0, 25.0, 145.0),  # southeast_asia
+            (15.0, 95.0, 55.0, 145.0),  # east_asia
         ],
     ),
     (
         "africa",
         [
-            (10.0, -18.0, 38.0, 25.0),   # north
-            (-35.0,  24.0, 15.0, 55.0),  # east
+            (10.0, -18.0, 38.0, 25.0),  # north
+            (-35.0, 24.0, 15.0, 55.0),  # east
             (-10.0, -18.0, 20.0, 25.0),  # west
         ],
     ),
@@ -99,7 +88,7 @@ def fetch_all_ways_for_super_region(bboxes: list[tuple]) -> list[dict]:
     """Download and merge pipeline ways for all bboxes in a super-region."""
     all_ways: list[dict] = []
     for i, (s, w, n, e) in enumerate(bboxes):
-        print(f"  [{i+1}/{len(bboxes)}] bbox ({s},{w},{n},{e}) ...", flush=True)
+        print(f"  [{i + 1}/{len(bboxes)}] bbox ({s},{w},{n},{e}) ...", flush=True)
         time.sleep(5)
         ways = fetch_pipeline_ways(s, w, n, e)
         print(f"    Got {len(ways)} ways", flush=True)
@@ -116,12 +105,12 @@ def main():
 
     # Filter to only those still missing from global_pipeline_routes
     con = duckdb.connect(str(ANALYTICS_DB))
-    already = set(r[0] for r in con.execute("SELECT wm_id FROM global_pipeline_routes").fetchall())
+    already = {r[0] for r in con.execute("SELECT wm_id FROM global_pipeline_routes").fetchall()}
     con.close()
 
     # Also exclude those with EU routes
     con2 = duckdb.connect(str(ANALYTICS_DB), read_only=True)
-    eu_done = set(r[0] for r in con2.execute("SELECT wm_id FROM eu_pipeline_routes").fetchall())
+    eu_done = {r[0] for r in con2.execute("SELECT wm_id FROM eu_pipeline_routes").fetchall()}
     con2.close()
 
     pending = [p for p in all_unrouted if p["wm_id"] not in already and p["wm_id"] not in eu_done]
@@ -138,7 +127,8 @@ def main():
         max_lon = max(b[3] for b in bboxes) + 3
 
         regional = [
-            p for p in pending
+            p
+            for p in pending
             if (
                 (min_lat <= p["start_lat"] <= max_lat and min_lon <= p["start_lon"] <= max_lon)
                 or (min_lat <= p["end_lat"] <= max_lat and min_lon <= p["end_lon"] <= max_lon)
@@ -157,7 +147,10 @@ def main():
             continue
 
         graph = build_graph(ways)
-        print(f"  Combined graph: {len(graph['endpoints'])} nodes, {len(graph['ways'])} ways", flush=True)
+        print(
+            f"  Combined graph: {len(graph['endpoints'])} nodes, {len(graph['ways'])} ways",
+            flush=True,
+        )
 
         results = route_pipelines_on_graph(graph, regional)
         print(f"  Routed: {len(results)}/{len(regional)}", flush=True)
@@ -175,7 +168,14 @@ def main():
             try:
                 con_w.execute(
                     "INSERT OR REPLACE INTO global_pipeline_routes VALUES (?,?,?,?,?,?)",
-                    [r["wm_id"], r["n_points"], r["path_km"], r["snap_km_start"], r["snap_km_end"], r["route_json"]],
+                    [
+                        r["wm_id"],
+                        r["n_points"],
+                        r["path_km"],
+                        r["snap_km_start"],
+                        r["snap_km_end"],
+                        r["route_json"],
+                    ],
                 )
                 total_stored += 1
             except Exception as exc:

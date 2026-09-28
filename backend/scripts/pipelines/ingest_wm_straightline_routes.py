@@ -15,7 +15,7 @@ Pipelines excluded:
 
 Usage:
     cd backend
-    .venv/bin/python ingest_wm_straightline_routes.py [--db <path>] [--dry-run]
+    .venv/bin/python scripts/pipelines/ingest_wm_straightline_routes.py [--db <path>] [--dry-run]
 """
 
 from __future__ import annotations
@@ -23,14 +23,12 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import sys
 from pathlib import Path
 
 import duckdb
 import psycopg2
 
-DB_DEFAULT = Path(__file__).parent / "data" / "freight_analytics.duckdb"
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared" / "market-data" / "src"))
+DB_DEFAULT = Path(__file__).resolve().parents[2] / "data" / "freight_analytics.duckdb"
 
 # WM pipeline IDs to generate straight-line routes for.
 # Exclusion criteria documented in module docstring.
@@ -53,7 +51,7 @@ def _haversine(a: list[float], b: list[float]) -> float:
     lat1, lon1, lat2, lon2 = map(math.radians, [a[0], a[1], b[0], b[1]])
     dlat, dlon = lat2 - lat1, lon2 - lon1
     h = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
-    return 2 * 6371.0 * math.asin(h ** 0.5)
+    return 2 * 6371.0 * math.asin(h**0.5)
 
 
 def _load_wm_coords() -> dict[str, dict]:
@@ -85,8 +83,7 @@ def _skip_already_routed(targets: list[str], db_path: str) -> list[str]:
     try:
         con = duckdb.connect(db_path, read_only=True)
         existing = {
-            row[0]
-            for row in con.execute("SELECT wm_id FROM eia_oil_pipeline_routes").fetchall()
+            row[0] for row in con.execute("SELECT wm_id FROM eia_oil_pipeline_routes").fetchall()
         }
         con.close()
     except Exception:
@@ -104,7 +101,9 @@ def main() -> None:
 
     coords = _load_wm_coords()
     unrouted = _skip_already_routed(_TARGETS, args.db)
-    print(f"Targets: {len(_TARGETS)}  |  already routed: {len(_TARGETS) - len(unrouted)}  |  to ingest: {len(unrouted)}\n")
+    print(
+        f"Targets: {len(_TARGETS)}  |  already routed: {len(_TARGETS) - len(unrouted)}  |  to ingest: {len(unrouted)}\n"
+    )
 
     routes: list[tuple[str, list[list[list[float]]]]] = []
     for wm_id in unrouted:
@@ -124,7 +123,9 @@ def main() -> None:
         seg = [[s_lat, s_lon], [e_lat, e_lon]]
         routes.append((wm_id, [seg]))
         print(f"  {wm_id}")
-        print(f"    {info['name']} | straight-line {dist:.0f} km (WM length: {info['length_km']} km)")
+        print(
+            f"    {info['name']} | straight-line {dist:.0f} km (WM length: {info['length_km']} km)"
+        )
 
     print(f"\nRoutes to store: {len(routes)}")
     if args.dry_run:
@@ -151,9 +152,11 @@ def main() -> None:
         stored += 1
     con.close()
 
-    total = duckdb.connect(args.db, read_only=True).execute(
-        "SELECT COUNT(*) FROM eia_oil_pipeline_routes"
-    ).fetchone()[0]
+    total = (
+        duckdb.connect(args.db, read_only=True)
+        .execute("SELECT COUNT(*) FROM eia_oil_pipeline_routes")
+        .fetchone()[0]
+    )
     print(f"\nStored {stored} straight-line routes.")
     print(f"Total eia_oil_pipeline_routes: {total}")
     print("\nDone. Restart freight-api to pick up changes.")

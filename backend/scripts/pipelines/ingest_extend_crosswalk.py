@@ -6,7 +6,7 @@ routes immediately visible in the map loader without any new downloads.
 
 Usage:
     cd backend
-    .venv/bin/python ingest_extend_crosswalk.py [--db <path>] [--dry-run]
+    .venv/bin/python scripts/pipelines/ingest_extend_crosswalk.py [--db <path>] [--dry-run]
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from pathlib import Path
 
 import duckdb
 
-DB_DEFAULT = Path(__file__).parent / "data" / "freight_analytics.duckdb"
+DB_DEFAULT = Path(__file__).resolve().parents[2] / "data" / "freight_analytics.duckdb"
 
 # Manually curated WM ID -> RexTag slug mappings.
 # Only includes cases where the RexTag slug is confirmed to have an EIA route.
@@ -34,7 +34,10 @@ NEW_MAPPINGS: list[tuple[str, str]] = [
     # East Tennessee Natural Gas (Appalachian region)
     ("east-tennessee-gas-pipeline-us", "east-tennessee-natural-gas"),
     # Natural Gas Pipeline Company of America (Illinois to Texas)
-    ("natural-gas-pipeline-company-of-america-system-us", "natural-gas-pipeline-company-of-america-ngpl"),
+    (
+        "natural-gas-pipeline-company-of-america-system-us",
+        "natural-gas-pipeline-company-of-america-ngpl",
+    ),
     # Alliance Pipeline (Canada to Chicago)
     ("alliance-gas-pipeline-ca", "alliance-pipeline"),
     # Gulf South Pipeline (Louisiana/Mississippi/Alabama)
@@ -87,7 +90,9 @@ def main():
     print(f"Current crosswalk entries: {len(existing)}")
 
     # Verify each proposed RexTag slug actually has an EIA route
-    eia_slugs = {r[0] for r in con.execute("SELECT rextag_slug FROM eia_pipeline_routes").fetchall()}
+    eia_slugs = {
+        r[0] for r in con.execute("SELECT rextag_slug FROM eia_pipeline_routes").fetchall()
+    }
     print(f"RexTag slugs with EIA routes: {len(eia_slugs)}")
 
     to_add: list[tuple[str, str]] = []

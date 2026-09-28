@@ -12,7 +12,7 @@ Handles international pipelines where OSM ways share the same name but
 have no shared endpoints (common for China, India, Iran, Saudi Arabia).
 
 Usage:
-    .venv/bin/python ingest_osm_named_pipeline_routes.py [--region <name>] [--dry-run]
+    .venv/bin/python scripts/pipelines/ingest_osm_named_pipeline_routes.py [--region <name>] [--dry-run]
 """
 
 from __future__ import annotations
@@ -21,10 +21,9 @@ import argparse
 import json
 import math
 import re
-import sys
+import subprocess
 import time
 import unicodedata
-import subprocess
 import urllib.parse
 from collections import defaultdict
 from pathlib import Path
@@ -34,20 +33,32 @@ import duckdb
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-ANALYTICS_DB = Path(__file__).parent / "data" / "freight_analytics.duckdb"
-RDP_EPSILON = 0.02       # degrees (~2 km), same as Dijkstra routes
-MAX_CHAIN_GAP_KM = 300   # treat gap > 300 km as a separate segment
-MIN_WAY_POINTS = 2       # discard sub-2-point ways
+ANALYTICS_DB = Path(__file__).resolve().parents[2] / "data" / "freight_analytics.duckdb"
+RDP_EPSILON = 0.02  # degrees (~2 km), same as Dijkstra routes
+MAX_CHAIN_GAP_KM = 300  # treat gap > 300 km as a separate segment
+MIN_WAY_POINTS = 2  # discard sub-2-point ways
 JACCARD_THRESHOLD = 0.38  # need at least ~2 distinctive words in common
-MAX_SNAP_KM_THRESHOLD = 600  # skip match if best-scoring name group centroid is >600km from WM endpoints
+MAX_SNAP_KM_THRESHOLD = (
+    600  # skip match if best-scoring name group centroid is >600km from WM endpoints
+)
 
 # Generic OSM name fragments that produce false-positives - skip any OSM group
 # whose entire name normalises to only these words.
-_GENERIC_NAMES = frozenset({
-    "pipeline", "gas pipeline", "oil pipeline", "crude oil pipeline",
-    "petroleum pipeline", "natural gas pipeline", "gas", "oil", "pipe",
-    "main gas pipeline", "main oil pipeline",
-})
+_GENERIC_NAMES = frozenset(
+    {
+        "pipeline",
+        "gas pipeline",
+        "oil pipeline",
+        "crude oil pipeline",
+        "petroleum pipeline",
+        "natural gas pipeline",
+        "gas",
+        "oil",
+        "pipe",
+        "main gas pipeline",
+        "main oil pipeline",
+    }
+)
 MIN_OSM_DISTINCTIVE_WORDS = 1  # 1 distinctive word is enough; acronyms (HVJ, JHBDPL) are valid
 
 # Translation map for non-Latin OSM name tags (Chinese, etc.) that would otherwise
@@ -55,35 +66,35 @@ MIN_OSM_DISTINCTIVE_WORDS = 1  # 1 distinctive word is enough; acronyms (HVJ, JH
 # strings as returned by Overpass; values are WM-matchable English equivalents.
 _FOREIGN_NAME_MAP: dict[str, str] = {
     # West-East Gas Pipeline trunk lines (西气东输)
-    "西气东输":     "West-East Gas Pipeline",
+    "西气东输": "West-East Gas Pipeline",
     "西气东输一线": "West-East Gas Pipeline 1",
     "西气东输二线": "West-East Gas Pipeline 2",
     "西气东输三线": "West-East Gas Pipeline 3",
     "西气东输四线": "West-East Gas Pipeline 4",
     # China-Russia East Gas Pipeline (中俄东线, called Power of Siberia on Russian side)
-    "中俄东线天然气管道":              "China Russia East Gas Pipeline",
+    "中俄东线天然气管道": "China Russia East Gas Pipeline",
     "中俄东线天然气管道长岭-长春支线": "China Russia East Gas Pipeline Changling Changchun Branch",
     # China-Central Asia Gas Pipeline (中国-中亚)
     "中国—中亚天然气管道": "China Central Asia Gas Pipeline",
     "中国-中亚天然气管道": "China Central Asia Gas Pipeline",
     # Sino-Myanmar (Chinese name tag on some OSM ways in Yunnan)
-    "中缅油气管道":    "Sino Myanmar oil gas pipeline",
-    "中缅天然气管道":  "Sino Myanmar gas pipeline",
-    "中缅原油管道":    "Sino Myanmar crude oil pipeline",
+    "中缅油气管道": "Sino Myanmar oil gas pipeline",
+    "中缅天然气管道": "Sino Myanmar gas pipeline",
+    "中缅原油管道": "Sino Myanmar crude oil pipeline",
     # Shaan-Jing (Shaanxi-Beijing) gas pipeline lines 1-4
     "陕京一线": "Shaan-Jing Pipeline 1",
     "陕京二线": "Shaan-Jing Pipeline 2",
     "陕京三线": "Shaan-Jing Pipeline 3",
     "陕京四线": "Shaan-Jing Pipeline 4",
     # Sichuan-Shanghai / Sichuan-to-East gas pipelines
-    "川气东送":     "Sichuan East Gas Pipeline",
+    "川气东送": "Sichuan East Gas Pipeline",
     "川气东送管道": "Sichuan East Gas Pipeline",
     # Eastern Siberia - Pacific Ocean (ESPO): Russian side already has name:en;
     # add the Chinese-character tags for Chinese territory ways
     "中俄原油管道": "Eastern Siberia Pacific Ocean China crude oil pipeline",
     # Kazakhstan-China oil pipeline (Atasu-Alashankou) - Chinese segment
-    "哈中管道":         "Kazakhstan China oil pipeline",
-    "中哈原油管道":     "Kazakhstan China crude oil pipeline",
+    "哈中管道": "Kazakhstan China oil pipeline",
+    "中哈原油管道": "Kazakhstan China crude oil pipeline",
     # Russia ESPO spur to China (ВСТО - Китай) - Cyrillic tag on some cross-border ways
     'Отвод "ВСТО - Китай"': "Eastern Siberia Pacific Ocean China spur crude oil pipeline",
     # Trans-Sakhalin (Sakhalin-2 crude export pipeline, Gazprom/Shell JV)
@@ -91,20 +102,20 @@ _FOREIGN_NAME_MAP: dict[str, str] = {
     # Sakhalin-Khabarovsk-Vladivostok gas pipeline (main line)
     "Магистральный газопровод Сахалин-Хабаровск-Владивосток": "Sakhalin Khabarovsk Vladivostok gas pipeline",
     # SHV gas pipeline - abbreviated name used on Amur Oblast / Khabarovsk ways (Belogorsk section)
-    "Газопровод \"СХВ\"": "Belogorsk Khabarovsk Amur gas pipeline SHV",
+    'Газопровод "СХВ"': "Belogorsk Khabarovsk Amur gas pipeline SHV",
     # Okha-Komsomolsk crude pipeline (Soviet-era, Sakhalin to mainland)
     "Оха — Комсомольск-на-Амуре": "Okha Komsomolsk crude oil pipeline Sakhalin",
     # Kuyumba-Taishet oil pipeline (Krasnoyarsk, Transneft)
     "Магистральный нефтепровод Куюмба-Тайшет": "Kuyumba Taishet oil pipeline",
     # SRTO-Ural gas pipelines (Northern Tyumen Oblast to Ural, Gazprom)
-    "СРТО — Урал":   "SRTO Ural gas pipeline",
+    "СРТО — Урал": "SRTO Ural gas pipeline",
     "СРТО — Урал 2": "SRTO Ural gas pipeline 2",
     # Igrim-Serov-Nizhny Tagil gas pipeline (older Soviet-era trunk)
-    "Игрим — Серов — Нижний Тагил":           "Igrim Serov Nizhny Tagil gas pipeline",
-    "Игрим — Серов — Нижний Тагил (лупинг)":  "Igrim Serov Nizhny Tagil gas pipeline looping",
+    "Игрим — Серов — Нижний Тагил": "Igrim Serov Nizhny Tagil gas pipeline",
+    "Игрим — Серов — Нижний Тагил (лупинг)": "Igrim Serov Nizhny Tagil gas pipeline looping",
     # Bukhara-Ural gas pipeline (Uzbekistan to Russian Urals, Gazprom/Transneft era)
-    "Бухара - Урал":            "Bukhara Ural gas pipeline",
-    "Бухара — Урал 1":          "Bukhara Ural gas pipeline 1",
+    "Бухара - Урал": "Bukhara Ural gas pipeline",
+    "Бухара — Урал 1": "Bukhara Ural gas pipeline 1",
     "Бухара — Урал 1 (лупинг)": "Bukhara Ural gas pipeline 1 looping",
     # Beineu-Shymkent gas pipeline (Kazakhstan, connects Caspian to south)
     "Газопровод бейнеу - шымкент": "Beineu Shymkent gas pipeline Kazakhstan",
@@ -177,57 +188,98 @@ OVERPASS_ENDPOINTS = [
 
 # Region definitions: (name, south, west, north, east)
 REGIONS = [
-    ("middle_east_west",    10.0,  24.0,  40.0,  50.0),  # Egypt, Sudan, Syria, Lebanon, Israel, Jordan
-    ("middle_east_gulf",    15.0,  44.0,  40.0,  65.0),  # Saudi Arabia, UAE, Qatar, Kuwait, Iraq, Iran W
-    ("iran_east",           25.0,  56.0,  40.0,  67.0),  # Iran East, Turkmenistan S
-    ("central_asia_n",      38.0,  50.0,  56.0,  80.0),  # Kazakhstan, Uzbekistan, Kyrgyzstan
-    ("central_asia_s",      30.0,  55.0,  42.0,  75.0),  # Turkmenistan, Tajikistan, Afghanistan
-    ("russia_w",            47.0,  28.0,  70.0,  65.0),  # Western Russia, Urals
-    ("russia_c",            47.0,  60.0,  70.0,  100.0), # Siberia Central
-    ("russia_e",            47.0,  95.0,  72.0,  145.0), # East Siberia, Far East
-    ("south_asia",           5.0,  60.0,  38.0,  98.0),  # India, Pakistan, Bangladesh, Nepal
-    ("southeast_asia",     -15.0,  92.0,  25.0,  142.0), # Myanmar, Thailand, Indonesia, Malaysia, Vietnam
-    ("china_w",             25.0,  73.0,  55.0,  108.0), # Xinjiang, Tibet, Sichuan, Gansu
-    ("china_e",             18.0, 103.0,  45.0,  135.0), # Eastern China, NE China
-    ("china_ne",            42.0, 118.0,  55.0,  140.0), # Manchuria / NE China - China-Russia East Pipeline
-    ("africa_n",            10.0, -18.0,  38.0,  38.0),  # North Africa, Horn, Sudan
-    ("africa_w",            -5.0, -18.0,  18.0,  20.0),  # West Africa, Niger Delta
-    ("africa_e",           -35.0,  20.0,  15.0,  55.0),  # East Africa, Southern Africa
-    ("latam_n",             -5.0, -85.0,  18.0, -50.0),  # Colombia, Venezuela, Peru, Ecuador, Brazil N
-    ("latam_s",            -60.0, -80.0,  -5.0, -30.0),  # Argentina, Chile, Brazil S, Bolivia
-    ("mexico_ca",           14.0,-120.0,  34.0, -82.0),  # Mexico, Central America
+    ("middle_east_west", 10.0, 24.0, 40.0, 50.0),  # Egypt, Sudan, Syria, Lebanon, Israel, Jordan
+    ("middle_east_gulf", 15.0, 44.0, 40.0, 65.0),  # Saudi Arabia, UAE, Qatar, Kuwait, Iraq, Iran W
+    ("iran_east", 25.0, 56.0, 40.0, 67.0),  # Iran East, Turkmenistan S
+    ("central_asia_n", 38.0, 50.0, 56.0, 80.0),  # Kazakhstan, Uzbekistan, Kyrgyzstan
+    ("central_asia_s", 30.0, 55.0, 42.0, 75.0),  # Turkmenistan, Tajikistan, Afghanistan
+    ("russia_w", 47.0, 28.0, 70.0, 65.0),  # Western Russia, Urals
+    ("russia_c", 47.0, 60.0, 70.0, 100.0),  # Siberia Central
+    ("russia_e", 47.0, 95.0, 72.0, 145.0),  # East Siberia, Far East
+    ("south_asia", 5.0, 60.0, 38.0, 98.0),  # India, Pakistan, Bangladesh, Nepal
+    ("southeast_asia", -15.0, 92.0, 25.0, 142.0),  # Myanmar, Thailand, Indonesia, Malaysia, Vietnam
+    ("china_w", 25.0, 73.0, 55.0, 108.0),  # Xinjiang, Tibet, Sichuan, Gansu
+    ("china_e", 18.0, 103.0, 45.0, 135.0),  # Eastern China, NE China
+    ("china_ne", 42.0, 118.0, 55.0, 140.0),  # Manchuria / NE China - China-Russia East Pipeline
+    ("africa_n", 10.0, -18.0, 38.0, 38.0),  # North Africa, Horn, Sudan
+    ("africa_w", -5.0, -18.0, 18.0, 20.0),  # West Africa, Niger Delta
+    ("africa_e", -35.0, 20.0, 15.0, 55.0),  # East Africa, Southern Africa
+    ("latam_n", -5.0, -85.0, 18.0, -50.0),  # Colombia, Venezuela, Peru, Ecuador, Brazil N
+    ("latam_s", -60.0, -80.0, -5.0, -30.0),  # Argentina, Chile, Brazil S, Bolivia
+    ("mexico_ca", 14.0, -120.0, 34.0, -82.0),  # Mexico, Central America
     # Canada split into west/east to avoid Overpass timeout on the full-country bbox
-    ("canada_west",         48.0,-145.0,  65.0,-105.0),  # BC, Alberta, NWT west (NGTL, Westcoast, Cold Lake)
-    ("canada_east",         42.0,-110.0,  56.0, -52.0),  # Prairies, Ontario, Quebec, Maritimes
-    ("north_sea",           54.0,  -5.0,  68.0,  12.0),  # Norwegian shelf, UK shelf, Langeled, Åsgard
-    ("oceania",            -50.0, 105.0,   5.0, 180.0),  # Australia + Pacific
+    (
+        "canada_west",
+        48.0,
+        -145.0,
+        65.0,
+        -105.0,
+    ),  # BC, Alberta, NWT west (NGTL, Westcoast, Cold Lake)
+    ("canada_east", 42.0, -110.0, 56.0, -52.0),  # Prairies, Ontario, Quebec, Maritimes
+    ("north_sea", 54.0, -5.0, 68.0, 12.0),  # Norwegian shelf, UK shelf, Langeled, Åsgard
+    ("oceania", -50.0, 105.0, 5.0, 180.0),  # Australia + Pacific
     # US split into sub-regions to avoid Overpass timeout on the full continental bbox
-    ("us_northeast",        37.0, -83.0,  48.0, -66.0),  # PA, OH, NY, NE - Mariner, Utopia, Dominion
-    ("us_southeast",        25.0, -92.0,  37.0, -75.0),  # VA, KY, TN, NC, SC, GA, FL
-    ("us_gulf",             24.0,-100.0,  33.0, -87.0),  # TX/LA/MS/AL Gulf Coast - NGL, offshore
-    ("us_permian",          28.0,-107.0,  34.0, -88.0),  # West TX/NM Permian Basin gap coverage
-    ("us_midcontinent",     33.0,-104.0,  40.0, -90.0),  # OK, KS, AR, MO, IL - intrastate
-    ("us_rockies_north",    40.0,-116.0,  50.0, -96.0),  # WY, MT, ND, SD, CO north, NE - Overland Pass, Bakken
-    ("us_west",             32.0,-125.0,  49.0,-109.0),  # CA, OR, WA, NV, AZ, NM, UT, ID
+    ("us_northeast", 37.0, -83.0, 48.0, -66.0),  # PA, OH, NY, NE - Mariner, Utopia, Dominion
+    ("us_southeast", 25.0, -92.0, 37.0, -75.0),  # VA, KY, TN, NC, SC, GA, FL
+    ("us_gulf", 24.0, -100.0, 33.0, -87.0),  # TX/LA/MS/AL Gulf Coast - NGL, offshore
+    ("us_permian", 28.0, -107.0, 34.0, -88.0),  # West TX/NM Permian Basin gap coverage
+    ("us_midcontinent", 33.0, -104.0, 40.0, -90.0),  # OK, KS, AR, MO, IL - intrastate
+    (
+        "us_rockies_north",
+        40.0,
+        -116.0,
+        50.0,
+        -96.0,
+    ),  # WY, MT, ND, SD, CO north, NE - Overland Pass, Bakken
+    ("us_west", 32.0, -125.0, 49.0, -109.0),  # CA, OR, WA, NV, AZ, NM, UT, ID
 ]
 
 
 # ---------------------------------------------------------------------------
 # Text normalisation
 # ---------------------------------------------------------------------------
-_STOP = {"the", "of", "and", "for", "in", "to", "a", "an", "at", "by", "on",
-         "de", "del", "la", "el", "los", "las", "en", "da", "do", "dos"}
+_STOP = {
+    "the",
+    "of",
+    "and",
+    "for",
+    "in",
+    "to",
+    "a",
+    "an",
+    "at",
+    "by",
+    "on",
+    "de",
+    "del",
+    "la",
+    "el",
+    "los",
+    "las",
+    "en",
+    "da",
+    "do",
+    "dos",
+}
 _EXPAND = {
-    r"\bpl\b": "pipeline", r"\bpipe\b": "pipeline", r"\bngl\b": "ngl",
-    r"\bgas\b": "gas", r"\boil\b": "oil", r"\bcrude\b": "crude",
-    r"\bsys(tem)?\b": "system", r"\btrans\b": "trans", r"\bco\b": "company",
-    r"\bllc\b": "", r"\blp\b": "", r"\binc\b": "",
+    r"\bpl\b": "pipeline",
+    r"\bpipe\b": "pipeline",
+    r"\bngl\b": "ngl",
+    r"\bgas\b": "gas",
+    r"\boil\b": "oil",
+    r"\bcrude\b": "crude",
+    r"\bsys(tem)?\b": "system",
+    r"\btrans\b": "trans",
+    r"\bco\b": "company",
+    r"\bllc\b": "",
+    r"\blp\b": "",
+    r"\binc\b": "",
     # Spanish/Portuguese pipeline words (LATAM)
     r"\bgasoducto\b": "gas pipeline",
     r"\boleoducto\b": "oil pipeline",
     r"\bpoliducto\b": "products pipeline",
-    r"\bgasoduto\b": "gas pipeline",     # Portuguese
-    r"\boleoduto\b": "oil pipeline",     # Portuguese
+    r"\bgasoduto\b": "gas pipeline",  # Portuguese
+    r"\boleoduto\b": "oil pipeline",  # Portuguese
     r"\bducto\b": "pipeline",
     r"\bsistema\b": "system",
     r"\bnorte\b": "north",
@@ -236,16 +288,16 @@ _EXPAND = {
     r"\beste\b": "east",
     r"\boeste\b": "west",
     r"\bandino\b": "andean",
-    r"\bbrasil\b": "brazil",             # Portuguese/Spanish -> English for Bolivia-Brazil match
+    r"\bbrasil\b": "brazil",  # Portuguese/Spanish -> English for Bolivia-Brazil match
     r"\bneuba\b": "neuquen buenos aires",  # NEUBA = Neuquen-Buenos Aires gas pipeline
     # Compound Spanish pipeline names - expand to final form directly (ordering: these run after
     # \bandino\b already fired, so must include the andean substitution inline)
-    r"\bnorandino\b": "nor andean",       # NorAndino -> "nor andean" (pre-expanded)
-    r"\btransandino\b": "trans andean",   # Transandino -> "trans andean"
+    r"\bnorandino\b": "nor andean",  # NorAndino -> "nor andean" (pre-expanded)
+    r"\btransandino\b": "trans andean",  # Transandino -> "trans andean"
     r"\btransecuatoriano\b": "trans ecuadorian",  # SOTE Transecuatoriano
-    r"\becuatoriano\b": "ecuadorian",             # standalone (after hyphen split: "Trans-Ecuatoriano")
-    r"\bnorperuano\b": "north peruvian",           # Oleoducto NorPeruano compound form
-    r"\bnororiental\b": "northeastern",            # nororiental in Venezuelan gas pipeline names
+    r"\becuatoriano\b": "ecuadorian",  # standalone (after hyphen split: "Trans-Ecuatoriano")
+    r"\bnorperuano\b": "north peruvian",  # Oleoducto NorPeruano compound form
+    r"\bnororiental\b": "northeastern",  # nororiental in Venezuelan gas pipeline names
     # SOTE abbreviation: expand to final form matching OSM's full Spanish name expanded tokens
     r"\bsote\b": "system trans ecuadorian oil pipeline",
     # India pipeline abbreviations: expand so OSM short-form names match WM full names
@@ -263,9 +315,7 @@ def _norm(s: str) -> set[str]:
     # etc.) with spaces so "Habshan–Fujairah" -> "Habshan Fujairah", not "habshanfujairah".
     buf = []
     for c in s:
-        if c.isascii():
-            buf.append(c)
-        elif unicodedata.category(c).startswith("M"):
+        if c.isascii() or unicodedata.category(c).startswith("M"):
             buf.append(c)
         else:
             buf.append(" ")
@@ -280,8 +330,19 @@ def _norm(s: str) -> set[str]:
 
 
 _GENERIC_TOKENS = {
-    "pipeline", "gas", "oil", "crude", "natural", "petroleum",
-    "system", "main", "line", "pipe", "ngl", "products", "refined",
+    "pipeline",
+    "gas",
+    "oil",
+    "crude",
+    "natural",
+    "petroleum",
+    "system",
+    "main",
+    "line",
+    "pipe",
+    "ngl",
+    "products",
+    "refined",
 }
 
 
@@ -309,7 +370,10 @@ def _hav(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     R = 6371.0
     dlat = math.radians(lat2 - lat1)
     dlon = math.radians(lon2 - lon1)
-    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
+    a = (
+        math.sin(dlat / 2) ** 2
+        + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
+    )
     return R * 2 * math.asin(math.sqrt(a))
 
 
@@ -325,7 +389,11 @@ def _rdp(pts: list, eps: float) -> list:
     d = (dx * dx + dy * dy) ** 0.5
     max_dist, max_idx = 0.0, 0
     for i in range(1, len(pts) - 1):
-        dist = abs(dy * pts[i][0] - dx * pts[i][1] + x2 * y1 - y2 * x1) / d if d else _hav(*pts[i], *pts[0])
+        dist = (
+            abs(dy * pts[i][0] - dx * pts[i][1] + x2 * y1 - y2 * x1) / d
+            if d
+            else _hav(*pts[i], *pts[0])
+        )
         if dist > max_dist:
             max_dist, max_idx = dist, i
     if max_dist > eps:
@@ -354,7 +422,8 @@ def _wait_for_slot(ep: str) -> None:
     for _ in range(20):
         r = subprocess.run(
             ["curl", "-s", "--max-time", "15", status_url],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
         txt = r.stdout
         if "Slot available after" not in txt:
@@ -378,21 +447,31 @@ def _overpass_query(ql: str) -> dict | None:
         _wait_for_slot(ep)
         r = subprocess.run(
             [
-                "curl", "-s", "--max-time", "180",
-                "-X", "POST", ep,
-                "--data", f"data={urllib.parse.quote(ql)}",
+                "curl",
+                "-s",
+                "--max-time",
+                "180",
+                "-X",
+                "POST",
+                ep,
+                "--data",
+                f"data={urllib.parse.quote(ql)}",
             ],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
         if not r.stdout.strip():
-            print(f"    [attempt {attempt+1}] empty response from {ep}", flush=True)
+            print(f"    [attempt {attempt + 1}] empty response from {ep}", flush=True)
             _ep_idx += 1
             time.sleep(15)
             continue
         if r.stdout.lstrip().startswith("<"):
             # HTML error page - rate limit or query rejected by server
             wait = 90 + attempt * 30
-            print(f"    [attempt {attempt+1}] server returned HTML (rate limit/reject) - waiting {wait}s", flush=True)
+            print(
+                f"    [attempt {attempt + 1}] server returned HTML (rate limit/reject) - waiting {wait}s",
+                flush=True,
+            )
             time.sleep(wait)
             # Don't rotate - same endpoint, rate limit is IP-based
             continue
@@ -401,14 +480,13 @@ def _overpass_query(ql: str) -> dict | None:
             if "elements" in d:
                 return d
             remark = d.get("remark", "")
-            print(f"    [attempt {attempt+1}] no elements key, remark={remark!r}", flush=True)
+            print(f"    [attempt {attempt + 1}] no elements key, remark={remark!r}", flush=True)
         except json.JSONDecodeError:
             snippet = r.stdout[:200]
-            print(f"    [attempt {attempt+1}] JSON error, response: {snippet!r}", flush=True)
+            print(f"    [attempt {attempt + 1}] JSON error, response: {snippet!r}", flush=True)
         _ep_idx += 1
         time.sleep(10)
     return None
-
 
 
 # ---------------------------------------------------------------------------
@@ -420,7 +498,16 @@ def _is_generic_osm_name(name: str) -> bool:
     normalised = name.lower().strip()
     if normalised in _GENERIC_NAMES:
         return True
-    words = _norm(name) - {"pipeline", "gas", "oil", "crude", "petroleum", "natural", "pipe", "main"}
+    words = _norm(name) - {
+        "pipeline",
+        "gas",
+        "oil",
+        "crude",
+        "petroleum",
+        "natural",
+        "pipe",
+        "main",
+    }
     return len(words) < MIN_OSM_DISTINCTIVE_WORDS
 
 
@@ -446,7 +533,9 @@ def _pick_osm_name(tags: dict) -> str:
     return ""
 
 
-def fetch_named_pipeline_ways(s: float, w: float, n: float, e: float) -> dict[str, list[list[list[float]]]]:
+def fetch_named_pipeline_ways(
+    s: float, w: float, n: float, e: float
+) -> dict[str, list[list[list[float]]]]:
     ql = f"""
 [out:json][timeout:120][maxsize:536870912];
 way[man_made=pipeline][name]({s},{w},{n},{e});
@@ -513,9 +602,6 @@ def greedy_chain(ways: list[list[list[float]]]) -> list[list[list[float]]]:
 # Load unrouted WM pipelines from loader
 # ---------------------------------------------------------------------------
 def load_unrouted_wm() -> list[dict]:
-    sys.path.insert(
-        0, str(Path(__file__).resolve().parents[2] / "shared" / "market-data" / "src")
-    )
     from loaders.worldmonitor import load_pipelines_for_map  # noqa: PLC0415
 
     df = load_pipelines_for_map(disrupted_only=False)
@@ -524,17 +610,19 @@ def load_unrouted_wm() -> list[dict]:
     unrouted = unrouted[unrouted["start_lat"].notna() & unrouted["end_lat"].notna()]
     records = []
     for _, row in unrouted.iterrows():
-        records.append({
-            "wm_id": row["id"],
-            "name": row["name"],
-            "commodity": row["commodity"],
-            "from_country": row["from_country"],
-            "to_country": row["to_country"],
-            "start_lat": float(row["start_lat"]),
-            "start_lon": float(row["start_lon"]),
-            "end_lat": float(row["end_lat"]),
-            "end_lon": float(row["end_lon"]),
-        })
+        records.append(
+            {
+                "wm_id": row["id"],
+                "name": row["name"],
+                "commodity": row["commodity"],
+                "from_country": row["from_country"],
+                "to_country": row["to_country"],
+                "start_lat": float(row["start_lat"]),
+                "start_lon": float(row["start_lon"]),
+                "end_lat": float(row["end_lat"]),
+                "end_lon": float(row["end_lon"]),
+            }
+        )
     return records
 
 
@@ -604,8 +692,9 @@ def _already_routed() -> set[str]:
 # ---------------------------------------------------------------------------
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--region", action="append", dest="regions",
-                        help="Run only this region (may be repeated)")
+    parser.add_argument(
+        "--region", action="append", dest="regions", help="Run only this region (may be repeated)"
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -615,7 +704,10 @@ def main():
     all_unrouted = load_unrouted_wm()
     already = _already_routed()
     unrouted = [p for p in all_unrouted if p["wm_id"] not in already]
-    print(f"Unrouted WM pipelines: {len(unrouted)} (of {len(all_unrouted)} total unrouted)\n", flush=True)
+    print(
+        f"Unrouted WM pipelines: {len(unrouted)} (of {len(all_unrouted)} total unrouted)\n",
+        flush=True,
+    )
 
     # Create table if needed (reuses global_pipeline_routes)
     if not args.dry_run:
@@ -639,7 +731,8 @@ def main():
     for region_name, s, w, n, e in regions:
         # Filter pipelines in this region
         regional = [
-            p for p in unrouted
+            p
+            for p in unrouted
             if (s - 5 <= p["start_lat"] <= n + 5 and w - 5 <= p["start_lon"] <= e + 5)
             or (s - 5 <= p["end_lat"] <= n + 5 and w - 5 <= p["end_lon"] <= e + 5)
         ]
@@ -647,7 +740,10 @@ def main():
             print(f"[{region_name}] no unrouted pipelines -> skip\n", flush=True)
             continue
 
-        print(f"[{region_name}] {len(regional)} unrouted pipelines in bbox ({s},{w},{n},{e})", flush=True)
+        print(
+            f"[{region_name}] {len(regional)} unrouted pipelines in bbox ({s},{w},{n},{e})",
+            flush=True,
+        )
         time.sleep(3)
 
         osm_groups = fetch_named_pipeline_ways(s, w, n, e)

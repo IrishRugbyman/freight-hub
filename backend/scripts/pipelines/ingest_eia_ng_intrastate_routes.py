@@ -9,7 +9,7 @@ Routes stored in eia_oil_pipeline_routes (wm_id keyed, already in loader cascade
 
 Usage:
     cd backend
-    .venv/bin/python ingest_eia_ng_intrastate_routes.py [--db <path>] [--dry-run]
+    .venv/bin/python scripts/pipelines/ingest_eia_ng_intrastate_routes.py [--db <path>] [--dry-run]
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from pathlib import Path
 
 import duckdb
 
-DB_DEFAULT = Path(__file__).parent / "data" / "freight_analytics.duckdb"
+DB_DEFAULT = Path(__file__).resolve().parents[2] / "data" / "freight_analytics.duckdb"
 
 NG_URL = (
     "https://services2.arcgis.com/FiaPA4ga0iQKduv3/arcgis/rest/services"
@@ -76,7 +76,7 @@ def _rdp(pts: list[list[float]], eps: float) -> list[list[float]]:
         if dist > max_dist:
             max_dist, max_idx = dist, i
     if max_dist > eps:
-        return _rdp(pts[:max_idx + 1], eps)[:-1] + _rdp(pts[max_idx:], eps)
+        return _rdp(pts[: max_idx + 1], eps)[:-1] + _rdp(pts[max_idx:], eps)
     return [pts[0], pts[-1]]
 
 
@@ -93,15 +93,11 @@ def _haversine(a: list[float], b: list[float]) -> float:
     lat1, lon1, lat2, lon2 = map(math.radians, [a[0], a[1], b[0], b[1]])
     dlat, dlon = lat2 - lat1, lon2 - lon1
     h = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
-    return 2 * 6371.0 * math.asin(h ** 0.5)
+    return 2 * 6371.0 * math.asin(h**0.5)
 
 
 def _path_km(segs: list[list[list[float]]]) -> float:
-    return sum(
-        _haversine(seg[i], seg[i + 1])
-        for seg in segs
-        for i in range(len(seg) - 1)
-    )
+    return sum(_haversine(seg[i], seg[i + 1]) for seg in segs for i in range(len(seg) - 1))
 
 
 # ---------------------------------------------------------------------------
@@ -197,9 +193,11 @@ def main() -> None:
         stored += 1
     con.close()
 
-    total = duckdb.connect(args.db, read_only=True).execute(
-        "SELECT COUNT(*) FROM eia_oil_pipeline_routes"
-    ).fetchone()[0]
+    total = (
+        duckdb.connect(args.db, read_only=True)
+        .execute("SELECT COUNT(*) FROM eia_oil_pipeline_routes")
+        .fetchone()[0]
+    )
     print(f"\nStored {stored} new/updated routes.")
     print(f"Total eia_oil_pipeline_routes: {total}")
     print("\nDone. Restart freight-api to pick up changes.")
