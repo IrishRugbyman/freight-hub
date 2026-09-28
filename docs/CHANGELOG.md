@@ -57,6 +57,13 @@ so this is now a plain import that fails loudly.
   `-EuropeanSupplyCards` and `-EtaCards`, the original file keeping only the tab's
   composition. `useGoToTracker`, byte-identical in four files, now lives once in
   `-analyticsShared.tsx`.
+- **The push-to-deploy workflow now has test gates.** A GitHub job type-checks the frontend
+  (including the generated API types) and runs vitest; only then does the VPS deploy, which
+  runs the full backend suite against the incoming revision in a throwaway worktree before
+  pulling into the live checkout (the batch timers import from it, not just `freight-api`).
+  Two latent faults went with it: the 10-minute default SSH `command_timeout` had killed the
+  2026-08-16 deploy mid-script (now 30m), and the plain `uv sync` uninstalled pytest and four
+  other dev packages on every deploy (now `--extra dev`).
 - **Fleet-trend fixture no longer straddles midnight.** Two density rows seeded at `now - 2h`
   and `now - 1h` fell on different days between 00:00 and 02:00 UTC, failing two tests.
 

@@ -4,8 +4,34 @@ on:
   push:
     branches: [main]
 
+# Two pushes in quick succession must not interleave git pull / uv sync / restart.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
 jobs:
+  # Self-contained, so it runs on a GitHub runner. The backend suite cannot: it needs
+  # the sibling quant-lib / market-data checkouts and the market_data PostgreSQL, so it
+  # gates the deploy on the VPS instead (below).
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Type-check (includes the types generated from openapi.json)
+        run: npx tsc -b
+      - run: npm test
+
   deploy:
+    needs: frontend
     runs-on: ubuntu-latest
     steps:
       - name: Deploy to VPS
@@ -14,15 +40,30 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
+          # The default is 10m, which killed the 2026-08-16 deploy mid-script. The backend
+          # suite alone takes ~2m, npm ci + build a few more.
+          command_timeout: 30m
           script: |
-            set -e
+            set -euo pipefail
             export PATH="$HOME/.local/bin:$PATH"
             cd ~/quant/freight
-            git pull origin main
+            git fetch --quiet origin main
+            REV=$(git rev-parse origin/main)
+
+            echo "=== Gate: backend suite on $REV ==="
+            # A throwaway worktree of the incoming revision, run with the live venv, so a
+            # failing push never reaches the live checkout: the batch timers import from it
+            # directly, not just freight-api.
+            WT=$(mktemp -d)
+            trap 'git -C ~/quant/freight worktree remove --force "$WT/src" 2>/dev/null || true; rm -rf "$WT"' EXIT
+            git worktree add --quiet --detach "$WT/src" "$REV"
+            (cd "$WT/src/backend" && PYTHONPATH="$PWD" ~/quant/freight/backend/.venv/bin/python -m pytest -q -x -p no:cacheprovider)
 
             echo "=== Backend ==="
+            git pull --ff-only --quiet origin main
             cd backend
-            uv sync
+            # --extra dev: a plain `uv sync` removes pytest, which the gate above needs.
+            uv sync --extra dev
             sudo systemctl restart freight-api
 
             echo "=== Frontend ==="
@@ -30,5 +71,11 @@ jobs:
             npm ci --silent
             npm run build
 
-            echo "=== Done ==="
+            echo "=== Health ==="
+            for _ in $(seq 1 30); do
+              curl -sf -o /dev/null http://127.0.0.1:8003/api/health && break
+              sleep 1
+            done
             systemctl is-active freight-api
+            curl -sf -o /dev/null http://127.0.0.1:8003/api/health
+            echo "deployed $REV"
