@@ -56,14 +56,22 @@ StandardError=journal
 # twice (a probe that early-stops to find the round count, then a refit on all of
 # train at that count) and the P50 head alone converges around 4500-5300 rounds.
 # That cost is the point: the 400-round cap was leaving 6.2% of median |err| on
-# the table. It still finishes an hour before the 03:20 derived stages.
+# the table.
 #
-# 3 GB leaves room for history growth and for systemd's cgroup accounting running
-# above RSS. Treat a cgroup OOM here as a signal to measure, not to raise the
+# Re-measured 2026-09-27 after the second training target (logratio) was added,
+# on 1.46M samples / 155k voyages: 2.31 GB peak RSS, 54m13s wall, 20300s CPU on
+# an otherwise quiet box. The logratio P50 head converges near 8000 rounds and is
+# most of the increase; the production refits reuse the evaluation fit's round
+# counts, which is what keeps it at ~2x rather than ~3x. It moved to 01:10 in the
+# timer so it still ends well before the 03:20 derived stages.
+#
+# 4 GB: systemd's cgroup accounting reads ~1.17x above RSS here (see
+# backend/CLAUDE.md), so 2.31 GB RSS is ~2.7 GB against the old 3 GB cap - too
+# close to leave. Treat a cgroup OOM here as a signal to measure, not to raise the
 # number - the job fits in memory only because _load_samples filters to underway,
-# positive-lead rows (1.05M of 3.10M).
+# positive-lead rows (1.46M of 4.32M on 2026-09-27).
 MemoryAccounting=yes
-MemoryMax=3G
+MemoryMax=4G
 
 [Install]
 WantedBy=multi-user.target

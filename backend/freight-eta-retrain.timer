@@ -3,11 +3,15 @@
 # Weekly, not daily: the gate compares a challenger against physics on a
 # walk-forward hold-out, and a week is roughly the timescale on which the sample
 # table grows enough for that comparison to say anything new. Daily retraining
-# would mostly re-decide the same cells on nearly the same data while costing 90s
-# of six-core CPU and holding the analytics lock.
+# would mostly re-decide the same cells on nearly the same data while costing ~55
+# minutes of eight-core CPU and holding the analytics lock.
 #
-# 02:20 Sunday: clear of the hourly incremental pass at 02:00, and ahead of the
-# daily derived stages at 03:20 that rebuild eta_predictions from the artifact.
+# 01:10 Sunday: clear of the hourly incremental pass at 01:00 (~7 min), and two
+# hours ahead of the daily derived stages at 03:20 that rebuild eta_predictions
+# from the artifact. It was 02:20 while the job took 15 min; at ~55 min since the
+# second target (2026-09-27) that would run into 03:20. The 02:00 hourly pass
+# waits on the shared flock for the few minutes of overlap, which is harmless -
+# it is incremental off a watermark.
 #
 # Persistent=true so a retrain missed while the machine was down runs on the next
 # boot rather than being skipped for a week.
@@ -20,7 +24,7 @@ Description=Weekly gated retrain of the freight True ETA ML challenger
 # same-named .service.
 
 [Timer]
-OnCalendar=Sun *-*-* 02:20:00
+OnCalendar=Sun *-*-* 01:10:00
 Persistent=true
 
 [Install]

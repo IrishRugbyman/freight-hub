@@ -4,6 +4,76 @@
 
 - [2026-Q2](changelog/2026-Q2.md) - 53 entries, 2026-06-10 to 2026-06-30
 
+## 2026-09-27 - a second ML target, conformal calibrated on the cells the gate judges, and the served band held to the gate
+
+The weekly ETA retrain log showed ML 4-5x worse than physics at short lead (5.35h vs
+1.15h median |err| at 0-6h by actual lead). That turned out to be mostly the known
+conditioning artifact of bucketing by the true outcome, but chasing it found three
+real problems and one real improvement. Promoted cells went from **3 to 5**, every
+cell that was already ML got more accurate, and live ML-served predictions went from
+48% to 79% of the fleet.
+
+**The ML learned hours from scratch; a log-ratio to physics does better.** Four
+targets measured on the gate's own walk-forward split (P50 head, 1.46M samples):
+raw hours, raw + physics as a feature, the additive residual `truth - physics`, and
+`log(truth / physics)`. The additive residual was no better than raw (11.30h vs
+11.35h overall), which rules out "the model just needed the physics anchor". The
+log-ratio was best overall (10.75h) and, with a voyage-grouped bootstrap, beat raw
+in 8 of 10 gate cells with 95% CIs excluding zero: port|0-6h 12.22 -> 11.27h
+(n=128k), port|12-24h 13.51 -> 12.89, port|24-48h 12.03 -> 11.71. It lost both 48h+
+cells by 2-3h, because a relative loss underweights large absolute misses. Neither
+dominates, so both are trained and the gate picks per cell among physics and each
+target. Quantiles are equivariant under `q -> physics * exp(q)`, so the log-ratio
+heads map back to hour quantiles exactly. `raw` keeps its artifact filenames and
+the loader reads the old single-target layout, so nothing broke in between.
+
+**Chokepoint intervals were calibrated on ports.** The conformal offset was one per
+lead bucket, pooled over target types. Ports are ~80% of rows, so they set it, and
+chokepoint cells realised 0.68-0.74 coverage against the [0.75, 0.85] gate: four
+cells where ML beat physics on error were refused on coverage alone. Offsets are now
+group-conditional (Mondrian) on `target_type x bucket`, falling back to bucket, then
+global. A first version keyed the bucket on the model's *own* P50, which is also
+serve-time-known but is not the partition the gate judges or serving routes on, so
+chokepoint|48h+ still realised 0.47. Keyed on the *physics* bucket, chokepoint|24-48h
+went 0.683 -> 0.798.
+
+**The served band had been under-covering, and a pooled number hid it.** The
+production refit trains on train+calib, then recalibrated conformal on calib, which
+is in-sample. On 2026-09-08 that measured harmless (0.801 vs 0.822 held-out, one
+pooled number). Measured per cell on the test window (a hold-out for the refit too),
+in-sample offsets under-covered in **all 20** (target, cell) pairs: 0.70-0.76 in
+promoted port cells, 0.718 on port|24-48h, i.e. outside the band the promotion had
+passed on. The refit now serves the evaluation model's held-out offsets
+(`PROD_OFFSETS = "heldout"`), nearer 0.80 in all 20. Every run prints both, so the
+choice can be re-checked from any retrain log.
+
+**The gate judged one model and served another.** Even with held-out offsets,
+chokepoint|48h+ (raw, 5.66h vs physics 8.20h) passed at 0.759 on the evaluation
+model while the refit that would serve it realised 0.659. `demote_uncovered` now
+holds the served model's hold-out coverage to the same band and demotes any cell
+that misses it, with a warning. It fired on exactly that cell. The ML scoreboard
+rows now score the served refit too, matching the hourly scorer.
+
+Result, from the live run through `freight-eta-retrain.service` (2026-09-28 00:34):
+chokepoint|12-24h, port|0-6h, port|12-24h, port|24-48h -> logratio; port|48h+ -> raw.
+Served coverage in those cells 0.764-0.814. The live scoreboard returned all 24 rows
+in each of 41 polls during the run. A read-only `build_predictions` smoke run on the
+new artifact produced 2,120 ML rows of 2,699, all ordered, with no NaN and no
+negative bounds.
+
+Cost: 40m28s wall and 2.26 GB cgroup peak for the live run (54m13s / 2.31 GB RSS in
+a dry run on 8 threads), up from ~25 min and 1.5 GB. The log-ratio P50 head
+converges near 8000 rounds. Production refits reuse the evaluation fit's round
+counts instead of re-probing, which is what keeps it at ~2x. `MemoryMax` 3G -> 4G
+(2.31 GB RSS x ~1.17 accounting is ~2.7 GB), and the timer moved from Sun 02:20 to
+01:10 so it still ends well before the 03:20 derived stages. The previous artifact
+is kept at `~/data/freight-eta-models-backup-20260927/` for rollback.
+
+Tests: 31 cases in `test_eta_ml.py` (from 16). Each new one was checked against an
+independent oracle, and three were mutation-checked to fail on the bug they guard:
+target choice under both dict orders, the physics-vs-ML bucket key, and the
+cell-level offset lookup.
+
 ## 2026-09-10 - both challengers retrained on a schedule, and the retrain stopped blanking the site
 
 Follow-on from the band fix. Three of the four things here were found by measuring

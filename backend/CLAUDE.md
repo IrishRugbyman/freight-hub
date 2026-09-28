@@ -123,8 +123,11 @@ account for 7 days, and MyShipTracking is anonymous but IP-rate-limited. See the
 searoute distance with a persistent cache) + `eta_samples` (B, training table) -> `eta_physics`
 (C, deterministic ETA + intervals) -> `eta_ml` (D, LightGBM quantiles) -> `eta_serving` (E, live
 scorer) -> `eta_backtest` (scoring harness) and `eta_drift` (G, drift watch). Trained artifacts
-and the champion map are committed under `analytics/models/`; `eta_champion_map.json` decides
-per-target which model serves, so a model swap is a data change, not a code change. Baselines in
+and the champion map live under `analytics/models/`, which is **gitignored and not backed up**:
+the weekly retrains regenerate it, and serving falls back to physics (ETA) or the heuristic
+(destination) when it is absent. `eta_champion_map.json` decides, per (target_type, lead) cell,
+whether physics or which ML training target serves (`raw` hours or `logratio` to physics), so
+a model swap is a data change, not a code change. Baselines in
 `analytics/baselines/*.csv` exist to be beaten - regenerate them only deliberately.
 
 The destination predictor mirrors this: `destination_labels` (transition graph) ->
