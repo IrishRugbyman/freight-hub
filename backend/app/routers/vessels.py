@@ -6,6 +6,7 @@ import json as _json
 import math
 from datetime import UTC, datetime, timedelta
 
+import numpy as np
 import pandas as pd
 from fastapi import APIRouter
 
@@ -494,6 +495,10 @@ def vessel_equasis(imo: int):
             result[col] = int(val)
         elif col == "ofac_sanctioned":
             result[col] = bool(val)
+        elif isinstance(val, np.generic):
+            # BIGINT/INTEGER columns (mmsi, ais_ship_type) arrive as numpy scalars,
+            # which the JSON encoder rejects: unwrap to the Python value.
+            result[col] = val.item()
         else:
             result[col] = val
     return result

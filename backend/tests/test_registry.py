@@ -7,13 +7,12 @@ from pathlib import Path
 
 import duckdb
 import pandas as pd
-import pytest
 from fastapi.testclient import TestClient
-
 
 # ---------------------------------------------------------------------------
 # Pure-function tests: priority_order and _to_int
 # ---------------------------------------------------------------------------
+
 
 def test_to_int_valid():
     from registry.crawl import _to_int
@@ -37,7 +36,7 @@ def test_priority_order_all_new():
 def test_priority_order_limit():
     from registry.crawl import priority_order
 
-    live = {i for i in range(100)}
+    live = set(range(100))
     result = priority_order(live, pd.DataFrame(), datetime.now(), 10)
     assert len(result) == 10
 
@@ -46,9 +45,11 @@ def test_priority_order_never_fetched_first():
     from registry.crawl import priority_order
 
     now = datetime.now()
-    reg_df = pd.DataFrame([
-        {"imo": 1001, "fetch_ok": True, "fetched_ts": now - timedelta(days=60)},  # stale
-    ])
+    reg_df = pd.DataFrame(
+        [
+            {"imo": 1001, "fetch_ok": True, "fetched_ts": now - timedelta(days=60)},  # stale
+        ]
+    )
     live = {1001, 1002}  # 1002 never fetched
     result = priority_order(live, reg_df, now, 10)
     # 1002 (never fetched) must come before 1001 (stale)
@@ -59,11 +60,17 @@ def test_priority_order_retry_failed():
     from registry.crawl import priority_order
 
     now = datetime.now()
-    reg_df = pd.DataFrame([
-        {"imo": 1001, "fetch_ok": False, "fetched_ts": now - timedelta(days=8)},   # retry eligible
-        {"imo": 1002, "fetch_ok": False, "fetched_ts": now - timedelta(days=2)},   # too recent
-        {"imo": 1003, "fetch_ok": True,  "fetched_ts": now - timedelta(days=60)},  # stale
-    ])
+    reg_df = pd.DataFrame(
+        [
+            {
+                "imo": 1001,
+                "fetch_ok": False,
+                "fetched_ts": now - timedelta(days=8),
+            },  # retry eligible
+            {"imo": 1002, "fetch_ok": False, "fetched_ts": now - timedelta(days=2)},  # too recent
+            {"imo": 1003, "fetch_ok": True, "fetched_ts": now - timedelta(days=60)},  # stale
+        ]
+    )
     live = {1001, 1002, 1003}
     result = priority_order(live, reg_df, now, 10)
     # 1001 (retry_failed) must come before 1003 (stale)
@@ -77,9 +84,11 @@ def test_priority_order_excludes_recent_ok():
 
     now = datetime.now()
     # Recently fetched OK row - should not be re-crawled
-    reg_df = pd.DataFrame([
-        {"imo": 9876543, "fetch_ok": True, "fetched_ts": now - timedelta(days=5)},
-    ])
+    reg_df = pd.DataFrame(
+        [
+            {"imo": 9876543, "fetch_ok": True, "fetched_ts": now - timedelta(days=5)},
+        ]
+    )
     result = priority_order({9876543}, reg_df, now, 10)
     assert result == []
 
@@ -93,8 +102,12 @@ def test_upsert_idempotent(tmp_path):
 
     now = datetime.now(UTC).replace(tzinfo=None)
     data = {
-        "ship_name": "TEST VESSEL", "flag": "Panama", "flag_code": "PAN",
-        "gross_tonnage": "50000", "dwt": "90000", "year_built": "2005",
+        "ship_name": "TEST VESSEL",
+        "flag": "Panama",
+        "flag_code": "PAN",
+        "gross_tonnage": "50000",
+        "dwt": "90000",
+        "year_built": "2005",
         "owner": "TEST OWNER",
     }
     _upsert(conn, 1234567, None, data, now)
@@ -111,7 +124,9 @@ def test_int_cast_stored_correctly(tmp_path):
     conn = duckdb.connect(str(tmp_path / "reg.duckdb"))
     conn.execute(_SCHEMA)
     now = datetime.now(UTC).replace(tzinfo=None)
-    _upsert(conn, 9999999, None, {"gross_tonnage": "171542", "dwt": "174239", "year_built": "2006"}, now)
+    _upsert(
+        conn, 9999999, None, {"gross_tonnage": "171542", "dwt": "174239", "year_built": "2006"}, now
+    )
     row = conn.execute(
         "SELECT gross_tonnage, dwt, year_built FROM vessel_registry WHERE imo = 9999999"
     ).fetchone()
@@ -177,28 +192,41 @@ def _make_registry_client(tmp_path, monkeypatch, pg_rows: list[dict]) -> TestCli
     setup_pg_vessels(monkeypatch, pg_rows)
     monkeypatch.setenv("AIS_POSITIONS_DB", str(ais_file))
     from app.main import app
+
     return TestClient(app)
 
 
 def test_equasis_registry_hit(tmp_path, monkeypatch):
     """When the registry has a row with fetch_ok=true, return it without hitting Equasis."""
-    client = _make_registry_client(tmp_path, monkeypatch, [
-        {
-            "imo": 9321483, "ship_name": "EMMA MAERSK", "flag": "Singapore",
-            "flag_code": "SGP", "call_sign": "9VCY3",
-            "gross_tonnage": 171542, "dwt": 174239,
-            "ship_type": "Container Ship", "year_built": 2006,
-            "ship_status": "In Service/Commission",
-            "owner": "MOLLER SINGAPORE AP PTE LTD",
-            "ism_manager": "MAERSK A/S", "ship_manager": "MAERSK A/S",
-            "class_society": "American Bureau of Shipping (IACS)",
-            "pi_club": "Britannia",
-            "detention_rate_pct": 10.0,
-            "paris_mou": "White", "tokyo_mou": "White",
-            "uscg_targeting": "not targeted",
-            "fetched_ts": _NOW, "fetch_ok": True,
-        }
-    ])
+    client = _make_registry_client(
+        tmp_path,
+        monkeypatch,
+        [
+            {
+                "imo": 9321483,
+                "ship_name": "EMMA MAERSK",
+                "flag": "Singapore",
+                "flag_code": "SGP",
+                "call_sign": "9VCY3",
+                "gross_tonnage": 171542,
+                "dwt": 174239,
+                "ship_type": "Container Ship",
+                "year_built": 2006,
+                "ship_status": "In Service/Commission",
+                "owner": "MOLLER SINGAPORE AP PTE LTD",
+                "ism_manager": "MAERSK A/S",
+                "ship_manager": "MAERSK A/S",
+                "class_society": "American Bureau of Shipping (IACS)",
+                "pi_club": "Britannia",
+                "detention_rate_pct": 10.0,
+                "paris_mou": "White",
+                "tokyo_mou": "White",
+                "uscg_targeting": "not targeted",
+                "fetched_ts": _NOW,
+                "fetch_ok": True,
+            }
+        ],
+    )
 
     # Patch get_ship_info to fail - should never be called on a registry hit
     monkeypatch.setattr("app.equasis.get_ship_info", lambda imo: None)
@@ -207,9 +235,37 @@ def test_equasis_registry_hit(tmp_path, monkeypatch):
     assert r.status_code == 200
     body = r.json()
     assert body["ship_name"] == "EMMA MAERSK"
-    assert body["gross_tonnage"] == "171542"   # INT stored, returned as str
+    assert body["gross_tonnage"] == "171542"  # INT stored, returned as str
     assert body["year_built"] == "2006"
     assert body["paris_mou"] == "White"
+
+
+def test_equasis_registry_row_with_integer_ais_columns_serialises(tmp_path, monkeypatch):
+    """BIGINT/INTEGER columns come back from pandas as numpy scalars, which FastAPI
+    cannot encode: every registry row with an MMSI 500'd (6,900 of 7,078 on
+    2026-09-28) until they were unwrapped to Python ints."""
+    client = _make_registry_client(
+        tmp_path,
+        monkeypatch,
+        [
+            {
+                "imo": 9668972,
+                "ship_name": "CAPE SAN ROMAN",
+                "mmsi": 338924075,
+                "ais_ship_type": 79,
+                "fetched_ts": _NOW,
+                "fetch_ok": True,
+            }
+        ],
+    )
+    monkeypatch.setattr("app.equasis.get_ship_info", lambda imo: None)
+
+    r = client.get("/api/vessels/9668972/equasis")
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["mmsi"] == 338924075
+    assert body["ais_ship_type"] == 79
 
 
 def test_equasis_registry_miss_returns_404(tmp_path, monkeypatch):
@@ -222,9 +278,13 @@ def test_equasis_registry_miss_returns_404(tmp_path, monkeypatch):
 
 def test_equasis_fetch_ok_false_returns_404(tmp_path, monkeypatch):
     """A row with fetch_ok=false is treated as a miss - returns 404, no live scrape."""
-    client = _make_registry_client(tmp_path, monkeypatch, [
-        {"imo": 9999999, "fetched_ts": _NOW, "fetch_ok": False},
-    ])
+    client = _make_registry_client(
+        tmp_path,
+        monkeypatch,
+        [
+            {"imo": 9999999, "fetched_ts": _NOW, "fetch_ok": False},
+        ],
+    )
 
     r = client.get("/api/vessels/9999999/equasis")
     assert r.status_code == 404
@@ -278,8 +338,9 @@ def test_crawl_aborts_on_lock(tmp_path, monkeypatch):
     ais_file = tmp_path / "ais.duckdb"
     ac = duckdb.connect(str(ais_file))
     ac.execute("CREATE TABLE live_positions (mmsi BIGINT, imo BIGINT)")
-    ac.executemany("INSERT INTO live_positions VALUES (?,?)",
-                   [(111, 9111111), (222, 9222222), (333, 9333333)])
+    ac.executemany(
+        "INSERT INTO live_positions VALUES (?,?)", [(111, 9111111), (222, 9222222), (333, 9333333)]
+    )
     ac.close()
 
     reg_file = tmp_path / "registry.duckdb"
